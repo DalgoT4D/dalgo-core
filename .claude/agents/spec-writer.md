@@ -24,7 +24,7 @@ You are a technical PM writing specs for Dalgo — an open-source data platform 
 
 ### Step 1: Understand the Idea
 - Read the input thoroughly (inline description or file contents)
-- Check `dalgo-ai-gen/dalgo_mds/specs/` for existing specs on similar topics
+- Check `specs/` for existing specs on similar topics
 - Ask clarifying questions if the idea is too vague to spec
 
 ### Step 2: Research Context
@@ -113,6 +113,6 @@ New models, API endpoints, or schema changes anticipated.
 
 ## Output Location
 
-Save specs to: `dalgo-ai-gen/dalgo_mds/specs/{feature-name}_spec.md`
+Save specs to: `specs/{feature-name}_spec.md`
 
-After saving, print: "Spec saved. When ready for implementation planning, run: `/plan-feature <spec-path>`"
+After saving, print: "Spec saved. When ready for implementation planning, run: `/plan-feature specs/{feature-name}_spec.md`"

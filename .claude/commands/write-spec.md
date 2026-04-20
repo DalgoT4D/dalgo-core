@@ -11,7 +11,7 @@ Turn a feature idea into a structured spec document.
 - Otherwise, treat `$ARGUMENTS` as an inline feature description.
 
 ### Step 2: Check for Existing Specs
-Search `dalgo-ai-gen/dalgo_mds/specs/` for existing specs on similar topics.
+Search `specs/` for existing specs on similar topics.
 - If a related spec exists, inform the user and ask whether to update the existing spec or create a new one.
 - Avoid creating duplicate specs for the same feature area.
 
@@ -19,7 +19,7 @@ Search `dalgo-ai-gen/dalgo_mds/specs/` for existing specs on similar topics.
 Use the spec-writer agent approach to produce a structured spec:
 
 1. **Understand the idea** — Parse the input, identify the core problem being solved.
-2. **Research context** — Search the codebase for related features, check existing planning docs at `dalgo-ai-gen/dalgo_mds/claude/planning/`.
+2. **Research context** — Search the codebase for related features, check existing plans in `plans/`.
 3. **Pressure-test from user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
 4. **Structure the spec** with these sections:
    - Problem Statement — What problem, for whom?
@@ -27,12 +27,12 @@ Use the spec-writer agent approach to produce a structured spec:
    - Success Metrics — How to measure success?
    - User Stories — As a [role], I want [thing], so that [outcome]. With acceptance criteria.
    - Scope — What's IN for MVP, what's OUT for later?
-   - Data Model Implications — Which repos/services affected?
+   - Technical Implications — Which repos/services affected?
    - Open Questions — What needs deciding before planning?
    - Handoff Checklist — Is this ready for `/plan-feature`?
 
 ### Step 4: Save the Spec
-Save to: `dalgo-ai-gen/dalgo_mds/specs/{feature-name}_spec.md`
+Save to: `specs/{feature-name}_spec.md`
 
 Use a kebab-case feature name derived from the core feature concept.
 
@@ -40,10 +40,10 @@ Use a kebab-case feature name derived from the core feature concept.
 After saving, print:
 
 ```
-Spec saved to: dalgo-ai-gen/dalgo_mds/specs/{feature-name}_spec.md
+Spec saved to: specs/{feature-name}_spec.md
 
 When ready for implementation planning, run:
-/plan-feature dalgo-ai-gen/dalgo_mds/specs/{feature-name}_spec.md
+/plan-feature specs/{feature-name}_spec.md
 ```
 
 ## Guidelines
