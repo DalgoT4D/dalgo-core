@@ -1,0 +1,1 @@
+Dalgo monorepo with AI assisted coding manual and artefacts
