@@ -7,123 +7,191 @@ Central repo for AI-assisted development workflows, specs, plans, and Claude Cod
 ```
 dalgo-core/
 ├── .claude/
-│   ├── agents/          # Specialized AI agents
-│   ├── commands/        # Slash commands (dev workflows)
-│   └── skills/          # Reusable evaluation lenses
+│   ├── agents/          # Specialized AI agents (auto-invoked by context)
+│   ├── commands/        # Slash commands (step-by-step workflows)
+│   └── skills/          # Evaluation lenses / thinking frameworks
 ├── specs/               # Feature specifications
 ├── plans/               # Implementation plans
 ```
 
-## Dev Workflows
+## Three Types of Tools
 
-These are the main workflows for building features on Dalgo, from idea to merge.
+| Type | Location | Purpose | How to Use |
+|------|----------|---------|------------|
+| **Commands** | `.claude/commands/` | Step-by-step workflows with inputs and outputs | `/command-name <args>` |
+| **Agents** | `.claude/agents/` | Specialized personas invoked by context | Claude picks the right agent automatically, or you can reference them |
+| **Skills** | `.claude/skills/` | Evaluation lenses — shift how Claude looks at a problem | Invoke by name (e.g. `/design-review`) |
 
-### 1. Write a Spec
+---
 
-Turn a rough feature idea into a structured spec with user stories, scope, and success metrics.
+## Feature Lifecycle
+
+The full journey from idea to production, with each tool connected to the next:
+
+```
+Idea
+ │
+ ▼
+/write-spec                    →  specs/{name}_spec.md
+ │
+ ▼
+/plan-feature specs/{name}_spec.md   →  plans/{name}_plan.md
+ │
+ ▼
+/execute-plan plans/{name}_plan.md   →  code changes + {name}_tasks.md
+ │
+ ▼
+/ship-checklist                →  pre-merge quality gate (read-only)
+ │
+ ▼
+Push + Create PR
+ │
+ ▼
+/review-pr 142                 →  structured code review
+ │
+ ▼
+Merge + Deploy
+ │
+ Bug in prod?
+ │
+ ▼
+/debug-issue "error or Sentry URL"  →  diagnosis + fix proposal
+ │
+ small fix → direct PR
+ large fix → loop back to /plan-feature
+```
+
+**Cross-cutting (usable at any stage):**
+- `/design-review` — UX + NGO user evaluation of any UI
+- `/tal-lens` — critical thinking framework for any technology decision
+
+---
+
+## Commands Reference
+
+### `/write-spec`
+Turn a rough feature idea into a structured spec with problem statement, user stories, scope, and success metrics.
 
 ```
 /write-spec "scheduled report emails for dashboard owners"
-```
-
-Or from a file:
-```
 /write-spec specs/scheduled-reports_spec.md
 ```
+**Output:** `specs/{feature-name}_spec.md`
+**Next step:** `/plan-feature specs/{feature-name}_spec.md`
 
-**Output**: `specs/{feature-name}_spec.md`
-
-### 2. Plan the Implementation
-
-Create a detailed implementation plan from a spec — covering architecture, affected services, API design, and testing strategy.
+### `/plan-feature`
+Create a detailed implementation plan from a spec — architecture, affected services, API design, testing strategy.
 
 ```
 /plan-feature specs/scheduled-reports_spec.md
 ```
+**Output:** `plans/{feature-name}_plan.md`
+**Next step:** `/execute-plan plans/{feature-name}_plan.md`
 
-**Output**: `plans/{feature-name}_plan.md`
-
-### 3. Execute the Plan
-
-Implement the feature following the plan, with checkpointing and validation.
+### `/execute-plan`
+Implement a feature following the plan. Creates a checkpoint file to track progress across sessions.
 
 ```
 /execute-plan plans/scheduled-reports_plan.md
 ```
+**Creates:** `{feature_name}_tasks.md` for progress tracking
+**Next step:** `/ship-checklist`
 
-Creates a `{feature_name}_tasks.md` checkpoint file to track progress across sessions.
-
-### 4. Debug an Issue
-
-Diagnose a bug from a Sentry URL, error message, or behavior description. Automatically classifies as backend or frontend and applies the right debugging methodology.
+### `/debug-issue`
+Diagnose a bug from a Sentry URL, error message, or behavior description. Classifies as backend/frontend/cross-cutting automatically.
 
 ```
 /debug-issue https://sentry.io/issues/DALGO-123/
-/debug-issue "500 error on /api/v1/organizations/ endpoint"
+/debug-issue "500 error on /api/v1/organizations/"
 /debug-issue "dashboard shows stale data after chart update"
 ```
 
-### 5. Review a PR
-
-Structured code review checking service-specific conventions, security, testing, and breaking changes.
+### `/review-pr`
+Structured code review — checks service-specific conventions, security, testing, and breaking changes.
 
 ```
 /review-pr 142
 /review-pr https://github.com/DalgoT4D/DDP_backend/pull/142
 ```
+**Does NOT auto-post to GitHub** — outputs the review for you to use.
 
-### 6. Ship Checklist
-
-Pre-merge quality gate — runs lint, tests, migration checks, and scans the diff for common issues. Read-only, does not modify code.
+### `/ship-checklist`
+Pre-merge quality gate. Runs lint, tests, migration checks, and scans the diff for common issues. Read-only — does not modify code.
 
 ```
 /ship-checklist
 ```
 
+---
+
 ## Agents
 
-Agents are specialized personas that Claude invokes automatically based on context. You can also reference them explicitly.
+Agents are specialized personas that Claude invokes automatically when the context matches. You don't need to remember which one to call.
 
-| Agent | When It's Used |
-|-------|---------------|
-| **debugger** | Diagnosing bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. Knows both architectures and can trace issues across service boundaries. |
-| **spec-writer** | Writing structured feature specs. Pressure-tests ideas from the NGO user perspective. |
-| **senior-product-strategist** | Product strategy grounded in Dalgo's reality — 20+ NGOs, small team, tight budgets, open-source. |
-| **ux-design-expert** | UI/UX design decisions using Dalgo's design system (Shadcn, teal brand, Tailwind). Designs for non-technical NGO users. |
-| **ngo-data-platform-advisor** | Evaluates features as "Priya" — a non-technical NGO program manager. Flags jargon, complexity, and abandonment risk. |
+| Agent | What It Does |
+|-------|-------------|
+| **debugger** | Diagnoses bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. Traces issues across service boundaries. |
+| **spec-writer** | Writes structured feature specs. Pressure-tests ideas from the NGO user perspective (comprehension, confidence, workflow, trust, independence). |
+| **senior-product-strategist** | Product strategy grounded in Dalgo's reality — 20+ NGOs, small team, tight budgets, open-source. Feature prioritization, roadmap, build-vs-buy. |
+| **ux-design-expert** | UI/UX design using Dalgo's design system (Shadcn, teal brand, Tailwind). Designs for non-technical NGO users on slow connections and old devices. |
+| **ngo-data-platform-consultant** | Evaluates features as "Priya" — a non-technical NGO program manager. Flags jargon, complexity, and abandonment risk. Rates likelihood of users going back to Excel. |
+
+---
 
 ## Skills
 
-Skills are reusable evaluation lenses that can be applied to any context.
+Skills are evaluation lenses — they shift how Claude thinks about a problem.
 
 | Skill | What It Does |
 |-------|-------------|
-| **design-review** | Combined UX + NGO user evaluation of UI components or screenshots. Includes a checklist and pattern library. |
-| **tal-lens** | Applies Tal Raviv's technology philosophy — demystify, build first, anti-hype, clarity over cleverness. |
+| **design-review** | Combined UX expert + NGO user evaluation of UI components or screenshots. Includes an accessibility checklist and Dalgo UI pattern library. |
+| **tal-lens** | Tal Raviv's technology philosophy — demystify, build first, anti-hype, clarity over cleverness. For evaluating any technology decision. |
 
-## Typical Development Flows
+---
 
-### New Feature (idea to code)
+## Common Workflows
+
+### New Feature (idea → code → merge)
 ```
-/write-spec "feature idea"     →  specs/{name}_spec.md
-/plan-feature specs/{name}_spec.md  →  plans/{name}_plan.md
-/execute-plan plans/{name}_plan.md  →  code changes
-/ship-checklist                →  pre-merge validation
+/write-spec "feature idea"
+/plan-feature specs/{name}_spec.md
+/execute-plan plans/{name}_plan.md
+/ship-checklist
+# push + create PR
+/review-pr <pr-number>
 ```
 
 ### Bug Fix
 ```
-/debug-issue "error description or Sentry URL"  →  diagnosis + fix proposal
+/debug-issue "error description or Sentry URL"
 # implement the fix
-/ship-checklist                                 →  pre-merge validation
-```
-
-### PR Review
-```
-/review-pr 142  →  structured review with blocking/suggestions/nitpicks
+/ship-checklist
 ```
 
 ### Design Feedback
 ```
-/design-review  →  UX + NGO user evaluation of a component or screenshot
+/design-review
+# evaluates a component through both UX and NGO user lenses
 ```
+
+### PR Review
+```
+/review-pr 142
+```
+
+### Evaluate a Technology Decision
+```
+/tal-lens
+# applies critical thinking framework to any tool/approach/architecture choice
+```
+
+---
+
+## What's Intentionally NOT Included
+
+| Idea | Why Not |
+|------|---------|
+| `/write-tests` | Test writing is part of `/execute-plan`. Separate command fragments the workflow. |
+| `/deploy` | Deployment depends on CI/CD infrastructure that varies per environment. |
+| `/estimate` | Effort estimation needs team velocity context Claude can't reliably provide. |
+| Repo-level agents | Workspace-level agents already read all repos. Repo-level agents fragment knowledge. |
