@@ -103,4 +103,6 @@ Positive aspects of the PR worth noting.
 [1-2 sentence overall assessment]
 ```
 
+**Tip:** For frontend UI changes, also consider applying the `design-review` skill for a combined UX + NGO user evaluation.
+
 **Important:** This command outputs the review for the developer to use. It does NOT auto-post comments to GitHub.

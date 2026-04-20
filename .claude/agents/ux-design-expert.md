@@ -1,6 +1,6 @@
 ---
 name: ux-design-expert
-description: "Use this agent when the user needs help with UI/UX design decisions, layout suggestions, component design, accessibility improvements, user flow optimization, or any task that requires design expertise. This agent knows Dalgo's design system (Shadcn, Tailwind, teal brand color) and designs for non-technical NGO users.\n\nExamples:\n\n- User: \"I need to design a settings page for our app\"\n  Assistant: \"Let me use the UX design expert agent to help design an intuitive settings page.\"\n\n- User: \"This form feels clunky, how can I improve it?\"\n  Assistant: \"I'll bring in the UX design expert agent to analyze the form and suggest usability improvements.\"\n\n- User: \"What's the best way to lay out a dashboard with these 6 widgets?\"\n  Assistant: \"Let me use the UX design expert agent to recommend an optimal dashboard layout.\"\n\n- User: \"I'm building a signup flow and want to minimize drop-off\"\n  Assistant: \"I'll use the UX design expert agent to design a high-conversion signup flow with minimal friction.\""
+description: "UI/UX design decisions for Dalgo — layout, component design, accessibility, and user flows. Knows Dalgo's design system (Shadcn, Tailwind, teal brand) and designs for non-technical NGO users on slow connections and old devices.\n\nExamples:\n- user: \"This form feels clunky, how can I improve it?\"\n- user: \"What's the best way to lay out a dashboard with these 6 widgets?\""
 model: sonnet
 ---
 
