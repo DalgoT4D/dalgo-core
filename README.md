@@ -86,8 +86,7 @@ Agents are specialized personas that Claude invokes automatically based on conte
 
 | Agent | When It's Used |
 |-------|---------------|
-| **backend-debugger** | Diagnosing Django/Python bugs in DDP_backend. Knows the layer architecture, Celery, Redis pitfalls, Airbyte/Prefect integration. |
-| **frontend-debugger** | Diagnosing Next.js/React bugs in webapp_v2. Knows SWR cache patterns, Zustand, cookie-based JWT, hydration issues. |
+| **debugger** | Diagnosing bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. Knows both architectures and can trace issues across service boundaries. |
 | **spec-writer** | Writing structured feature specs. Pressure-tests ideas from the NGO user perspective. |
 | **senior-product-strategist** | Product strategy grounded in Dalgo's reality — 20+ NGOs, small team, tight budgets, open-source. |
 | **ux-design-expert** | UI/UX design decisions using Dalgo's design system (Shadcn, teal brand, Tailwind). Designs for non-technical NGO users. |

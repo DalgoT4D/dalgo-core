@@ -41,7 +41,7 @@ Apply the 4-phase debugging methodology:
 
 2. **Hypothesize** — Form 2-3 ranked hypotheses about the root cause.
    - Trace the code path through the relevant architecture.
-   - Check known pitfalls (see backend-debugger and frontend-debugger agents for lists).
+   - Check known pitfalls (see debugger agent for lists).
 
 3. **Isolate** — Narrow to the specific function, component, or query.
    - Read the actual source code.
