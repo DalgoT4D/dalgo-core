@@ -1,0 +1,295 @@
+import os
+import re
+import string
+import secrets
+import hashlib
+import json
+from decimal import Decimal
+from datetime import datetime, date
+import pytz
+
+
+def remove_nested_attribute(obj: dict, attr: str) -> dict:
+    """
+    this function searches for `attr` in the JSON object
+    and removes any occurences it finds
+    """
+    if attr in obj:
+        del obj[attr]
+
+    for key in obj:
+        val = obj[key]
+
+        if isinstance(val, dict):
+            obj[key] = remove_nested_attribute(val, attr)
+
+        elif isinstance(val, list):
+            for list_idx, list_val in enumerate(val):
+                if isinstance(list_val, dict):
+                    val[list_idx] = remove_nested_attribute(list_val, attr)
+
+    return obj
+
+
+def isvalid_email(email: str) -> bool:
+    """
+    this function uses a regex to check if the provided email
+    address is valid
+    ref: https://www.geeksforgeeks.org/check-if-email-address-valid-or-not-in-python/
+    """
+    regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"
+
+    return re.fullmatch(regex, email)
+
+
+def generate_hash_id(l: int) -> str:
+    """
+    this function generates a random hash id of length `l`
+    """
+
+    alphabet = string.ascii_lowercase + string.digits + string.ascii_uppercase
+
+    return "".join(secrets.choice(alphabet) for _ in range(l))
+
+
+def cleaned_name_for_prefectblock(blockname):
+    """removes characters which are not lowercase letters, digits or dashes. same helper from prefect-proxy"""
+    pattern = re.compile(r"[^\-a-z0-9]")
+    return re.sub(pattern, "", blockname.lower())
+
+
+def map_airbyte_keys_to_postgres_keys(conn_info: dict):
+    """called by `post_system_transformation_tasks` and `_get_wclient`"""
+    if "tunnel_method" in conn_info:
+        method = conn_info["tunnel_method"]
+
+        if method["tunnel_method"] in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
+            conn_info["ssh_host"] = method["tunnel_host"]
+            conn_info["ssh_port"] = method["tunnel_port"]
+            conn_info["ssh_username"] = method["tunnel_user"]
+
+        if method["tunnel_method"] == "SSH_KEY_AUTH":
+            conn_info["ssh_pkey"] = method["ssh_key"]
+            conn_info["ssh_private_key_password"] = method.get("tunnel_private_key_password")
+
+        elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
+            conn_info["ssh_password"] = method.get("tunnel_user_password")
+
+    conn_info["user"] = conn_info["username"]
+
+    return conn_info
+
+
+def update_dict_but_not_stars(input_config: dict):
+    """
+    copies all the key-value pairs from `input_config` to `output_config`
+    except for the ones where the value is "*****"
+    """
+    output_config: dict = {}
+    for key, val in input_config.items():
+        if val and isinstance(val, str):
+            val = val.strip()
+            if not re.match(r"^\*+$", val):
+                output_config[key] = val
+        elif val and isinstance(val, dict):
+            output_config[key] = update_dict_but_not_stars(val)
+        elif val and isinstance(val, list):
+            output_config[key] = [
+                update_dict_but_not_stars(item) if isinstance(item, dict) else item for item in val
+            ]
+        else:
+            output_config[key] = val
+
+    return output_config
+
+
+def hash_dict(payload: dict) -> str:
+    """hash a dictionary"""
+    hasher = hashlib.sha256()
+
+    hasher.update(json.dumps(payload, sort_keys=True).encode("utf-8"))
+
+    return hasher.hexdigest()
+
+
+def nice_bytes(n: int) -> str:
+    """Convert bytes to string with appropriate units"""
+
+    units = ["bytes", "KB", "MB", "GB", "TB", "PB"]
+
+    l = 0
+
+    while n >= 1024 and l < len(units):
+        n = n / 1024
+        l += 1
+
+    return str(round(n, 2)) + " " + units[l]
+
+
+def convert_to_standard_types(obj):
+    """convert a sql alchemy python types to json serializable types"""
+    if obj is None:
+        return obj
+    if isinstance(obj, Decimal):
+        return float(obj)
+
+    # add other special cases here
+    if isinstance(obj, (datetime, date)):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {key: convert_to_standard_types(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [convert_to_standard_types(element) for element in obj]
+    if isinstance(obj, tuple):
+        return tuple(convert_to_standard_types(element) for element in obj)
+    return obj
+
+
+def convert_sqlalchemy_rows_to_csv_string(rows: list[dict]):
+    """converts a list of sqlalchemy rows to a csv string"""
+    # output = io.StringIO()
+    # writer = csv.DictWriter(output, fieldnames=rows[0].keys(), delimiter="|")
+    # writer.writeheader()
+    # for item in rows:
+    #     writer.writerow(item)
+    # csv_string = output.getvalue()
+    # output.close()
+    # return csv_string
+
+    csv_lines = []
+    for i, row in enumerate(rows):
+        csv_lines.append(f"=========== Cells values for row {i+1} ========")
+        for key, value in row.items():
+            csv_lines.append(f"{key}: {value}")
+
+    return "\n".join(csv_lines)
+
+
+def convert_sqlalchemy_rows_to_json_string(rows: list[dict]):
+    """converts a list of sqlalchemy rows to a csv string"""
+    return json.dumps(convert_to_standard_types(rows), indent=4)
+
+
+def find_key_in_dictionary(dictionary: dict, key):
+    """Recursively find first occurence of a key in a dictionary and return its value"""
+    for k, v in dictionary.items():
+        if k == key:
+            return v
+        if isinstance(v, dict):
+            val = find_key_in_dictionary(v, key)
+            if val:
+                return val
+    return None
+
+
+def from_timestamp(timestamp: int) -> datetime:
+    """
+    Convert a Unix timestamp to a datetime object.
+    :param timestamp: Unix timestamp in seconds.
+    :return: Corresponding datetime object or None if invalid.
+    """
+    if timestamp is None:
+        return None
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return None
+    if ts > 0:
+        return datetime.fromtimestamp(ts, tz=pytz.UTC)
+    return None
+
+
+def get_integer_env_var(varname: str, default_value: int, logger, allow_negative=False):
+    """reads a var from the environment, converts to int and returns"""
+    try:
+        varvalue = int(os.getenv(varname, str(default_value)))
+        if not allow_negative and varvalue < 0:
+            if logger:
+                logger.error("%s must be >= 0", varname)
+            varvalue = default_value
+    except ValueError:
+        if logger:
+            logger.error("invalid value for " + varname + " in .env: " + os.getenv(varname))
+        varvalue = default_value
+    return varvalue
+
+
+def compare_semver(version1: str, version2: str) -> int:
+    """compares semantic versioning strings"""
+
+    def parse_version(v):
+        """Regex to parse: major.minor.patch-prerelease+build"""
+        regex = r"^(\d+)\.(\d+)\.(\d+)(?:-([\w\.-]+))?(?:\+[\w\.-]+)?$"
+        match = re.match(regex, v)
+        if not match:
+            raise ValueError(f"Invalid semver string: {v}")
+        major, minor, patch = map(int, match.groups()[:3])
+        prerelease = match.group(4)
+        return (major, minor, patch, prerelease)
+
+    def cmp(a, b):
+        """Returns 1, 0, or -1"""
+        return (a > b) - (a < b)
+
+    v1 = parse_version(version1)
+    v2 = parse_version(version2)
+
+    # Compare major, minor, patch
+    for a, b in zip(v1[:3], v2[:3], strict=True):
+        result = cmp(a, b)
+        if result != 0:
+            return result
+
+    # If all of major, minor, patch are equal, compare prerelease
+    prere1 = v1[3]
+    prere2 = v2[3]
+    if prere1 is None and prere2 is None:
+        return 0
+    if prere1 is None:
+        return 1  # version1 is a release, which is higher than prerelease
+    if prere2 is None:
+        return -1  # version2 is a release, which is higher than prerelease
+
+    def pre_release_cmp(pr1, pr2):
+        """Prerelease comparison: split by '.'"""
+        parts1 = pr1.split(".")
+        parts2 = pr2.split(".")
+        len1, len2 = len(parts1), len(parts2)
+        for i in range(max(len1, len2)):
+            if i >= len1:
+                return -1  # shorter wins
+            if i >= len2:
+                return 1
+            is_digit1 = parts1[i].isdigit()
+            is_digit2 = parts2[i].isdigit()
+            if is_digit1 and is_digit2:
+                result = cmp(int(parts1[i]), int(parts2[i]))
+            elif is_digit1:
+                return -1
+            elif is_digit2:
+                return 1
+            else:
+                result = cmp(parts1[i], parts2[i])
+            if result != 0:
+                return result
+        return 0
+
+    return pre_release_cmp(prere1, prere2)
+
+
+def find_all_values_for_key(obj: dict, key: str) -> list:
+    """finds all occurences of the key in the object"""
+    results = []
+
+    def _search(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == key:
+                    results.append(v)
+                _search(v)
+        elif isinstance(o, list):
+            for item in o:
+                _search(item)
+
+    _search(obj)
+    return results

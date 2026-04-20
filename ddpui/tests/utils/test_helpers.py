@@ -1,0 +1,359 @@
+from unittest.mock import patch
+from datetime import datetime
+import pytz
+from ddpui.utils.helpers import (
+    remove_nested_attribute,
+    isvalid_email,
+    generate_hash_id,
+    cleaned_name_for_prefectblock,
+    map_airbyte_keys_to_postgres_keys,
+    update_dict_but_not_stars,
+    nice_bytes,
+    find_key_in_dictionary,
+    get_integer_env_var,
+    compare_semver,
+    from_timestamp,
+)
+
+
+def test_remove_nested_attribute():
+    """tests remove_nested_attribute"""
+    payload = {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "v3",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k7": "v7",
+            "k8": [
+                {"k9": "v9", "k10": "v10", "k11": 11},
+                {"k12": "v12", "k13": "v13", "k14": 14, "k15": "v15"},
+                200,
+                "v8",
+            ],
+        },
+    }
+    result = remove_nested_attribute(payload, "k7")
+    assert result == {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "v3",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k8": [
+                {"k9": "v9", "k10": "v10", "k11": 11},
+                {"k12": "v12", "k13": "v13", "k14": 14, "k15": "v15"},
+                200,
+                "v8",
+            ],
+        },
+    }
+
+
+def test_isvalid_email_0():
+    """valid email address"""
+    assert isvalid_email("abc@abc.com")
+
+
+def test_isvalid_email_1():
+    """invalid email address"""
+    assert not isvalid_email("abc@abc.com@foo")
+
+
+def test_generate_hash_id():
+    """tests length of generate_hash_id"""
+    assert len(generate_hash_id(10)) == 10
+    assert len(generate_hash_id(100)) == 100
+
+
+def test_cleaned_name_for_prefectblock():
+    """tests cleaned_name_for_prefectblock"""
+    assert cleaned_name_for_prefectblock("blockname") == "blockname"
+    assert cleaned_name_for_prefectblock("BLOCKNAME") == "blockname"
+    assert cleaned_name_for_prefectblock("blockName0") == "blockname0"
+    assert cleaned_name_for_prefectblock("blockName0@") == "blockname0"
+
+
+def test_map_airbyte_keys_to_postgres_keys_oldconfig():
+    """verifies the correct mapping of keys"""
+    conn_info = {
+        "host": "host",
+        "port": 100,
+        "username": "user",
+        "password": "password",
+        "database": "database",
+    }
+    conn_info = map_airbyte_keys_to_postgres_keys(conn_info)
+    assert conn_info["host"] == "host"
+    assert conn_info["port"] == 100
+    assert conn_info["user"] == "user"
+    assert conn_info["password"] == "password"
+    assert conn_info["database"] == "database"
+
+
+def test_map_airbyte_keys_to_postgres_keys_sshkey():
+    """verifies the correct mapping of keys"""
+    conn_info = {
+        "host": "host",
+        "port": 100,
+        "username": "user",
+        "password": "password",
+        "database": "database",
+        "tunnel_method": {
+            "tunnel_method": "SSH_KEY_AUTH",
+            "tunnel_host": "host",
+            "tunnel_port": 22,
+            "tunnel_user": "user",
+            "ssh_key": "ssh-key",
+        },
+    }
+    conn_info = map_airbyte_keys_to_postgres_keys(conn_info)
+    assert conn_info["ssh_host"] == "host"
+    assert conn_info["ssh_port"] == 22
+    assert conn_info["ssh_username"] == "user"
+    assert conn_info["ssh_pkey"] == "ssh-key"
+
+
+def test_map_airbyte_keys_to_postgres_keys_password():
+    """verifies the correct mapping of keys"""
+    conn_info = {
+        "host": "host",
+        "port": 100,
+        "username": "user",
+        "password": "password",
+        "database": "database",
+        "tunnel_method": {
+            "tunnel_method": "SSH_PASSWORD_AUTH",
+            "tunnel_host": "host",
+            "tunnel_port": 22,
+            "tunnel_user": "user",
+            "tunnel_user_password": "ssh-password",
+        },
+    }
+    conn_info = map_airbyte_keys_to_postgres_keys(conn_info)
+    assert conn_info["ssh_host"] == "host"
+    assert conn_info["ssh_port"] == 22
+    assert conn_info["ssh_username"] == "user"
+    assert conn_info["ssh_password"] == "ssh-password"
+
+
+def test_map_airbyte_keys_to_postgres_keys_notunnel():
+    """verifies the correct mapping of keys"""
+    conn_info = {
+        "host": "host",
+        "port": 100,
+        "username": "user",
+        "password": "password",
+        "database": "database",
+        "tunnel_method": {
+            "tunnel_method": "NO_TUNNEL",
+        },
+    }
+    conn_info = map_airbyte_keys_to_postgres_keys(conn_info)
+    assert conn_info["host"] == "host"
+    assert conn_info["port"] == 100
+    assert conn_info["user"] == "user"
+    assert conn_info["password"] == "password"
+
+
+def test_update_dict_but_not_stars():
+    """tests update_dict_but_not_stars"""
+    payload = {
+        "k1": "v1",
+        "k2": 100,
+        "k3": "*******",
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k7": "*****",
+            "k8": [
+                {"k9": "*****", "k10": "v10", "k11": 11},
+                {"k12": "*****", "k13": "v13", "k14": 14, "k15": "*****"},
+                200,
+                "v8",
+            ],
+        },
+    }
+    result = update_dict_but_not_stars(payload)
+    assert result == {
+        "k1": "v1",
+        "k2": 100,
+        "k4": {
+            "k5": "v5",
+            "k6": 101,
+            "k8": [{"k10": "v10", "k11": 11}, {"k13": "v13", "k14": 14}, 200, "v8"],
+        },
+    }
+
+
+def test_nice_bytes():
+    """tests nice_bytes"""
+    assert nice_bytes(1024) == "1.0 KB"
+    assert nice_bytes(1024 * 1024) == "1.0 MB"
+    assert nice_bytes(3 * 1024 * 1024) == "3.0 MB"
+
+
+def test_find_key_in_dictionary():
+    """tests find_key_in_dictionary"""
+    assert find_key_in_dictionary({"a": "b"}, "a") == "b"
+    assert find_key_in_dictionary({"a": {"b": "c"}}, "b") == "c"
+    assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "c") == "d"
+    assert find_key_in_dictionary({"a": {"b": {"c": "d"}}}, "d") is None
+
+
+def test_get_integer_env_var_1():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = ""
+        assert get_integer_env_var("TEST_VAR", 19, None, False) == 19
+
+
+def test_get_integer_env_var_2():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "18"
+        assert get_integer_env_var("TEST_VAR", 19, None, False) == 18
+
+
+def test_get_integer_env_var_3():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "hello"
+        assert get_integer_env_var("TEST_VAR", 20, None, False) == 20
+
+
+def test_get_integer_env_var_4():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "-20"
+        assert get_integer_env_var("TEST_VAR", 21, None, False) == 21
+
+
+def test_get_integer_env_var_5():
+    """tests get_integer_env_var"""
+    with patch("os.getenv") as mock_getenv:
+        mock_getenv.return_value = "-20"
+        assert get_integer_env_var("TEST_VAR", 21, None, True) == -20
+
+
+def test_compare_semver_1():
+    """tests compare_semver"""
+    assert compare_semver("0.1.1", "0.1.2") == -1
+
+
+def test_compare_semver_2():
+    """tests compare_semver"""
+    assert compare_semver("1.2.3", "1.2.3-alpha") == 1
+
+
+def test_compare_semver_3():
+    """tests compare_semver"""
+    assert compare_semver("1.2.3-beta.2", "1.2.3-beta.11") == -1
+
+
+def test_compare_semver_4():
+    """tests compare_semver"""
+    assert compare_semver("2.0.0", "1.9.9") == 1
+
+
+def test_from_timestamp_valid_timestamp():
+    """tests from_timestamp with a valid Unix timestamp"""
+    timestamp = 1640995200  # 2022-01-01 00:00:00 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.year == 2022
+    assert result.month == 1
+    assert result.day == 1
+
+
+def test_from_timestamp_string_timestamp():
+    """tests from_timestamp with a string representation of timestamp"""
+    timestamp = "1640995200"  # 2022-01-01 00:00:00 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(1640995200, tz=pytz.UTC)
+    assert result == expected
+
+
+def test_from_timestamp_float_timestamp():
+    """tests from_timestamp with a float timestamp"""
+    timestamp = 1640995200.5
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(1640995200, tz=pytz.UTC)  # int() truncates the decimal
+    assert result == expected
+
+
+def test_from_timestamp_zero():
+    """tests from_timestamp with zero timestamp"""
+    result = from_timestamp(0)
+    assert result is None
+
+
+def test_from_timestamp_negative():
+    """tests from_timestamp with negative timestamp"""
+    result = from_timestamp(-100)
+    assert result is None
+
+
+def test_from_timestamp_none():
+    """tests from_timestamp with None input"""
+    result = from_timestamp(None)
+    assert result is None
+
+
+def test_from_timestamp_invalid_string():
+    """tests from_timestamp with invalid string input"""
+    result = from_timestamp("not_a_number")
+    assert result is None
+
+
+def test_from_timestamp_empty_string():
+    """tests from_timestamp with empty string input"""
+    result = from_timestamp("")
+    assert result is None
+
+
+def test_from_timestamp_boolean():
+    """tests from_timestamp with boolean input"""
+    # True converts to int(1) which is a valid timestamp (1 second after Unix epoch)
+    result = from_timestamp(True)
+    expected = datetime.fromtimestamp(1, tz=pytz.UTC)
+    assert result == expected
+
+    # False converts to int(0) which is invalid (returns None for 0)
+    result = from_timestamp(False)
+    assert result is None
+
+
+def test_from_timestamp_list():
+    """tests from_timestamp with list input"""
+    result = from_timestamp([1640995200])
+    assert result is None
+
+
+def test_from_timestamp_large_valid():
+    """tests from_timestamp with a large valid timestamp"""
+    timestamp = 2147483647  # 2038-01-19 03:14:07 UTC (max 32-bit signed int)
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.year == 2038
+
+
+def test_from_timestamp_recent_timestamp():
+    """tests from_timestamp with a recent timestamp"""
+    timestamp = 1700000000  # 2023-11-14 22:13:20 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.tzinfo == pytz.UTC
+
+
+def test_from_timestamp_string_float():
+    """tests from_timestamp with string representation of float"""
+    timestamp = "1640995200.123"
+    result = from_timestamp(timestamp)
+    # int("1640995200.123") will raise ValueError, so should return None
+    assert result is None

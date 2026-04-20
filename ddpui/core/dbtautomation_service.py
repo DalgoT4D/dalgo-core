@@ -1,0 +1,1099 @@
+import uuid
+from pathlib import Path
+from collections import deque
+from ninja import Schema
+
+from django.db.models import Q
+from ninja.errors import HttpError
+from ddpui.core.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
+from ddpui.core.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
+from ddpui.core.dbt_automation.operations.coalescecolumns import (
+    coalesce_columns,
+    coalesce_columns_dbt_sql,
+)
+from ddpui.core.dbt_automation.operations.concatcolumns import (
+    concat_columns,
+    concat_columns_dbt_sql,
+)
+from ddpui.core.dbt_automation.operations.droprenamecolumns import (
+    drop_columns,
+    rename_columns,
+    rename_columns_dbt_sql,
+    drop_columns_dbt_sql,
+)
+from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
+
+from ddpui.core.dbt_automation.operations.flattenjson import flattenjson, flattenjson_dbt_sql
+
+# from ddpui.core.dbt_automation.operations.mergetables import union_tables, union_tables_sql
+from ddpui.core.dbt_automation.operations.regexextraction import (
+    regex_extraction,
+    regex_extraction_sql,
+)
+from ddpui.core.dbt_automation.operations.mergeoperations import (
+    merge_operations,
+    merge_operations_sql,
+    merge_operations_v2,
+)
+from ddpui.core.dbt_automation.operations.joins import join, joins_sql
+from ddpui.core.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
+from ddpui.core.dbt_automation.operations.wherefilter import where_filter, where_filter_sql
+from ddpui.core.dbt_automation.operations.mergetables import union_tables, union_tables_sql
+from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.core.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
+from ddpui.core.dbt_automation.operations.replace import replace, replace_dbt_sql
+from ddpui.core.git_manager import GitChangedFile
+from ddpui.core.dbt_automation.operations.casewhen import casewhen, casewhen_dbt_sql
+from ddpui.core.dbt_automation.operations.aggregate import aggregate, aggregate_dbt_sql
+from ddpui.core.dbt_automation.operations.pivot import pivot, pivot_dbt_sql
+from ddpui.core.dbt_automation.operations.unpivot import unpivot, unpivot_dbt_sql
+from ddpui.core.dbt_automation.operations.generic import generic_function, generic_function_dbt_sql
+from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function, raw_generic_dbt_sql
+
+from ddpui.schemas.dbt_workflow_schema import (
+    CompleteDbtModelPayload,
+    ModelSrcOtherInputPayload,
+    ModelSrcInputsForMultiInputOp,
+    SequencedNode,
+)
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtOperation, DbtEdge, OrgDbtModelType
+from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
+from ddpui.models.tasks import TaskProgressStatus
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import secretsmanager
+from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
+from ddpui.celery import app
+from ddpui.utils.taskprogress import TaskProgress
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from pydantic import BaseModel, field_validator
+from typing import Dict, List
+import yaml
+
+
+# Pydantic models for source validation
+class SourceGrouping(BaseModel):
+    """
+    Validates the structure of source groupings for DBT YAML generation
+
+    Expected structure:
+    {
+        "source_name_1": {
+            "schema_1": ["table1", "table2"],
+            "schema_2": ["table3"]
+        },
+        "source_name_2": {
+            "schema_3": ["table4", "table5"],
+            "schema_4": []  # Empty list is allowed - will be filtered out
+        }
+    }
+    """
+
+    sources: Dict[str, Dict[str, List[str]]]
+
+    @field_validator("sources")
+    @classmethod
+    def validate_sources_structure(cls, v):
+        """Validate that sources structure is correct"""
+        if not isinstance(v, dict):
+            raise ValueError("Sources must be a dictionary")
+
+        for source_name, schemas in v.items():
+            if not isinstance(source_name, str) or not source_name.strip():
+                raise ValueError(f"Source name must be a non-empty string, got: {source_name}")
+
+            if not isinstance(schemas, dict):
+                raise ValueError(f"Schemas for source '{source_name}' must be a dictionary")
+
+            for schema_name, tables in schemas.items():
+                if not isinstance(schema_name, str) or not schema_name.strip():
+                    raise ValueError(f"Schema name must be a non-empty string, got: {schema_name}")
+
+                if not isinstance(tables, list):
+                    raise ValueError(f"Tables for schema '{schema_name}' must be a list")
+
+                # Empty table list is allowed - will be filtered out during YAML generation
+                for table in tables:
+                    if not isinstance(table, str) or not table.strip():
+                        raise ValueError(f"Table name must be a non-empty string, got: {table}")
+
+        return v
+
+    @field_validator("sources")
+    @classmethod
+    def validate_unique_schema_table_pairs(cls, v):
+        """Validate that each (schema, table) combination appears only once across all sources"""
+        seen_schema_table_pairs = set()
+
+        for source_name, schemas in v.items():
+            for schema_name, tables in schemas.items():
+                for table in tables:
+                    schema_table_pair = (schema_name, table)
+
+                    if schema_table_pair in seen_schema_table_pairs:
+                        raise ValueError(
+                            f"Duplicate (schema, table) combination found: {schema_table_pair}. "
+                            f"Each table must be unique within its schema across all sources."
+                        )
+
+                    seen_schema_table_pairs.add(schema_table_pair)
+
+        return v
+
+
+def merge_source_groupings(
+    existing_sources: SourceGrouping, new_sources: SourceGrouping
+) -> SourceGrouping:
+    """
+    Merge two SourceGrouping objects, combining tables for matching (source_name, schema) pairs
+
+    Args:
+        existing_sources: Existing SourceGrouping with current sources
+        new_sources: New SourceGrouping to merge in
+
+    Returns:
+        SourceGrouping: Merged result with combined sources and tables
+    """
+    # Start with a copy of existing sources
+    merged_sources = {}
+
+    # Add all existing sources first
+    for source_name, schemas in existing_sources.sources.items():
+        merged_sources[source_name] = {}
+        for schema_name, tables in schemas.items():
+            # Copy existing tables
+            merged_sources[source_name][schema_name] = list(tables)
+
+    # Merge in new sources
+    for source_name, schemas in new_sources.sources.items():
+        if source_name not in merged_sources:
+            merged_sources[source_name] = {}
+
+        for schema_name, tables in schemas.items():
+            if schema_name in merged_sources[source_name]:
+                # Merge tables - combine and deduplicate
+                existing_tables = set(merged_sources[source_name][schema_name])
+                new_tables = set(tables)
+                merged_tables = list(existing_tables | new_tables)  # Union removes duplicates
+                merged_sources[source_name][schema_name] = sorted(merged_tables)
+                logger.info(
+                    f"Merged tables for source '{source_name}' schema '{schema_name}': "
+                    f"{len(existing_tables)} existing + {len(new_tables)} new = {len(merged_tables)} total"
+                )
+            else:
+                # New schema for this source - add all tables
+                merged_sources[source_name][schema_name] = list(tables)
+                logger.info(
+                    f"Added new schema '{schema_name}' to source '{source_name}' "
+                    f"with {len(tables)} tables"
+                )
+
+    # Return validated merged result
+    return SourceGrouping(sources=merged_sources)
+
+
+def upsert_multiple_sources_to_a_yaml(
+    sources_groups: Dict[str, Dict[str, List[str]]],
+    dbt_project: "dbtProject",
+    rel_dir_to_models: str,
+) -> str:
+    """
+    Upsert multiple sources to a YAML file - creates new file or merges with existing
+
+    Args:
+        sources_groups: Dictionary of source_name -> {schema -> [tables]}
+        dbt_project: dbtProject instance
+        rel_dir_to_models: Relative directory path from models directory
+
+    Returns:
+        str: Path to the generated/updated sources file relative to project root
+    """
+    # Validate the new sources using Pydantic
+    new_sources = SourceGrouping(sources=sources_groups)
+
+    # Filter out sources with empty table lists
+    filtered_sources = {}
+    for source_name, schemas in new_sources.sources.items():
+        filtered_schemas = {
+            schema_name: tables
+            for schema_name, tables in schemas.items()
+            if tables  # Only include schemas with non-empty table lists
+        }
+
+        # Only include the source if it has at least one schema with tables
+        if filtered_schemas:
+            filtered_sources[source_name] = filtered_schemas
+
+    if not filtered_sources:
+        logger.warning("No sources with tables to upsert to YAML")
+        return None
+
+    # Create filtered SourceGrouping for processing
+    filtered_new_sources = SourceGrouping(sources=filtered_sources)
+
+    # Determine the target file path using provided rel_dir_to_models
+    source_dir = dbt_project.models_dir(rel_dir_to_models)
+    sources_file = dbt_project.sources_filename(rel_dir_to_models)
+
+    # Ensure the directory exists
+    if not source_dir.exists():
+        source_dir.mkdir(parents=True)
+        logger.info(f"Created source directory {source_dir}")
+
+    # Determine final sources to write
+    if sources_file.exists():
+        # File exists - read existing and merge
+        with open(sources_file, "r", encoding="utf-8") as infile:
+            existing_yaml = yaml.safe_load(infile) or {}
+
+        existing_sources_data = {}
+        for source in existing_yaml.get("sources", []):
+            source_name = source.get("name")
+            schema_name = source.get("schema")
+            # Extract table identifiers from existing YAML (could be either format)
+            tables = []
+            for table in source.get("tables", []):
+                if isinstance(table, dict):
+                    # New format with name/identifier/description
+                    table_id = table.get("identifier") or table.get("name")
+                    if table_id:
+                        tables.append(table_id)
+                elif isinstance(table, str):
+                    # Old format where table is just a string
+                    tables.append(table)
+
+            if source_name not in existing_sources_data:
+                existing_sources_data[source_name] = {}
+            existing_sources_data[source_name][schema_name] = tables
+
+        existing_sources = SourceGrouping(sources=existing_sources_data)
+        logger.info(f"Found existing sources YAML, merging with new sources")
+
+        # Merge existing and new sources
+        final_sources = merge_source_groupings(existing_sources, filtered_new_sources)
+
+        # Preserve existing YAML structure (version, etc.)
+        yaml_content = existing_yaml
+    else:
+        # File doesn't exist - create new
+        logger.info("Creating new sources YAML file")
+        final_sources = filtered_new_sources
+        yaml_content = {"version": 2}
+
+    # Build the sources list for YAML
+    yaml_content["sources"] = []
+    for source_name, schemas in final_sources.sources.items():
+        for schema_name, tables in schemas.items():
+            source_def = {
+                "name": source_name,
+                "schema": schema_name,
+                "tables": [
+                    {"name": table, "identifier": table, "description": ""} for table in tables
+                ],
+            }
+            yaml_content["sources"].append(source_def)
+
+    # Write the YAML file
+    with open(sources_file, "w", encoding="utf-8") as outfile:
+        yaml.safe_dump(yaml_content, outfile, sort_keys=False)
+        logger.info(f"Upserted source definitions to {sources_file}")
+
+    return dbt_project.strip_project_dir(sources_file)
+
+
+OPERATIONS_DICT = {
+    "flatten": flatten_operation,
+    "flattenjson": flattenjson,
+    "unionall": union_tables,
+    "castdatatypes": cast_datatypes,
+    "coalescecolumns": coalesce_columns,
+    "arithmetic": arithmetic,
+    "concat": concat_columns,
+    "dropcolumns": drop_columns,
+    "renamecolumns": rename_columns,
+    "regexextraction": regex_extraction,
+    "join": join,
+    "groupby": groupby,
+    "where": where_filter,
+    "replace": replace,
+    "casewhen": casewhen,
+    "aggregate": aggregate,
+    "pivot": pivot,
+    "unpivot": unpivot,
+    "generic": generic_function,
+    "rawsql": generic_sql_function,
+}
+
+OPERATIONS_DICT_SQL = {
+    "flattenjson": flattenjson_dbt_sql,
+    "castdatatypes": cast_datatypes_sql,
+    "unionall": union_tables_sql,
+    "coalescecolumns": coalesce_columns_dbt_sql,
+    "arithmetic": arithmetic_dbt_sql,
+    "concat": concat_columns_dbt_sql,
+    "dropcolumns": drop_columns_dbt_sql,
+    "renamecolumns": rename_columns_dbt_sql,
+    "regexextraction": regex_extraction_sql,
+    "join": joins_sql,
+    "groupby": groupby_dbt_sql,
+    "where": where_filter_sql,
+    "replace": replace_dbt_sql,
+    "casewhen": casewhen_dbt_sql,
+    "aggregate": aggregate_dbt_sql,
+    "pivot": pivot_dbt_sql,
+    "unpivot": unpivot_dbt_sql,
+    "generic": generic_function_dbt_sql,
+    "rawsql": raw_generic_dbt_sql,
+}
+
+
+class SourceYmlDefinition(Schema):
+    source_name: str
+    source_schema: str
+    table: str
+    sql_path: str
+
+
+logger = CustomLogger("ddpui")
+
+
+def _get_wclient(org_warehouse: OrgWarehouse):
+    """Connect to a warehouse and return the client"""
+    credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
+    if org_warehouse.wtype == "postgres":
+        credentials = map_airbyte_keys_to_postgres_keys(credentials)
+    return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
+
+
+def _get_merge_operation_config(
+    operations: list[dict],
+    input: dict = {
+        "input_type": "source",
+        "input_name": "dummy",
+        "source_name": "dummy",
+    },
+    output_name: str = "",
+    dest_schema: str = "",
+):
+    """Get the config for a merge operation"""
+    return {
+        "output_name": output_name,
+        "dest_schema": dest_schema,
+        "input": input,
+        "operations": operations,
+    }
+
+
+def create_or_update_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+    payload: CompleteDbtModelPayload = None,
+    is_create: bool = True,
+):
+    """
+    Create or update a dbt model in the project for an operation
+    Read through all the operations mapped to the target_model
+    Fetch the source from the first operation
+    Create the merge op config
+    Call the merge operation to create sql model file on disk
+    """
+
+    wclient = _get_wclient(org_warehouse)
+
+    operations = []
+    input_models = []
+    for operation in OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).order_by("seq").all():
+        if operation.seq == 1:
+            input_models = operation.config["input_models"]
+        operations.append({"type": operation.config["type"], "config": operation.config["config"]})
+
+    merge_input = []
+    for model in input_models:
+        source_model = OrgDbtModel.objects.filter(uuid=model["uuid"]).first()
+        if source_model:
+            merge_input.append(
+                {
+                    "input_type": source_model.type,
+                    "input_name": (
+                        source_model.name
+                        if source_model.type == "model"
+                        else source_model.display_name
+                    ),
+                    "source_name": source_model.source_name,
+                }
+            )
+
+    output_name = payload.name if is_create else orgdbt_model.name
+    dest_schema = payload.dest_schema if is_create else orgdbt_model.schema
+
+    merge_config = _get_merge_operation_config(
+        operations,
+        input=merge_input[
+            0
+        ],  # just send the first input; for multi input operations rest will be inside the operations and their config - under "other_inputs".
+        output_name=output_name,
+        dest_schema=dest_schema,
+    )
+
+    model_sql_path, output_cols = merge_operations(
+        merge_config, wclient, Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt))
+    )
+
+    return model_sql_path, output_cols
+
+
+def create_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+    payload: CompleteDbtModelPayload,
+):
+    """Wrapper function to create a dbt model in the project."""
+    return create_or_update_dbt_model_in_project(
+        org_warehouse, orgdbt_model, payload, is_create=True
+    )
+
+
+def update_dbt_model_in_project(
+    org_warehouse: OrgWarehouse,
+    orgdbt_model: OrgDbtModel,
+):
+    """Wrapper function to update a dbt model in the project."""
+    create_or_update_dbt_model_in_project(org_warehouse, orgdbt_model, is_create=False)
+
+
+def read_dbt_sources_in_project(orgdbt: OrgDbt):
+    """Read the sources from .yml files in the dbt project"""
+
+    return read_sources(DbtProjectManager.get_dbt_project_dir(orgdbt))
+
+
+def get_table_columns(org_warehouse: OrgWarehouse, dbtmodel: OrgDbtModel):
+    """Get the columns of a table in a warehouse"""
+    wclient = _get_wclient(org_warehouse)
+    return wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
+
+
+def get_output_cols_for_operation(org_warehouse: OrgWarehouse, op_type: str, config: dict):
+    """
+    Get the output columns from a merge operation;
+    this only generates the sql and fetches the output col.
+    Model is neither being run nor saved to the disk
+    """
+    wclient = _get_wclient(org_warehouse)
+    operations = [{"type": op_type, "config": config}]
+    _, output_cols = merge_operations_sql(_get_merge_operation_config(operations), wclient)
+    return output_cols
+
+
+def delete_dbt_model_in_project(orgdbt_model: OrgDbtModel):
+    """Deletes a dbt model's sql file on disk"""
+    dbt_project = dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)))
+    dbt_project.delete_model(orgdbt_model.sql_path)
+    return True
+
+
+def delete_dbt_source_in_project(orgdbt_model: OrgDbtModel):
+    """Deletes a dbt source yml def on disk"""
+
+    # check if the sources yml file exists in the project
+    dbt_project_dir = DbtProjectManager.get_dbt_project_dir(orgdbt_model.orgdbt)
+    sources_yml_rel_path = orgdbt_model.sql_path
+    if not (Path(dbt_project_dir) / sources_yml_rel_path).exists():
+        logger.warning(
+            f"Source yml file at {sources_yml_rel_path} does not exist in dbt project. Nothing to delete."
+        )
+        return False
+
+    # read all sources in the same yml file
+    src_tables: list[dict] = read_sources_from_yaml(dbt_project_dir, sources_yml_rel_path)
+
+    filtered_src_tables: list[dict] = [
+        src_table
+        for src_table in src_tables
+        if not (
+            src_table["input_name"] == orgdbt_model.name
+            and src_table["schema"] == orgdbt_model.schema
+        )
+    ]
+
+    # Check if we actually found and removed the target table
+    if len(src_tables) == len(filtered_src_tables):
+        logger.warning(
+            f"Table '{orgdbt_model.name}' not found in schema '{orgdbt_model.schema}' "
+            f"in {sources_yml_rel_path}"
+        )
+        return True
+
+    # If no sources left after filtering, delete the entire file
+    if len(filtered_src_tables) == 0:
+        logger.info(
+            f"No sources left in the source yml file at {sources_yml_rel_path}. Deleting it."
+        )
+        sources_yml_full_path = Path(dbt_project_dir) / sources_yml_rel_path
+        sources_yml_full_path.unlink()
+        logger.info(f"Deleted the source yml file at {sources_yml_rel_path}")
+        return True
+
+    # Group the remaining tables by source_name, preserving (schema, table) pairs under each source
+    # A single source_name can have tables from multiple schemas
+    sources_groups = {}
+    for src_table in filtered_src_tables:
+        source_name = src_table["source_name"]
+        schema = src_table["schema"]
+        table_name = src_table["input_name"]
+
+        if source_name not in sources_groups:
+            sources_groups[source_name] = {}
+
+        if schema not in sources_groups[source_name]:
+            sources_groups[source_name][schema] = []
+
+        sources_groups[source_name][schema].append(table_name)
+
+    # Regenerate the file with all remaining sources using the upsert function
+    dbt_project = dbtProject(Path(dbt_project_dir))
+    rel_dir_to_models = str(Path(sources_yml_rel_path).parent.relative_to("models"))
+
+    # Clear the file first since we want complete replacement, not merging
+    # The upsert function would merge with existing content, but we want to replace entirely
+    sources_yml_full_path = Path(dbt_project_dir) / sources_yml_rel_path
+    sources_yml_full_path.unlink()
+
+    # Use upsert function to create the YAML with only the remaining sources
+    upsert_multiple_sources_to_a_yaml(
+        sources_groups=sources_groups, dbt_project=dbt_project, rel_dir_to_models=rel_dir_to_models
+    )
+
+    logger.info(
+        f"Updated the source definition yml at {sources_yml_rel_path} by removing the src table"
+    )
+
+    return True
+
+
+def delete_org_dbt_model(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "model"
+    Casacde will be implemented when we re-haul the ui4t architecture
+    """
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        raise ValueError("Cannot delete a source as a model")
+
+    operations = OrgDbtOperation.objects.filter(dbtmodel=orgdbt_model).count()
+
+    if operations > 0:
+        orgdbt_model.under_construction = True
+        orgdbt_model.save()
+    else:
+        # make sure this is not linked to any other model
+        # delete if there are no edges coming or going out of this model
+
+        cnt_edges_to_models = DbtEdge.objects.filter(
+            Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)
+        ).count()
+        if cnt_edges_to_models == 0:
+            orgdbt_model.delete()
+
+    # delete the model file is present
+    delete_dbt_model_in_project(orgdbt_model)
+
+
+def delete_org_dbt_source(orgdbt_model: OrgDbtModel, cascade: bool = False):
+    """
+    Delete the org dbt model
+    Only delete org dbt model of type "source"
+    Cascade will be implemented when we re-haul the ui4t architecture
+    """
+    if orgdbt_model.type == OrgDbtModelType.MODEL:
+        raise ValueError("Cannot delete a model as a source")
+
+    # delete entry in sources.yml on disk; & recreate the sources.yml
+    delete_dbt_source_in_project(orgdbt_model)
+
+    orgdbt_model.delete()
+
+
+def cascade_delete_org_dbt_model(orgdbt_model: OrgDbtModel):
+    """
+    Cascade delete the org dbt model
+    Delete the model and all its children (operations & models)
+    THIS iS UNUSED. Cascade will be implemented when we re-haul the ui4t architecture
+    """
+    # delete all children of this model (operations & models)
+    q = deque()
+    children: list[OrgDbtModel] = []
+
+    q.append(orgdbt_model)
+    while len(q) > 0:
+        curr_node = q.popleft()
+        children.append(curr_node)
+
+        for edge in DbtEdge.objects.filter(from_node=curr_node):
+            q.append(edge.to_node)
+
+    for child_orgdbt_model in reversed(children):  # just to be clean, delete from leaf nodes first
+        delete_dbt_model_in_project(child_orgdbt_model)
+        child_orgdbt_model.delete()
+
+
+def propagate_changes_to_downstream_operations(
+    target_model: OrgDbtModel, updated_operation: OrgDbtOperation, depth: int = 1
+):
+    """
+    - Propagate changes of an update in OrgDbtOperation downstream to all operations that build the target OrgDbtModel
+    - Propagating changes mean making sure the output of the updated operation i.e. output_cols are available as source_columns to next operations
+    - By default the depth is 1 i.e. it will only update the next operation
+    """
+
+    if depth == 0:
+        logger.info("Terminating propagation as depth is 0")
+        return
+
+    next_op = OrgDbtOperation.objects.filter(
+        dbtmodel=target_model, seq=updated_operation.seq + 1
+    ).first()
+
+    if not next_op:
+        logger.info("No downstream operations left to propagate changes")
+        return
+
+    config = next_op.config  # {"type": .. , "config": {}, "input_models": [...]}
+    op_config = config.get("config", {})
+    if "source_columns" in op_config:
+        op_config["source_columns"] = updated_operation.output_cols
+
+    next_op.config = config
+    next_op.save()
+
+    propagate_changes_to_downstream_operations(target_model, next_op, depth - 1)
+
+
+@app.task(bind=True)
+def sync_sources_for_warehouse_v2(
+    self, org_dbt_id: str, org_warehouse_id: str, task_id: str, hashkey: str
+):
+    """
+    1. Go through all tables in all the schemas in the warehouse.
+    2. If a table is not present as a OrgDbtModel.type=MODEL in our db, create a source for it.
+    3. Source name will be the same as the schema name.
+
+    We do not update the sources.yml definitions of the dbt project.
+    """
+    taskprogress = TaskProgress(
+        task_id=task_id,
+        hashkey=hashkey,
+        expire_in_seconds=10 * 60,  # max 10 minutes
+    )
+
+    org_dbt: OrgDbt = OrgDbt.objects.filter(id=org_dbt_id).first()
+    org_warehouse: OrgWarehouse = OrgWarehouse.objects.filter(id=org_warehouse_id).first()
+
+    taskprogress.add(
+        {
+            "message": "Started syncing sources",
+            "status": TaskProgressStatus.RUNNING,
+        }
+    )
+
+    try:
+        wclient = _get_wclient(org_warehouse)
+
+        create_source_model_for_tables: list[tuple] = []
+        for schema in wclient.get_schemas():
+            taskprogress.add(
+                {
+                    "message": f"Reading sources for schema {schema} from warehouse",
+                    "status": TaskProgressStatus.RUNNING,
+                }
+            )
+            logger.info(f"reading sources for schema {schema} for warehouse")
+            for table in wclient.get_tables(schema):
+                dbtmodel = OrgDbtModel.objects.filter(
+                    orgdbt=org_dbt, schema=schema, name=table
+                ).first()
+                if not dbtmodel:
+                    logger.info(
+                        f"table {table} in schema {schema} not present as model; will create source"
+                    )
+                    create_source_model_for_tables.append((schema, table))
+                else:
+                    # update the cols though
+                    try:
+                        dbtmodel.output_cols = [
+                            col["name"] for col in wclient.get_table_columns(schema, table)
+                        ]
+                        dbtmodel.save()
+                    except Exception as e:
+                        logger.error(
+                            f"Error updating output cols for existing model {dbtmodel.name} in schema {schema}: {e}"
+                        )
+
+            taskprogress.add(
+                {
+                    "message": f"Finished reading sources for schema {schema}",
+                    "status": TaskProgressStatus.RUNNING,
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Error syncing sources: {e}")
+        taskprogress.add(
+            {
+                "message": f"Error syncing sources: {e}",
+                "status": TaskProgressStatus.FAILED,
+            }
+        )
+        raise Exception(f"Error syncing sources: {e}")
+
+    logger.info("synced sources in dbt, creating now")
+    taskprogress.add(
+        {
+            "message": "Creating sources",
+            "status": TaskProgressStatus.RUNNING,
+        }
+    )
+
+    for source_schema, source_table in create_source_model_for_tables:
+        orgdbt_source = OrgDbtModel(
+            uuid=uuid.uuid4(),
+            orgdbt=org_dbt,
+            source_name=source_schema,
+            name=source_table,
+            display_name=source_table,
+            schema=source_schema,
+            type=OrgDbtModelType.SOURCE,
+        )
+        try:
+            orgdbt_source.output_cols = [
+                col["name"] for col in wclient.get_table_columns(source_schema, source_table)
+            ]
+        except Exception as e:
+            logger.error(
+                f"Error fetching output cols for source {source_table} in schema {source_schema}: {e}"
+            )
+
+        orgdbt_source.save()
+
+        taskprogress.add(
+            {
+                "message": "Added " + source_schema + "." + source_table,
+                "status": TaskProgressStatus.RUNNING,
+            }
+        )
+
+    taskprogress.add(
+        {
+            "message": "Sync finished",
+            "status": TaskProgressStatus.COMPLETED,
+        }
+    )
+    logger.info("saved sources to db")
+
+    return True
+
+
+def warehouse_datatypes(org_warehouse: OrgWarehouse):
+    """Get the datatypes of a table in a warehouse"""
+    wclient = _get_wclient(org_warehouse)
+    return wclient.get_column_data_types()
+
+
+def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
+    """Get json keys of a table in warehouse"""
+    wclient = _get_wclient(warehouse)
+    return wclient.get_json_columnspec(source_schema, input_name, json_column)
+
+
+def ensure_source_yml_definition_in_project(
+    orgdbt: OrgDbt,
+    schema: str,
+    table: str,
+) -> SourceYmlDefinition:
+    """
+    1. Read through all yaml files in project & parse to check if the source is present or not
+    2. If not present, create the source definition in a new yaml file under models/sources/sources.yml.
+    3. If models/sources/sources.yml file exists, append to it.
+    """
+
+    sources = read_dbt_sources_in_project(orgdbt)
+
+    for source in sources:
+        if (
+            source["schema"] == schema
+            and source["input_name"] == table
+            and source["input_type"] == "source"
+        ):
+            logger.info(
+                f"yml source definition for {schema}.{table} already exists in dbt project."
+            )
+            return SourceYmlDefinition(
+                source_name=source["source_name"],
+                source_schema=source["schema"],
+                table=source["input_name"],
+                sql_path=str(source["sql_path"]),
+            )
+
+    # create the source definition as it does not exist
+    sources_groups = {schema: {schema: [table]}}  # source_name  # schema -> [tables]
+    source_yml_path = upsert_multiple_sources_to_a_yaml(
+        sources_groups=sources_groups,
+        dbt_project=dbtProject(Path(DbtProjectManager.get_dbt_project_dir(orgdbt))),
+        rel_dir_to_models="sources",  # by default we create new sources in models/sources/sources.yml
+    )
+
+    logger.info(f"Generated yaml for source {schema}.{table}; yaml at {source_yml_path}")
+
+    return SourceYmlDefinition(
+        source_name=schema,
+        source_schema=schema,
+        table=table,
+        sql_path=str(source_yml_path),
+    )
+
+
+# ==============================================================================
+# UI4T V2 API - New unified architecture using CanvasNode and CanvasEdge
+# ==============================================================================
+
+
+def update_output_cols_of_dbt_model(
+    org_warehouse: OrgWarehouse,
+    dbtmodel: OrgDbtModel,
+):
+    # Get the latest output columns for a dbt model from the warehouse
+
+    wclient = _get_wclient(org_warehouse)
+    output_cols = wclient.get_table_columns(dbtmodel.schema, dbtmodel.name)
+
+    return [col["name"] for col in output_cols]
+
+
+def create_or_update_dbt_model_in_project_v2(
+    org_warehouse: OrgWarehouse, config: dict, orgdbt: OrgDbt
+):
+    """
+    Create or update a dbt model in the project for the list of operations
+    """
+
+    wclient = _get_wclient(org_warehouse)
+
+    model_sql_path, output_cols = merge_operations_v2(
+        config, wclient, Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    )
+
+    return model_sql_path, output_cols
+
+
+def convert_canvas_node_to_frontend_format(
+    canvas_node: CanvasNode, changed_files: list[GitChangedFile] = None
+):
+    """
+    Convert CanvasNode to dict
+    """
+    is_last_in_chain = True  # you can always build chains on a model/source node
+    if canvas_node.node_type == CanvasNodeType.OPERATION:
+        # check if there is another operation in chain after this
+        outgoing_edges = CanvasEdge.objects.filter(
+            from_node=canvas_node, to_node__node_type=CanvasNodeType.OPERATION
+        ).count()
+        is_last_in_chain = outgoing_edges == 0
+
+    # Determine if the node is published (only for model nodes)
+    is_published = None
+    if (
+        canvas_node.node_type == CanvasNodeType.MODEL
+        and canvas_node.dbtmodel
+        and changed_files is not None
+    ):
+        # Check if the model's SQL file or any of its parent directories appears in the changed files list
+        sql_path = canvas_node.dbtmodel.sql_path
+        is_published = True  # Assume published unless we find it in changed files
+
+        for changed_file in changed_files:
+            changed_filename = changed_file.filename
+            # Check if exact file matches
+            if changed_filename == sql_path:
+                is_published = False
+                break
+            # Check if any parent directory is untracked (ends with /)
+            if changed_filename.endswith("/") and sql_path.startswith(changed_filename):
+                is_published = False
+                break
+            # Check if the file is under a changed directory
+            if sql_path.startswith(changed_filename + "/"):
+                is_published = False
+                break
+    elif canvas_node.node_type != CanvasNodeType.MODEL:
+        # For non-model nodes, set isPublished to null as per requirement
+        is_published = None
+
+    return {
+        "uuid": str(canvas_node.uuid),
+        "node_type": canvas_node.node_type,
+        "name": canvas_node.name,
+        "operation_config": canvas_node.operation_config,
+        "output_columns": canvas_node.output_cols,
+        "dbtmodel": (
+            {
+                "schema": canvas_node.dbtmodel.schema,
+                "sql_path": canvas_node.dbtmodel.sql_path,
+                "name": canvas_node.dbtmodel.name,
+                "display_name": canvas_node.dbtmodel.display_name,
+                "uuid": str(canvas_node.dbtmodel.uuid),
+                "type": canvas_node.dbtmodel.type,
+                "source_name": canvas_node.dbtmodel.source_name,
+                "output_cols": canvas_node.dbtmodel.output_cols,
+            }
+            if canvas_node.dbtmodel
+            else None
+        ),
+        "is_last_in_chain": is_last_in_chain,
+        "isPublished": is_published,
+    }
+
+
+def validate_and_return_inputs_for_multi_input_op(
+    extra_input_models: list[ModelSrcOtherInputPayload], orgdbt: OrgDbt
+) -> list[ModelSrcInputsForMultiInputOp]:
+    """
+    Validate inputs for multi input operation
+    Note that the first or the main input is validated separately
+    At least two input models are required for multi-input operations
+    """
+    if len(extra_input_models) < 1:
+        raise HttpError(422, "At least two input models are required for this operation")
+
+    input_models: list[ModelSrcInputsForMultiInputOp] = []
+    for input_model in extra_input_models:
+        try:
+            dbtmodel = OrgDbtModel.objects.get(uuid=input_model.input_model_uuid, orgdbt=orgdbt)
+
+            input_models.append(
+                ModelSrcInputsForMultiInputOp(seq=input_model.seq, src_model=dbtmodel)
+            )
+        except OrgDbtModel.DoesNotExist:
+            raise HttpError(404, f"Dbt model {input_model.input_model_uuid} not found")
+
+    return input_models
+
+
+def tranverse_graph_and_return_operations_list(terminal_op_node: CanvasNode) -> list[dict]:
+    """
+    Traverse the graph upstream from the terminal node to get all connected nodes and operations
+    Returns the list of operations with its input in the order they must be applied
+    The operation dict is in the format expected by the dbt_automation package
+
+    We traverse upstream till the operation node has edges from only source/model nodes going into it
+
+    case 1
+    src/model -> op1 -> op2 -> ... -> terminal_op_node
+
+    case 2
+    src/model -> op1 -> op2 -> op3 ->... -> terminal_op_node
+                     model2 -> op3
+
+    """
+
+    operations_list = []
+    current_op_node = terminal_op_node
+
+    cte_n = 1  # counter for cte naming
+    while True:
+        operation_dict = {
+            "uuid": str(current_op_node.uuid),
+            "type": current_op_node.operation_config.get("type"),
+            "config": current_op_node.operation_config.get("config", {}),
+        }
+
+        operation_dict["config"]["input"] = None  # main input
+        operation_dict["config"]["other_inputs"] = []  # other inputs for multi-input operations
+
+        # get all incoming edges to the current node
+        # if there are multiple src/model nodes, the one with seq=1 is the main input
+        incoming_edges = (
+            CanvasEdge.objects.filter(to_node=current_op_node)
+            .select_related("from_node")
+            .order_by("seq")
+        )
+
+        sequenced_model_nodes: list[SequencedNode] = []
+
+        upstream_op_nodes = []
+        for incoming_edge in incoming_edges:
+            from_node = incoming_edge.from_node
+            if from_node.node_type in [CanvasNodeType.SOURCE, CanvasNodeType.MODEL]:
+                sequenced_model_nodes.append(SequencedNode(seq=incoming_edge.seq, node=from_node))
+            elif from_node.node_type == CanvasNodeType.OPERATION:
+                upstream_op_nodes.append(from_node)
+
+        # if the node is first in the chain, we need to push this as input in the config
+        # get the seq = 1 model node as main input
+        main_model_node: SequencedNode = next(
+            (node for node in sequenced_model_nodes if node.seq == 1), None
+        )
+        if main_model_node:
+            operation_dict["config"]["input"] = (
+                {
+                    "input_type": main_model_node.node.dbtmodel.type,
+                    "input_name": (
+                        main_model_node.node.dbtmodel.name
+                        if main_model_node.node.dbtmodel.type == "model"
+                        else main_model_node.node.dbtmodel.display_name
+                    ),
+                    "source_name": main_model_node.node.dbtmodel.source_name,
+                }
+                if main_model_node and main_model_node.node.dbtmodel
+                else None
+            )
+
+            # pop this node from the sequenced_model_nodes
+            # these will go as other_inputs
+            sequenced_model_nodes = [node for node in sequenced_model_nodes if node.seq != 1]
+        else:
+            operation_dict["config"]["input"] = {
+                "input_type": "cte",
+                "input_name": f"cte{cte_n+1}",
+                "source_name": None,
+            }
+
+        # cte numbering for merging
+        operation_dict["as_cte"] = f"cte{cte_n}"
+        cte_n += 1
+
+        # other inputs for multi-input operations
+        for extra_input_model in sequenced_model_nodes:
+            operation_dict["config"]["other_inputs"].append(
+                {
+                    "input": {
+                        "input_type": extra_input_model.node.dbtmodel.type,
+                        "input_name": (
+                            extra_input_model.node.dbtmodel.name
+                            if extra_input_model.node.dbtmodel.type == "model"
+                            else extra_input_model.node.dbtmodel.display_name
+                        ),
+                        "source_name": extra_input_model.node.dbtmodel.source_name,
+                    },
+                    "source_columns": extra_input_model.node.dbtmodel.output_cols,
+                    "seq": extra_input_model.seq,
+                }
+            )
+
+        operations_list.append(operation_dict)
+
+        # we stop when there are no upstream operation nodes
+        if len(upstream_op_nodes) == 0:
+            break
+
+        if len(upstream_op_nodes) > 1:
+            raise Exception(
+                "Invalid graph state: multiple upstream operation nodes found for operation node "
+                + str(current_op_node.uuid)
+            )
+
+        current_op_node = upstream_op_nodes[0]
+
+    operations_list.reverse()
+
+    return operations_list
