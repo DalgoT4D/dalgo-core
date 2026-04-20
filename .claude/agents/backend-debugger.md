@@ -38,7 +38,7 @@ Follow this 4-phase approach for every bug:
 - Use `mcp__plugin_sentry_sentry__search_issues` to find related issues
 - Use `mcp__plugin_sentry_sentry__analyze_issue_with_seer` for AI-powered root cause analysis when the issue is complex
 - Identify the affected endpoint, service, and user flow
-- Check if this is a recurring pattern (consult your agent memory)
+- Check if this matches a known Dalgo-specific pitfall (see below)
 
 ### Phase 2: Hypothesize
 - Trace the code path through the layer architecture: API → Core → Model
@@ -100,10 +100,3 @@ Structure your diagnosis as:
 6. **Suggested Test**: Test case that would catch this bug
 7. **Related Issues**: Other bugs that share the same root cause pattern
 
-## Update Your Agent Memory
-
-Record bug patterns and root causes you discover. Over time, build a library of:
-- Common error patterns and their typical root causes
-- Code paths that are frequently involved in bugs
-- Fixes that worked well and their side effects
-- Areas of the codebase that are fragile or under-tested

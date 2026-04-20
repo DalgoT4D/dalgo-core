@@ -43,7 +43,7 @@ types/         → TypeScript interfaces
 - Read the error message, console output, or behavior description
 - If VS Code diagnostics are available, check with `mcp__ide__getDiagnostics`
 - Identify the affected component(s) and page route
-- Check if this is a known pattern (consult your agent memory)
+- Check if this matches a known webapp_v2 gotcha (see below)
 
 ### Phase 2: Hypothesize
 - Trace through the component hierarchy: Page → Layout → Component → Hook → API
@@ -109,11 +109,3 @@ Structure your diagnosis as:
 6. **Suggested Test**: React Testing Library test case
 7. **Related Issues**: Other components that might have the same problem
 
-## Update Your Agent Memory
-
-Record frontend bug patterns you discover. Build a library of:
-- SWR cache issues and their resolution patterns
-- Component lifecycle bugs and fixes
-- Auth flow edge cases
-- Hydration issues and SSR/CSR boundaries
-- Performance issues (unnecessary re-renders, missing memoization)
