@@ -123,7 +123,7 @@ Remember: You are the voice of the end user. Your job is to ensure that every fe
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/Users/siddhant/Documents/Dalgo/dalgo-core/.claude/agent-memory/ngo-data-platform-advisor/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `.claude/agent-memory/ngo-data-platform-advisor/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 

@@ -149,9 +149,9 @@
 ## Files to Reference
 
 ### UI Components
-- `/Users/siddhant/Documents/dalgo/webapp_v2/components/reports/share-via-email-dialog.tsx` - Email input pattern
-- `/Users/siddhant/Documents/dalgo/webapp_v2/components/reports/report-share-menu.tsx` - Dropdown menu pattern
-- `/Users/siddhant/Documents/dalgo/webapp_v2/components/reports/utils.ts` - Shared constants (EMAIL_REGEX, MAX_RECIPIENTS)
+- `../webapp_v2/components/reports/share-via-email-dialog.tsx` - Email input pattern
+- `../webapp_v2/components/reports/report-share-menu.tsx` - Dropdown menu pattern
+- `../webapp_v2/components/reports/utils.ts` - Shared constants (EMAIL_REGEX, MAX_RECIPIENTS)
 
 ### Planning Docs
-- `/Users/siddhant/Documents/dalgo/dalgo-ai-gen/dalgo_mds/claude/planning/reports/` - Feature plans
+- `../ai-llm-service/dalgo_mds/claude/planning/reports/` - Feature plans

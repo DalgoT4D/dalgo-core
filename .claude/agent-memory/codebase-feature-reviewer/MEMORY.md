@@ -1,10 +1,10 @@
 # Dalgo Platform Code Review Memory
 
 ## Architecture Overview
-- **DDP_backend**: Django REST API with Django Ninja at `/Users/siddhant/Documents/Dalgo/DDP_backend`
-- **webapp_v2**: Next.js 15 + React 19 frontend at `/Users/siddhant/Documents/Dalgo/webapp_v2`
-- **prefect-proxy**: FastAPI proxy for Prefect at `/Users/siddhant/Documents/Dalgo/prefect-proxy`
-- **dalgo-ai-gen**: AI/ML repo at `/Users/siddhant/Documents/dalgo/dalgo-ai-gen` (mostly planning docs)
+- **DDP_backend**: Django REST API with Django Ninja at `../DDP_backend`
+- **webapp_v2**: Next.js 15 + React 19 frontend at `../webapp_v2`
+- **prefect-proxy**: FastAPI proxy for Prefect at `../prefect-proxy`
+- **dalgo-ai-gen**: AI/ML repo at `../ai-llm-service` (mostly planning docs)
 
 ## Key Patterns
 - Backend CLAUDE.md defines a comprehensive layer architecture (API -> Core -> Models)
