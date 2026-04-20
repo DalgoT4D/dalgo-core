@@ -16,7 +16,7 @@ Search `specs/` for existing specs on similar topics.
 - Avoid creating duplicate specs for the same feature area.
 
 ### Step 3: Write the Spec
-Use the spec-writer agent approach to produce a structured spec:
+Use the senior-product-manager agent approach to produce a structured spec:
 
 1. **Understand the idea** — Parse the input, identify the core problem being solved.
 2. **Research context** — Search the codebase for related features, check existing plans in `plans/`.
