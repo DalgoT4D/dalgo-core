@@ -41,7 +41,7 @@ dalgo-core/
 
 ## Feature Lifecycle
 
-### Spike Track (PM)
+### Spike Track (PM or Anyone)
 
 Quick validation with NGO partners before committing engineering time. PM owns this end-to-end.
 
@@ -55,7 +55,7 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 
 ```mermaid
 flowchart TD
-    A["PM has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
+    A["Anyone has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
     B --> |"saves prototypes/{name}/brief.md"| C{"Build prototype?"}
     C --> |"Yes — Claude builds it"| D["Prototype code ready"]
     C --> |"No"| E["Share brief with team"]
