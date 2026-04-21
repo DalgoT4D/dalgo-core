@@ -24,6 +24,28 @@ dalgo-core/
 └── webapp_v2 -> ../webapp_v2       (symlink, gitignored)
 ```
 
+## Setup — Symlinks
+
+This repo uses symlinks to reference sibling repositories (`DDP_backend`, `webapp_v2`) so that Claude Code can read and edit across repos from a single workspace. These symlinks are gitignored.
+
+> **Note:** This is a temporary setup until we convert to a full monorepo.
+
+From the `dalgo-core/` directory:
+
+```bash
+ln -s ../DDP_backend DDP_backend
+ln -s ../webapp_v2 webapp_v2
+```
+
+Verify:
+
+```bash
+ls -la DDP_backend webapp_v2
+# Should show symlinks pointing to ../DDP_backend and ../webapp_v2
+```
+
+---
+
 ## Three Types of Tools
 
 | Type | Location | Purpose | How to Use |
