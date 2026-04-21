@@ -11,10 +11,15 @@ dalgo-core/
 │   ├── commands/        # Slash commands (step-by-step workflows)
 │   └── skills/          # Evaluation lenses / thinking frameworks
 ├── workdocs/
-│   └── {feature-name}/  # Each feature gets its own folder
-│       ├── spec.md      # Feature specification
-│       ├── plan.md      # Implementation plan
-│       └── tasks.md     # Execution progress checkpoint
+│   └── {feature-name}/
+│       ├── spec.md              # PM's original spec (full vision)
+│       ├── v1/
+│       │   ├── spec.md          # Engineering's scoped iteration
+│       │   ├── research.md      # Codebase & external research
+│       │   ├── plan.md          # Implementation plan (HLD, LLD, milestones)
+│       │   └── tasks.md         # Execution progress checkpoint
+│       └── v2/
+│           └── ...              # Next iteration
 ├── DDP_backend -> ../DDP_backend   (symlink, gitignored)
 └── webapp_v2 -> ../webapp_v2       (symlink, gitignored)
 ```
@@ -31,78 +36,101 @@ dalgo-core/
 
 ## Feature Lifecycle
 
-The full journey from idea to production, with each tool connected to the next:
+### The Full Flow
 
 ```
-Idea
+PM has feature idea
  │
  ▼
-/write-spec                              →  workdocs/{name}/spec.md
+/write-spec "feature idea"           →  workdocs/{name}/spec.md (full vision)
  │
  ▼
-/plan-feature workdocs/{name}/spec.md    →  workdocs/{name}/plan.md
+Engineering scopes v1
  │
  ▼
-/execute-plan workdocs/{name}/plan.md    →  code changes + workdocs/{name}/tasks.md
+/scope-version workdocs/{name}       →  workdocs/{name}/v1/spec.md (scoped iteration)
  │
  ▼
-/ship-checklist                →  pre-merge quality gate (read-only)
+/plan-feature workdocs/{name}/v1/spec.md
+ │                                   →  workdocs/{name}/v1/research.md
+ │                                   →  workdocs/{name}/v1/plan.md (HLD, LLD, security, milestones)
+ ▼
+Engineer reviews plan, iterates      →  "revise the HLD", "change the API design", etc.
  │
  ▼
-Push + Create PR
+/execute-plan workdocs/{name}/v1/plan.md
+ │                                   →  workdocs/{name}/v1/tasks.md (progress tracking)
+ │                                   →  code changes across DDP_backend, webapp_v2
+ ▼
+/ship-checklist                      →  pre-merge quality gate (read-only)
  │
  ▼
-/review-pr 142                 →  structured code review
+Push + /review-pr                    →  structured code review
  │
  ▼
 Merge + Deploy
  │
- Bug in prod?
+ Bug in prod?  →  /debug-issue "error or Sentry URL"
  │
- ▼
-/debug-issue "error or Sentry URL"  →  diagnosis + fix proposal
- │
- small fix → direct PR
- large fix → loop back to /plan-feature
+ Ready for v2? →  /scope-version workdocs/{name} (next iteration)
 ```
 
-**Cross-cutting (usable at any stage):**
-- `/design-review` — UX + NGO user evaluation of any UI
-- `/tal-lens` — critical thinking framework for any technology decision
+### PM vs Engineering Handoff
+
+| Step | Who | Tool | Output |
+|------|-----|------|--------|
+| Write full spec | PM | `/write-spec` | `workdocs/{name}/spec.md` |
+| Scope an iteration | Engineering | `/scope-version` | `workdocs/{name}/v1/spec.md` |
+| Plan implementation | Engineering | `/plan-feature` | `workdocs/{name}/v1/plan.md` |
+| Iterate on plan | Engineering | Conversation | Updates to `plan.md` |
+| Execute | Engineering | `/execute-plan` | Code + `tasks.md` |
+| Quality gate | Engineering | `/ship-checklist` | Pass/fail report |
+| Review | Engineering | `/review-pr` | Structured review |
 
 ---
 
 ## Commands Reference
 
 ### `/write-spec`
-Turn a rough feature idea into a structured spec with problem statement, user stories, scope, and success metrics.
+PM command. Turn a rough feature idea into a structured spec — the full vision with all user stories and scope.
 
 ```
 /write-spec "scheduled report emails for dashboard owners"
 ```
 **Output:** `workdocs/{feature-name}/spec.md`
-**Next step:** `/plan-feature workdocs/{feature-name}/spec.md`
+**Next step:** Engineering scopes a v1 with `/scope-version`
+
+### `/scope-version`
+Engineering command. Break the PM's full spec into a scoped iteration for implementation.
+
+```
+/scope-version workdocs/scheduled-reports
+```
+**Output:** `workdocs/{feature-name}/v1/spec.md` (or v2, v3, etc.)
+**Next step:** `/plan-feature workdocs/{feature-name}/v1/spec.md`
 
 ### `/plan-feature`
-Create a detailed implementation plan from a spec — architecture, affected services, API design, testing strategy.
+Engineering command. Generate an implementation plan with HLD, LLD, security review, and milestones.
 
 ```
-/plan-feature workdocs/scheduled-reports/spec.md
+/plan-feature workdocs/scheduled-reports/v1/spec.md
 ```
-**Output:** `workdocs/{feature-name}/plan.md`
-**Next step:** `/execute-plan workdocs/{feature-name}/plan.md`
+**Output:** `workdocs/{feature-name}/v1/plan.md` + `research.md`
+**Next step:** Review, iterate, then `/execute-plan workdocs/{feature-name}/v1/plan.md`
+
+The plan is a **draft** — engineers iterate on it: "revise the API design", "add a caching layer", "split milestone 2". Claude updates `plan.md` in place.
 
 ### `/execute-plan`
-Implement a feature following the plan. Creates a checkpoint file to track progress across sessions.
+Engineering command. Implement the feature following the plan, with checkpointing.
 
 ```
-/execute-plan workdocs/scheduled-reports/plan.md
+/execute-plan workdocs/scheduled-reports/v1/plan.md
 ```
-**Creates:** `workdocs/{feature-name}/tasks.md` for progress tracking
+**Creates:** `workdocs/{feature-name}/v1/tasks.md` for progress tracking
 **Next step:** `/ship-checklist`
 
 ### `/debug-issue`
-Diagnose a bug from a Sentry URL, error message, or behavior description. Classifies as backend/frontend/cross-cutting automatically.
+Diagnose a bug from a Sentry URL, error message, or behavior description.
 
 ```
 /debug-issue https://sentry.io/issues/DALGO-123/
@@ -120,7 +148,7 @@ Structured code review — checks service-specific conventions, security, testin
 **Does NOT auto-post to GitHub** — outputs the review for you to use.
 
 ### `/ship-checklist`
-Pre-merge quality gate. Runs lint, tests, migration checks, and scans the diff for common issues. Read-only — does not modify code.
+Pre-merge quality gate. Runs lint, tests, migration checks, and scans the diff for common issues. Read-only.
 
 ```
 /ship-checklist
@@ -130,7 +158,7 @@ Pre-merge quality gate. Runs lint, tests, migration checks, and scans the diff f
 
 ## Agents
 
-Agents are specialized personas that Claude invokes automatically when the context matches. You don't need to remember which one to call.
+Agents are specialized personas that Claude invokes automatically when the context matches.
 
 | Agent | What It Does |
 |-------|-------------|
@@ -157,10 +185,11 @@ Skills are evaluation lenses — they shift how Claude thinks about a problem.
 ### New Feature (idea → code → merge)
 ```
 /write-spec "feature idea"
-/plan-feature workdocs/{name}/spec.md
-/execute-plan workdocs/{name}/plan.md
+/scope-version workdocs/{name}
+/plan-feature workdocs/{name}/v1/spec.md
+# iterate on plan...
+/execute-plan workdocs/{name}/v1/plan.md
 /ship-checklist
-# push + create PR
 /review-pr <pr-number>
 ```
 
@@ -174,18 +203,13 @@ Skills are evaluation lenses — they shift how Claude thinks about a problem.
 ### Design Feedback
 ```
 /design-review
-# evaluates a component through both UX and NGO user lenses
 ```
 
-### PR Review
+### Next Iteration of a Feature
 ```
-/review-pr 142
-```
-
-### Evaluate a Technology Decision
-```
-/tal-lens
-# applies critical thinking framework to any tool/approach/architecture choice
+/scope-version workdocs/{name}
+# creates v2/spec.md from remaining items in original spec
+/plan-feature workdocs/{name}/v2/spec.md
 ```
 
 ---
@@ -197,4 +221,5 @@ Skills are evaluation lenses — they shift how Claude thinks about a problem.
 | `/write-tests` | Test writing is part of `/execute-plan`. Separate command fragments the workflow. |
 | `/deploy` | Deployment depends on CI/CD infrastructure that varies per environment. |
 | `/estimate` | Effort estimation needs team velocity context Claude can't reliably provide. |
-| Repo-level agents | Workspace-level agents already read all repos. Repo-level agents fragment knowledge. |
+| Repo-level agents | Workspace-level agents already read all repos via symlinks. |
+| Research agent | Research is a step within `/plan-feature`, saved as `research.md`. Doesn't need a separate persona. |

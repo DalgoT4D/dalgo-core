@@ -19,7 +19,7 @@ Search `workdocs/` for an existing folder with a similar feature name.
 Use the senior-product-manager agent approach to produce a structured spec:
 
 1. **Understand the idea** — Parse the input, identify the core problem being solved.
-2. **Research context** — Search the codebase for related features, check existing workdocs for related plans.
+2. **Research context** — Search the codebase for related features, check existing workdocs.
 3. **Pressure-test from user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
 4. **Structure the spec** with these sections:
    - Problem Statement — What problem, for whom?
@@ -34,7 +34,9 @@ Use the senior-product-manager agent approach to produce a structured spec:
 ### Step 4: Save the Spec
 Save to: `workdocs/{feature-name}/spec.md`
 
-Use a kebab-case feature name derived from the core feature concept. Create the directory if it doesn't exist.
+This is the **PM's original spec** — the full vision. Engineering will later break this into versioned iterations (`v1/spec.md`, `v2/spec.md`) scoped for shippable chunks.
+
+Use a kebab-case or snake_case feature name. Create the directory if it doesn't exist.
 
 ### Step 5: Print Next Step
 After saving, print:
@@ -42,8 +44,10 @@ After saving, print:
 ```
 Spec saved to: workdocs/{feature-name}/spec.md
 
-When ready for implementation planning, run:
-/plan-feature workdocs/{feature-name}/spec.md
+Next steps for engineering:
+1. Review the spec and scope a v1 iteration
+2. Create workdocs/{feature-name}/v1/spec.md with the scoped-down version
+3. Run: /plan-feature workdocs/{feature-name}/v1/spec.md
 ```
 
 ## Guidelines

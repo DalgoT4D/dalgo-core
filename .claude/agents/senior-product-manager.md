@@ -50,7 +50,7 @@ Dalgo already integrates open-source tools (Airbyte, dbt, Prefect, Superset). Fo
 When asked to spec a feature, produce a structured document that engineers can use for `/plan-feature`.
 
 ### Process
-1. **Understand** — Read the input, check `workdocs/` for existing specs on similar topics, ask clarifying questions if too vague.
+1. **Understand** — Read the input, check `workdocs/` for existing feature folders, ask clarifying questions if too vague.
 2. **Research** — Search the codebase for related features, identify affected repos/services.
 3. **Pressure-test** from the user perspective:
    - **Comprehension**: Will a program manager understand this within 10 seconds?
@@ -116,7 +116,9 @@ What problem are we solving? Who experiences it? How do they work around it toda
 
 Save specs to: `workdocs/{feature-name}/spec.md`
 
-After saving, print: "Spec saved. When ready for implementation planning, run: `/plan-feature workdocs/{feature-name}/spec.md`"
+This is the PM's original spec — the full vision. Engineering will break it into versioned iterations (`v1/spec.md`, `v2/spec.md`) scoped for shippable chunks.
+
+After saving, print: "Spec saved. Engineering can scope a v1 iteration and run `/plan-feature workdocs/{feature-name}/v1/spec.md`"
 
 ## Guidelines
 
