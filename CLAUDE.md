@@ -13,7 +13,15 @@ Dalgo is an open-source data platform for NGOs. It replaces manual Excel/Google 
 
 ## Development Workflow
 
-Commands chain together — each step's output feeds into the next:
+### Fast track (prototype → validate → promote)
+
+```
+/product/prototype "feature idea"           → prototypes/{name}/brief.md + build
+```
+
+Skip the full pipeline. Get a working prototype to test with NGO partners. If validated, promote to full feature with the standard workflow below. PM artifacts live in `prototypes/`, separate from engineering's `workdocs/`.
+
+### Standard track (spec → plan → build → ship)
 
 ```
 /product/write-spec "feature idea"          → workdocs/{name}/spec.md

@@ -12,6 +12,9 @@ dalgo-core/
 │   │   ├── product/         # PM commands
 │   │   └── engineering/     # Engineering commands
 │   └── skills/              # Evaluation lenses / thinking frameworks
+├── prototypes/
+│   └── {feature-name}/
+│       └── brief.md             # PM's prototype brief (spike)
 ├── workdocs/
 │   └── {feature-name}/
 │       ├── spec.md              # PM's original spec (full vision)
@@ -38,46 +41,76 @@ dalgo-core/
 
 ## Feature Lifecycle
 
-### The Full Flow
+Two tracks depending on confidence level:
 
+### Spike Track (PM — fast validation)
+
+For ideas you want to test with an NGO partner before committing engineering time. PM owns this track end-to-end. Artifacts live in `prototypes/`, separate from engineering's `workdocs/`.
+
+```mermaid
+flowchart TD
+    A["PM has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
+    B --> |"prototypes/{name}/brief.md"| C{"Build prototype?"}
+    C --> |Yes| D["Build with # PROTOTYPE markers"]
+    C --> |No| E["Share brief with team"]
+    D --> F["Test with NGO partner"]
+    E --> F
+    F --> G{Validated?}
+    G --> |"Yes"| H["/product/write-spec\n→ Engineering Track"]
+    G --> |"No"| I["Archive prototypes/{name}/\nDocument learnings"]
+
+    style A fill:#f3f4f6,stroke:#6b7280
+    style B fill:#dbeafe,stroke:#3b82f6
+    style H fill:#d1fae5,stroke:#10b981
+    style I fill:#fef3c7,stroke:#f59e0b
 ```
-PM has feature idea
- │
- ▼
-/product/write-spec "feature idea"
- │                                   →  workdocs/{name}/spec.md (full vision)
- ▼
-/product/write-spec workdocs/{name}
- │                                   →  workdocs/{name}/v1/spec.md (scoped iteration)
- ▼
-/engineering/plan-feature workdocs/{name}/v1/spec.md
- │                                   →  workdocs/{name}/v1/research.md
- │                                   →  workdocs/{name}/v1/plan.md (HLD, LLD, security, milestones)
- ▼
-Engineer reviews plan, iterates      →  "revise the HLD", "change the API design", etc.
- │
- ▼
-/engineering/execute-plan workdocs/{name}/v1/plan.md
- │                                   →  workdocs/{name}/v1/tasks.md (progress tracking)
- │                                   →  code changes across DDP_backend, webapp_v2
- ▼
-/engineering/ship-checklist          →  pre-merge quality gate (read-only)
- │
- ▼
-Push + /engineering/review-pr        →  structured code review
- │
- ▼
-Merge + Deploy
- │
- Bug in prod?  →  /engineering/debug-issue "error or Sentry URL"
- │
- Ready for v2? →  /product/write-spec workdocs/{name} (next iteration)
+
+### Engineering Track (spec → plan → build → ship)
+
+For confirmed features that need production-quality implementation. Engineering owns this track. Artifacts live in `workdocs/`.
+
+```mermaid
+flowchart TD
+    A["Feature idea or validated spike"] --> B["/product/write-spec 'idea'"]
+    B --> |"workdocs/{name}/spec.md"| C["/product/write-spec workdocs/{name}"]
+    C --> |"workdocs/{name}/v1/spec.md"| D["/engineering/plan-feature"]
+    D --> |"v1/plan.md + research.md"| E["Engineer reviews & iterates plan"]
+    E --> F["/engineering/execute-plan"]
+    F --> |"code + v1/tasks.md"| G["/engineering/ship-checklist"]
+    G --> H["Push + /engineering/review-pr"]
+    H --> I["Merge + Deploy"]
+    I --> J{What next?}
+    J --> |"Bug in prod"| K["/engineering/debug-issue"]
+    J --> |"Ready for v2"| C
+
+    style A fill:#f3f4f6,stroke:#6b7280
+    style B fill:#dbeafe,stroke:#3b82f6
+    style C fill:#dbeafe,stroke:#3b82f6
+    style D fill:#e0e7ff,stroke:#6366f1
+    style F fill:#e0e7ff,stroke:#6366f1
+    style G fill:#fce7f3,stroke:#ec4899
+    style H fill:#fce7f3,stroke:#ec4899
+    style I fill:#d1fae5,stroke:#10b981
+    style K fill:#fee2e2,stroke:#ef4444
 ```
+
+### Spike vs Engineering — When to Use Which
+
+| | Spike | Engineering |
+|---|---|---|
+| **Confidence** | "I think this might work" | "We know we need this" |
+| **Goal** | Validate with a real NGO user | Ship to production |
+| **Artifacts** | `prototypes/{name}/brief.md` | `workdocs/{name}/spec.md` → `plan.md` → code |
+| **Time** | Hours | Days |
+| **Tests** | Manual, with the user | Automated + manual |
+| **Code quality** | Prototype — shortcuts documented | Production — reviewed, tested |
+| **Command** | `/product/prototype` | `/product/write-spec` → `/engineering/plan-feature` → `/engineering/execute-plan` |
 
 ### PM vs Engineering Handoff
 
 | Step | Who | Command | Output |
 |------|-----|---------|--------|
+| Spike / prototype | PM | `/product/prototype "idea"` | `prototypes/{name}/brief.md` |
 | Write full spec | PM | `/product/write-spec "idea"` | `workdocs/{name}/spec.md` |
 | Scope an iteration | PM or Eng | `/product/write-spec workdocs/{name}` | `workdocs/{name}/v1/spec.md` |
 | Plan implementation | Engineering | `/engineering/plan-feature` | `workdocs/{name}/v1/plan.md` |
@@ -91,6 +124,16 @@ Merge + Deploy
 ## Commands Reference
 
 ### Product Commands
+
+#### `/product/prototype`
+Quick spike — validate an idea with NGO partners before committing to a full spec.
+
+```
+/product/prototype "let users bookmark their favorite dashboard charts"
+```
+**Output:** `prototypes/{feature-name}/brief.md` (1-page brief with problem, scope, quick plan)
+**Optionally:** builds the prototype code with `# PROTOTYPE` markers
+**Next step:** Test with NGO → if validated, `/product/write-spec "{feature name}"`
 
 #### `/product/write-spec`
 Two modes in one command:
@@ -178,6 +221,14 @@ Agents are specialized personas that Claude invokes automatically when the conte
 ---
 
 ## Common Workflows
+
+### Spike (idea to validation)
+```
+/product/prototype "feature idea"
+# test with NGO partner...
+# if validated:
+/product/write-spec "feature idea"
+```
 
 ### New Feature (idea to merge)
 ```
