@@ -1,6 +1,6 @@
 ---
 name: debugger
-description: "Use this agent when the user needs to diagnose a bug — backend (Django/Python), frontend (Next.js/React), or cross-cutting. Accepts Sentry URLs, error messages, stack traces, or behavior descriptions.\n\nExamples:\n- user: \"Can you debug this Sentry issue? https://sentry.io/issues/DALGO-123/\"\n  assistant: \"I'll use the debugger agent to diagnose this Sentry issue and trace the root cause.\"\n\n- user: \"We're getting a 500 error on /api/v1/organizations/\"\n  assistant: \"Let me launch the debugger agent to investigate the 500 error.\"\n\n- user: \"The dashboard page is showing stale data after I update a chart\"\n  assistant: \"I'll use the debugger agent to investigate — could be SWR cache, missing backend caching, or both.\"\n\n- user: \"Users are getting stuck in a login redirect loop\"\n  assistant: \"Let me launch the debugger agent to trace the auth redirect flow across frontend and backend.\""
+description: "Diagnoses bugs across the full Dalgo stack — backend (Django/Python), frontend (Next.js/React), or cross-cutting. Accepts Sentry URLs, error messages, stack traces, or behavior descriptions. Uses Sentry MCP tools when a URL is provided.\n\nExamples:\n- user: \"Can you debug this Sentry issue? https://sentry.io/issues/DALGO-123/\"\n- user: \"The dashboard page is showing stale data after I update a chart\""
 model: opus
 ---
 
@@ -33,65 +33,10 @@ Follow this 4-phase approach for every bug:
 
 ---
 
-## Backend: DDP_backend (Django + Django Ninja)
+## Architecture References
 
-### Architecture
-
-```
-API Layer (ddpui/api/) → Core Layer (ddpui/core/) → Schema Layer (ddpui/schemas/) → Model Layer (ddpui/models/)
-```
-
-- **API Layer**: HTTP handling, schema validation, permissions (`@has_permission`), response wrapping (`api_response()`)
-- **Core Layer**: Business logic, orchestration, external service calls (dbt, Airbyte)
-- **Schema Layer**: Pydantic request/response validation, `from_model()` conversion
-- **Model Layer**: Django ORM only, no business logic
-- **Exceptions**: Feature-specific in `core/{module}/exceptions.py`, mapped to HTTP status in API layer
-- **Background tasks**: Celery with default worker + dedicated `canvas_dbt` worker
-
-Key conventions: no local imports, no barrel exports, `{module}_router` naming, `@has_permission` on all endpoints, `api_response()` wrapping.
-
-### Backend Key Files
-
-- Auth: `DDP_backend/ddpui/auth.py`
-- Role Models: `DDP_backend/ddpui/models/role_based_access.py`
-- Charts API: `DDP_backend/ddpui/api/charts_api.py`
-- Charts Service: `DDP_backend/ddpui/core/charts/charts_service.py`
-- Query Builder: `DDP_backend/ddpui/core/datainsights/query_builder.py`
-- Response Wrapper: `DDP_backend/ddpui/utils/response_wrapper.py`
-
----
-
-## Frontend: webapp_v2 (Next.js 15 + React 19)
-
-### Architecture
-
-- **Framework**: Next.js 15 with App Router, React 19, TypeScript
-- **Styling**: Tailwind CSS v4, Shadcn UI (Radix headless)
-- **State**: Zustand (global/auth), SWR (server state), React Hook Form (forms)
-- **Charts**: ECharts
-- **Auth**: Cookie-based JWT. Backend sets HTTP-only cookies. `lib/api.ts` intercepts 401s, refreshes token, retries.
-- **Multi-tenant**: `x-dalgo-org` header + localStorage org selection
-- **Testing**: Jest + React Testing Library (unit), Playwright (E2E)
-
-```
-app/           → App Router pages (thin wrappers)
-components/    → Feature-specific + ui/ components
-hooks/api/     → SWR-based data fetching hooks
-stores/        → Zustand stores (authStore)
-lib/           → API client, utils, SWR config, toast helpers
-```
-
-Conventions: no barrel exports, `data-testid` on interactive elements, `toastSuccess`/`toastError` (never raw `toast()`), CSS variables for colors (never hardcoded hex), no `any` types.
-
-### Frontend Key Files
-
-- API Client: `webapp_v2/lib/api.ts`
-- Auth Store: `webapp_v2/stores/authStore.ts`
-- SWR Config: `webapp_v2/lib/swr-config.ts`
-- Toast Helpers: `webapp_v2/lib/toast.ts`
-- Permissions Hook: `webapp_v2/hooks/api/usePermissions.ts`
-- Main Layout: `webapp_v2/components/main-layout.tsx`
-- Middleware: `webapp_v2/middleware.ts`
+- **Backend**: The `backend-architecture` skill has templates and examples. Read `DDP_backend/.claude/CLAUDE.md` for rules and conventions.
+- **Frontend**: The `frontend-architecture` skill has patterns and reference. Read `webapp_v2/CLAUDE.md` for rules and conventions.
 
 ---
 

@@ -65,6 +65,7 @@ Save as: `plans/{feature-name}_plan.md`
 - [ ] Clear implementation path for all affected service(s)
 - [ ] Error handling documented
 - [ ] Testing strategy defined
+- [ ] Technology choices evaluated (consider applying the `tal-lens` skill for non-trivial decisions)
 
 ## Next Step
 After saving the plan, print:

@@ -23,38 +23,7 @@ Provide one or more of:
 
 ### Step 2: Apply the UX Design Expert Lens
 
-Evaluate against professional design standards:
-
-**Visual Design**
-- Does the layout follow webapp_v2's page layout pattern (fixed header + scrollable content)?
-- Is spacing consistent with the 4px grid system (Tailwind defaults)?
-- Does typography follow the hierarchy (text-3xl for page headings, text-xl for sections, text-sm for secondary)?
-- Are colors using CSS variables (`var(--primary)`) not hardcoded hex values?
-
-**Component Choices**
-- Are the right Radix UI / Shadcn components being used?
-- Could a simpler component achieve the same result?
-- Are interactive elements large enough for touch targets (44x44px)?
-
-**Accessibility (WCAG AA)**
-- Color contrast: 4.5:1 for normal text, 3:1 for large text
-- Focus states: 2px ring with offset on all interactive elements
-- Keyboard navigation: Tab order, Enter to submit, Escape to close
-- Screen reader support: aria-labels on icon-only buttons, aria-live for dynamic content
-- Semantic HTML: button for actions, nav for navigation, main for content
-
-**Responsiveness**
-- Does it work on mobile viewports (<768px)?
-- Are forms using bottom sheets on mobile?
-- Is touch interaction considered?
-
-**Interaction Design**
-- Are loading states shown during async operations?
-- Are error states handled inline (not just alerts)?
-- Is there visual feedback for user actions?
-- Are destructive actions behind confirmation dialogs?
-
-Refer to `checklist.md` in this skill directory for the complete checklist.
+Evaluate against Dalgo's design standards using `checklist.md` in this skill directory. Compare component usage, spacing, colors, and patterns against `patterns.md`.
 
 ### Step 3: Apply the NGO User Lens
 
