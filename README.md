@@ -41,23 +41,28 @@ dalgo-core/
 
 ## Feature Lifecycle
 
-Two tracks depending on confidence level:
+### Spike Track (PM)
 
-### Spike Track (PM — fast validation)
+Quick validation with NGO partners before committing engineering time. PM owns this end-to-end.
 
-For ideas you want to test with an NGO partner before committing engineering time. PM owns this track end-to-end. Artifacts live in `prototypes/`, separate from engineering's `workdocs/`.
+| | |
+|---|---|
+| **Run** | `/product/prototype "feature idea"` |
+| **Saves to** | `prototypes/{feature-name}/brief.md` |
+| **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
+| **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
 
 ```mermaid
 flowchart TD
-    A["PM has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
-    B --> |"prototypes/{name}/brief.md"| C{"Build prototype?"}
-    C --> |Yes| D["Build with # PROTOTYPE markers"]
-    C --> |No| E["Share brief with team"]
+    A["PM has idea or NGO request"] --> B["Run: /product/prototype 'feature idea'"]
+    B --> |"saves prototypes/{name}/brief.md"| C{"Build prototype?"}
+    C --> |"Yes — Claude builds it"| D["Prototype code ready to test"]
+    C --> |"No"| E["Share brief with team"]
     D --> F["Test with NGO partner"]
     E --> F
     F --> G{Validated?}
-    G --> |"Yes"| H["/product/write-spec\n→ Engineering Track"]
-    G --> |"No"| I["Archive prototypes/{name}/\nDocument learnings"]
+    G --> |"Yes"| H["Run: /product/write-spec 'feature name'\n→ moves to Engineering Track"]
+    G --> |"No"| I["Delete prototypes/{name}/\nMove on"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
@@ -70,9 +75,9 @@ flowchart TD
     style I fill:#fef3c7,stroke:#f59e0b,color:#000
 ```
 
-### Engineering Track (spec → plan → build → ship)
+### Engineering Track
 
-For confirmed features that need production-quality implementation. Engineering owns this track. Artifacts live in `workdocs/`.
+Production-quality implementation for confirmed features. Engineering owns this. All artifacts in `workdocs/`.
 
 ```mermaid
 flowchart TD
@@ -101,30 +106,15 @@ flowchart TD
     style K fill:#fee2e2,stroke:#ef4444,color:#000
 ```
 
-### Spike vs Engineering — When to Use Which
+### When to use which
 
 | | Spike | Engineering |
 |---|---|---|
 | **Confidence** | "I think this might work" | "We know we need this" |
-| **Goal** | Validate with a real NGO user | Ship to production |
-| **Artifacts** | `prototypes/{name}/brief.md` | `workdocs/{name}/spec.md` → `plan.md` → code |
+| **Goal** | Validate with an NGO user | Ship to production |
 | **Time** | Hours | Days |
-| **Tests** | Manual, with the user | Automated + manual |
-| **Code quality** | Prototype — shortcuts documented | Production — reviewed, tested |
-| **Command** | `/product/prototype` | `/product/write-spec` → `/engineering/plan-feature` → `/engineering/execute-plan` |
-
-### PM vs Engineering Handoff
-
-| Step | Who | Command | Output |
-|------|-----|---------|--------|
-| Spike / prototype | PM | `/product/prototype "idea"` | `prototypes/{name}/brief.md` |
-| Write full spec | PM | `/product/write-spec "idea"` | `workdocs/{name}/spec.md` |
-| Scope an iteration | PM or Eng | `/product/write-spec workdocs/{name}` | `workdocs/{name}/v1/spec.md` |
-| Plan implementation | Engineering | `/engineering/plan-feature` | `workdocs/{name}/v1/plan.md` |
-| Iterate on plan | Engineering | Conversation | Updates to `plan.md` |
-| Execute | Engineering | `/engineering/execute-plan` | Code + `tasks.md` |
-| Quality gate | Engineering | `/engineering/ship-checklist` | Pass/fail report |
-| Review | Engineering | `/engineering/review-pr` | Structured review |
+| **Workspace** | `prototypes/` | `workdocs/` |
+| **Command** | `/product/prototype` | `/product/write-spec` → `/engineering/*` |
 
 ---
 

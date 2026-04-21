@@ -1,42 +1,53 @@
-# Quick Prototype
+# Spike: Quick Prototype
 
 ## Input: $ARGUMENTS
 
-Rapidly prototype a feature idea for testing with NGO partners. This skips the full spec/plan pipeline and gets to something testable fast.
+Fast-track a feature idea to something testable with NGO partners.
 
-**Use this when**: You want to validate an idea with a partner NGO before investing in a full spec. The goal is a working prototype in hours, not a production feature.
+## What the PM runs
 
-**Don't use this when**: The feature touches auth, billing, data deletion, or other sensitive areas. Use the full `/product/write-spec` → `/engineering/plan-feature` pipeline instead.
+```
+/product/prototype "let users bookmark dashboard charts"
+```
+
+## What it produces
+
+```
+prototypes/{feature-name}/
+└── brief.md          ← 1-page prototype brief
+```
+
+## When to use
+
+- You want to test an idea with a partner NGO before writing a full spec
+- The goal is validation in hours, not a production feature
+- The feature does NOT touch auth, billing, or data deletion
+
+---
 
 ## Process
 
-### Step 1: Understand the Idea (2 min)
+### 1. Parse the idea
 
-Parse `$ARGUMENTS` — this is either:
-- An inline idea (e.g. `"let users bookmark dashboard charts"`)
-- A file path to rough notes or a conversation transcript
+`$ARGUMENTS` is either:
+- An inline idea in quotes (e.g. `"show data freshness on dashboard"`)
+- A file path to rough notes
 
-Identify:
-- **The problem** — one sentence, what pain does this solve?
-- **The user** — which NGO role cares? (program manager, data coordinator, admin)
-- **The test** — how would an NGO user tell us if this works?
+From the input, identify:
+- **Problem** — one sentence
+- **User** — which NGO role (program manager, data coordinator, admin)
+- **Validation** — how will we know it works?
 
-### Step 2: Quick Codebase Scan (3 min)
+### 2. Quick codebase scan
 
-Do a fast, targeted search — not a deep analysis:
-- Where in the codebase does this feature naturally live?
-- Is there existing UI/API surface to hook into?
-- Any similar pattern already implemented that we can reuse?
+Fast, targeted — not a deep analysis:
+- Where does this feature naturally live in the code?
+- Existing UI/API to hook into?
+- Similar pattern to reuse?
 
-Keep notes brief. No separate research file needed.
-
-### Step 3: Write the Prototype Brief
-
-Create a single-page brief. This is NOT a spec — it's a napkin sketch with just enough structure to build from.
+### 3. Write the brief
 
 Save to: `prototypes/{feature-name}/brief.md`
-
-Use this template:
 
 ```markdown
 # Prototype: {Feature Name}
@@ -45,88 +56,77 @@ Use this template:
 **Status**: Prototype — not production-ready
 **Goal**: Validate {what} with {which NGO/user type}
 
-## Problem (1-2 sentences)
-{What pain does this solve? How do users handle it today?}
+## Problem
+{1-2 sentences. What pain does this solve? How do users handle it today?}
 
 ## What We're Building
-{3-5 bullet points describing what the prototype does. Be concrete — "user clicks X, sees Y" not "enable data-driven insights"}
+{3-5 bullet points. Be concrete — "user clicks X, sees Y" not "enable data-driven insights"}
 
 ## What We're NOT Building
-{2-3 things that are explicitly out of scope for the prototype}
+{2-3 things explicitly out of scope}
 
 ## How We'll Know It Works
-{2-3 concrete validation criteria — things you'd ask the NGO user after testing}
 - [ ] {User can do X without help}
 - [ ] {User understands what Y means}
-- [ ] {User says "this is better than what I do in Excel"}
+- [ ] {User prefers this over their current Excel workflow}
 
 ## Quick Plan
-{Ordered list of implementation steps. Each step should be small and independently testable.}
-
-1. **{Step}**: {what to do} → {what's working after this step}
-2. **{Step}**: {what to do} → {what's working after this step}
-3. ...
+1. **{Step}**: {what to do} → {what works after this}
+2. **{Step}**: {what to do} → {what works after this}
 
 ### Where It Lives
-- **Backend**: {file/module path, or "no backend changes"}
-- **Frontend**: {file/component path, or "no frontend changes"}
-- **Pattern to follow**: {link to similar existing feature in codebase}
+- **Backend**: {file/module, or "no backend changes"}
+- **Frontend**: {file/component, or "no frontend changes"}
+- **Pattern to follow**: {existing similar feature}
 
-## Prototype Shortcuts (tech debt we're accepting)
-{List the corners we're deliberately cutting. This makes it explicit and easier to clean up later.}
-- {e.g., "Hardcoded to one org for now"}
+## Shortcuts We're Taking
+- {e.g., "Hardcoded to one org"}
 - {e.g., "No error handling for edge case X"}
-- {e.g., "Skipping unit tests — will add when promoting to full feature"}
-
-## Next Steps After Validation
-- If it works: promote to full spec with `/product/write-spec "{feature name}"`
-- If it doesn't: document what we learned in this file and archive
+- {e.g., "No tests — will add when promoting"}
 ```
 
-### Step 4: Ask Before Building
+### 4. Stop and ask
 
-After saving the brief, print:
+Print:
 
 ```
-Prototype brief saved to: prototypes/{feature-name}/brief.md
+Brief saved to: prototypes/{feature-name}/brief.md
 
-Ready to build? Options:
-1. Build it now — I'll implement the quick plan above
-2. Revise — tell me what to change in the brief
-3. Just the brief — I'll stop here, you'll build it manually
+What next?
+1. Build it — I'll implement the quick plan
+2. Revise — tell me what to change
+3. Done — I'll build it myself
 ```
 
-Wait for the user's response before proceeding to implementation.
+Wait for the PM's response.
 
-### Step 5: Build (if user says go)
+### 5. Build (only if PM says go)
 
-If the user says to build:
-
-1. Follow the Quick Plan steps in order
-2. After each step, briefly confirm what's done
-3. Keep changes minimal — this is a prototype, not production code
-4. Mark shortcuts explicitly with `# PROTOTYPE` comments in code so they're easy to find later
-5. Don't write tests unless the user asks — prototype velocity matters more
+- Follow the Quick Plan steps in order
+- Keep changes minimal
+- Mark shortcuts with `# PROTOTYPE` comments in code
+- Skip tests unless asked
 
 When done, print:
 
 ```
-Prototype built. Changes:
-- {file1}: {what changed}
-- {file2}: {what changed}
+Prototype built.
 
-Test it by: {concrete steps to try the feature}
+Files changed:
+- {file}: {what changed}
 
-When you've validated with users:
-- Promote to full feature: /product/write-spec "{feature name}"
-- Or discard: delete the prototype code and prototypes/{feature-name}/
+Try it: {steps to test the feature}
+
+Next:
+- Validated? → /product/write-spec "{feature name}"
+- Didn't work? → delete prototype code + prototypes/{feature-name}/
 ```
+
+---
 
 ## Guidelines
 
-- **Speed over polish.** A working prototype today beats a perfect spec next week.
-- **One page max.** If the brief is longer than one page, the scope is too big — split it.
-- **Real words, not jargon.** Write the brief so a PM can share it with the NGO partner.
-- **Smallest testable thing.** What's the minimum that validates the idea? Build that.
-- **Explicit shortcuts.** Every corner cut should be documented so promotion to full feature is smooth.
-- **No gold-plating.** If you're adding error handling "just in case," you're over-building.
+- **One page max.** If the brief is longer, the scope is too big — split it.
+- **Smallest testable thing.** What's the minimum that validates the idea?
+- **Plain language.** Write so a PM can share the brief directly with the NGO partner.
+- **Document every shortcut.** Makes promotion to full feature smooth.
