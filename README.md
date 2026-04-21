@@ -47,27 +47,30 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 
 | | |
 |---|---|
-| **Run** | `/product/prototype "feature idea"` |
+| **Run** | `/product/prototype "feature idea"` or `/product/prototype path/to/notes.md` |
 | **Saves to** | `prototypes/{feature-name}/brief.md` |
 | **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
+| **Review** | `/design-review` — reviews prototype UI for NGO usability before showing to users |
 | **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
 
 ```mermaid
 flowchart TD
-    A["PM has idea or NGO request"] --> B["Run: /product/prototype 'feature idea'"]
+    A["PM has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
     B --> |"saves prototypes/{name}/brief.md"| C{"Build prototype?"}
-    C --> |"Yes — Claude builds it"| D["Prototype code ready to test"]
+    C --> |"Yes — Claude builds it"| D["Prototype code ready"]
     C --> |"No"| E["Share brief with team"]
-    D --> F["Test with NGO partner"]
+    D --> DR["/design-review\nReview prototype for NGO usability"]
+    DR --> F["Test with NGO partner"]
     E --> F
     F --> G{Validated?}
-    G --> |"Yes"| H["Run: /product/write-spec 'feature name'\n→ moves to Engineering Track"]
+    G --> |"Yes"| H["/product/write-spec 'feature name'\n→ Engineering Track"]
     G --> |"No"| I["Delete prototypes/{name}/\nMove on"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#fff,stroke:#6b7280,color:#000
+    style DR fill:#fdf4ff,stroke:#a855f7,color:#000
     style E fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
