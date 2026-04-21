@@ -202,14 +202,14 @@ Pre-merge quality gate. Runs lint, tests, migration checks, scans diff for commo
 
 ## Agents
 
-Agents are specialized personas that Claude invokes automatically when the context matches.
+Agents are specialized personas that Claude invokes automatically when the context matches. Agents use skills as reference material for their decisions.
 
-| Agent | What It Does |
-|-------|-------------|
-| **debugger** | Diagnoses bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. |
-| **senior-product-manager** | Product strategy and feature specs. Prioritization, roadmap, build-vs-buy, spec writing. |
-| **ux-design-expert** | UI/UX design using Dalgo's design system (Shadcn, teal brand, Tailwind). |
-| **ngo-data-platform-consultant** | Evaluates features as "Priya" — a non-technical NGO program manager. |
+| Agent | What It Does | Skills Used |
+|-------|-------------|-------------|
+| **debugger** | Diagnoses bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. | `backend-architecture`, `frontend-architecture` |
+| **senior-product-manager** | Product strategy and feature specs. Prioritization, roadmap, build-vs-buy, spec writing. | None — uses its own evaluation framework |
+| **ux-design-expert** | UI/UX design using Dalgo's design system (Shadcn, teal brand, Tailwind). | `design-review` (patterns.md for design system reference) |
+| **ngo-data-platform-consultant** | Evaluates features as "Priya" — a non-technical NGO program manager. | None — uses its own NGO persona framework |
 
 ---
 
