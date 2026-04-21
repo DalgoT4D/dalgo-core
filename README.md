@@ -41,33 +41,38 @@ dalgo-core/
 
 ## Feature Lifecycle
 
-### Spike Track (PM)
+### Spike Track (PM or Anyone)
 
 Quick validation with NGO partners before committing engineering time. PM owns this end-to-end.
 
 | | |
 |---|---|
-| **Run** | `/product/prototype "feature idea"` |
+| **Run** | `/product/prototype "feature idea"` or `/product/prototype path/to/notes.md` |
 | **Saves to** | `prototypes/{feature-name}/brief.md` |
 | **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
+| **Review** | `/design-review` — reviews prototype UI for NGO usability before showing to users |
 | **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
+
+<img width="483" height="88" alt="Screenshot 2026-04-21 at 12 53 17 PM" src="https://github.com/user-attachments/assets/1a3135cf-bf03-4b1b-8a07-4ed7d3024d32" />
 
 ```mermaid
 flowchart TD
-    A["PM has idea or NGO request"] --> B["Run: /product/prototype 'feature idea'"]
-    B --> |"saves prototypes/{name}/brief.md"| C{"Build prototype?"}
-    C --> |"Yes — Claude builds it"| D["Prototype code ready to test"]
-    C --> |"No"| E["Share brief with team"]
-    D --> F["Test with NGO partner"]
+    A["Idea or NGO request"] --> B["/product/prototype"]
+    B --> |"brief.md"| C{"Build?"}
+    C --> |Yes| D["Code ready"]
+    C --> |No| E["Share brief"]
+    D --> DR["/design-review"]
+    DR --> F["Test with NGO"]
     E --> F
-    F --> G{Validated?}
-    G --> |"Yes"| H["Run: /product/write-spec 'feature name'\n→ moves to Engineering Track"]
-    G --> |"No"| I["Delete prototypes/{name}/\nMove on"]
+    F --> G{Works?}
+    G --> |Yes| H["/product/write-spec"]
+    G --> |No| I["Archive"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#fff,stroke:#6b7280,color:#000
+    style DR fill:#fdf4ff,stroke:#a855f7,color:#000
     style E fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
@@ -81,17 +86,17 @@ Production-quality implementation for confirmed features. Engineering owns this.
 
 ```mermaid
 flowchart TD
-    A["Feature idea or validated spike"] --> B["/product/write-spec 'idea'"]
-    B --> |"workdocs/{name}/spec.md"| C["/product/write-spec workdocs/{name}"]
-    C --> |"workdocs/{name}/v1/spec.md"| D["/engineering/plan-feature"]
-    D --> |"v1/plan.md + research.md"| E["Engineer reviews & iterates plan"]
+    A["Idea or validated spike"] --> B["/product/write-spec"]
+    B --> |"spec.md"| C["Scope version"]
+    C --> |"v1/spec.md"| D["/engineering/plan-feature"]
+    D --> |"plan.md"| E["Review & iterate"]
     E --> F["/engineering/execute-plan"]
-    F --> |"code + v1/tasks.md"| G["/engineering/ship-checklist"]
-    G --> H["Push + /engineering/review-pr"]
+    F --> |"code"| G["/engineering/ship-checklist"]
+    G --> H["/engineering/review-pr"]
     H --> I["Merge + Deploy"]
-    I --> J{What next?}
-    J --> |"Bug in prod"| K["/engineering/debug-issue"]
-    J --> |"Ready for v2"| C
+    I --> J{Next?}
+    J --> |Bug| K["/engineering/debug-issue"]
+    J --> |v2| C
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
@@ -197,14 +202,14 @@ Pre-merge quality gate. Runs lint, tests, migration checks, scans diff for commo
 
 ## Agents
 
-Agents are specialized personas that Claude invokes automatically when the context matches.
+Agents are specialized personas that Claude invokes automatically when the context matches. Agents use skills as reference material for their decisions.
 
-| Agent | What It Does |
-|-------|-------------|
-| **debugger** | Diagnoses bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. |
-| **senior-product-manager** | Product strategy and feature specs. Prioritization, roadmap, build-vs-buy, spec writing. |
-| **ux-design-expert** | UI/UX design using Dalgo's design system (Shadcn, teal brand, Tailwind). |
-| **ngo-data-platform-consultant** | Evaluates features as "Priya" — a non-technical NGO program manager. |
+| Agent | What It Does | Skills Used |
+|-------|-------------|-------------|
+| **debugger** | Diagnoses bugs across the full stack — Django backend, Next.js frontend, or cross-cutting. | `backend-architecture`, `frontend-architecture` |
+| **senior-product-manager** | Product strategy and feature specs. Prioritization, roadmap, build-vs-buy, spec writing. | None — uses its own evaluation framework |
+| **ux-design-expert** | UI/UX design using Dalgo's design system (Shadcn, teal brand, Tailwind). | `design-review` (patterns.md for design system reference) |
+| **ngo-data-platform-consultant** | Evaluates features as "Priya" — a non-technical NGO program manager. | None — uses its own NGO persona framework |
 
 ---
 
