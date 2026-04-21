@@ -57,16 +57,16 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 
 ```mermaid
 flowchart TD
-    A["Anyone has idea or NGO request"] --> B["/product/prototype 'feature idea'"]
-    B --> |"saves prototypes/{name}/brief.md"| C{"Build prototype?"}
-    C --> |"Yes — Claude builds it"| D["Prototype code ready"]
-    C --> |"No"| E["Share brief with team"]
-    D --> DR["/design-review\nReview prototype for NGO usability"]
-    DR --> F["Test with NGO partner"]
+    A["Idea or NGO request"] --> B["/product/prototype"]
+    B --> |"brief.md"| C{"Build?"}
+    C --> |Yes| D["Code ready"]
+    C --> |No| E["Share brief"]
+    D --> DR["/design-review"]
+    DR --> F["Test with NGO"]
     E --> F
-    F --> G{Validated?}
-    G --> |"Yes"| H["/product/write-spec 'feature name'\n→ Engineering Track"]
-    G --> |"No"| I["Delete prototypes/{name}/\nMove on"]
+    F --> G{Works?}
+    G --> |Yes| H["/product/write-spec"]
+    G --> |No| I["Archive"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
@@ -86,17 +86,17 @@ Production-quality implementation for confirmed features. Engineering owns this.
 
 ```mermaid
 flowchart TD
-    A["Feature idea or validated spike"] --> B["/product/write-spec 'idea'"]
-    B --> |"workdocs/{name}/spec.md"| C["/product/write-spec workdocs/{name}"]
-    C --> |"workdocs/{name}/v1/spec.md"| D["/engineering/plan-feature"]
-    D --> |"v1/plan.md + research.md"| E["Engineer reviews & iterates plan"]
+    A["Idea or validated spike"] --> B["/product/write-spec"]
+    B --> |"spec.md"| C["Scope version"]
+    C --> |"v1/spec.md"| D["/engineering/plan-feature"]
+    D --> |"plan.md"| E["Review & iterate"]
     E --> F["/engineering/execute-plan"]
-    F --> |"code + v1/tasks.md"| G["/engineering/ship-checklist"]
-    G --> H["Push + /engineering/review-pr"]
+    F --> |"code"| G["/engineering/ship-checklist"]
+    G --> H["/engineering/review-pr"]
     H --> I["Merge + Deploy"]
-    I --> J{What next?}
-    J --> |"Bug in prod"| K["/engineering/debug-issue"]
-    J --> |"Ready for v2"| C
+    I --> J{Next?}
+    J --> |Bug| K["/engineering/debug-issue"]
+    J --> |v2| C
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000
