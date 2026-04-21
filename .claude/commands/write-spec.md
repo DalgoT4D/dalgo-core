@@ -10,8 +10,8 @@ Turn a feature idea into a structured spec document.
 - If `$ARGUMENTS` looks like a file path (contains `/` or ends in `.md`/`.txt`), read it as input.
 - Otherwise, treat `$ARGUMENTS` as an inline feature description.
 
-### Step 2: Check for Existing Specs
-Search `specs/` for existing specs on similar topics.
+### Step 2: Check for Existing Work
+Search `workdocs/` for an existing folder with a similar feature name.
 - If a related spec exists, inform the user and ask whether to update the existing spec or create a new one.
 - Avoid creating duplicate specs for the same feature area.
 
@@ -19,7 +19,7 @@ Search `specs/` for existing specs on similar topics.
 Use the senior-product-manager agent approach to produce a structured spec:
 
 1. **Understand the idea** — Parse the input, identify the core problem being solved.
-2. **Research context** — Search the codebase for related features, check existing plans in `plans/`.
+2. **Research context** — Search the codebase for related features, check existing workdocs for related plans.
 3. **Pressure-test from user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
 4. **Structure the spec** with these sections:
    - Problem Statement — What problem, for whom?
@@ -32,18 +32,18 @@ Use the senior-product-manager agent approach to produce a structured spec:
    - Handoff Checklist — Is this ready for `/plan-feature`?
 
 ### Step 4: Save the Spec
-Save to: `specs/{feature-name}_spec.md`
+Save to: `workdocs/{feature-name}/spec.md`
 
-Use a kebab-case feature name derived from the core feature concept.
+Use a kebab-case feature name derived from the core feature concept. Create the directory if it doesn't exist.
 
 ### Step 5: Print Next Step
 After saving, print:
 
 ```
-Spec saved to: specs/{feature-name}_spec.md
+Spec saved to: workdocs/{feature-name}/spec.md
 
 When ready for implementation planning, run:
-/plan-feature specs/{feature-name}_spec.md
+/plan-feature workdocs/{feature-name}/spec.md
 ```
 
 ## Guidelines

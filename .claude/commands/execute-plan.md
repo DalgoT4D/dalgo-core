@@ -4,14 +4,14 @@ Implement a feature using the planning document.
 
 ## Planning document: $ARGUMENTS
 
-Make sure to always generate a `{feature_name}_tasks.md` first and mark the tasks that are finished as you execute them.
+Make sure to always generate a `tasks.md` in the same `workdocs/{feature-name}/` folder and mark tasks as finished as you execute them.
 This should be your checkpoint when you start. So you don't have to repeat stuff.
-If the file is not present, you can create a new one in root directory or else use an existing one to figure out where to start from.
+If the file is not present, create one. If it exists, use it to figure out where to start from.
 
 ## Execution Process
 
 1. **Load the planning document**
-   - Read the specified planning document file from `plans/`
+   - Read the specified planning document file
    - Understand all context and requirements
    - Follow all instructions in the planning document and extend the research if needed
    - Ensure you have all needed context to implement the planning document fully

@@ -10,8 +10,13 @@ dalgo-core/
 │   ├── agents/          # Specialized AI agents (auto-invoked by context)
 │   ├── commands/        # Slash commands (step-by-step workflows)
 │   └── skills/          # Evaluation lenses / thinking frameworks
-├── specs/               # Feature specifications
-├── plans/               # Implementation plans
+├── workdocs/
+│   └── {feature-name}/  # Each feature gets its own folder
+│       ├── spec.md      # Feature specification
+│       ├── plan.md      # Implementation plan
+│       └── tasks.md     # Execution progress checkpoint
+├── DDP_backend -> ../DDP_backend   (symlink, gitignored)
+└── webapp_v2 -> ../webapp_v2       (symlink, gitignored)
 ```
 
 ## Three Types of Tools
@@ -32,13 +37,13 @@ The full journey from idea to production, with each tool connected to the next:
 Idea
  │
  ▼
-/write-spec                    →  specs/{name}_spec.md
+/write-spec                              →  workdocs/{name}/spec.md
  │
  ▼
-/plan-feature specs/{name}_spec.md   →  plans/{name}_plan.md
+/plan-feature workdocs/{name}/spec.md    →  workdocs/{name}/plan.md
  │
  ▼
-/execute-plan plans/{name}_plan.md   →  code changes + {name}_tasks.md
+/execute-plan workdocs/{name}/plan.md    →  code changes + workdocs/{name}/tasks.md
  │
  ▼
 /ship-checklist                →  pre-merge quality gate (read-only)
@@ -74,27 +79,26 @@ Turn a rough feature idea into a structured spec with problem statement, user st
 
 ```
 /write-spec "scheduled report emails for dashboard owners"
-/write-spec specs/scheduled-reports_spec.md
 ```
-**Output:** `specs/{feature-name}_spec.md`
-**Next step:** `/plan-feature specs/{feature-name}_spec.md`
+**Output:** `workdocs/{feature-name}/spec.md`
+**Next step:** `/plan-feature workdocs/{feature-name}/spec.md`
 
 ### `/plan-feature`
 Create a detailed implementation plan from a spec — architecture, affected services, API design, testing strategy.
 
 ```
-/plan-feature specs/scheduled-reports_spec.md
+/plan-feature workdocs/scheduled-reports/spec.md
 ```
-**Output:** `plans/{feature-name}_plan.md`
-**Next step:** `/execute-plan plans/{feature-name}_plan.md`
+**Output:** `workdocs/{feature-name}/plan.md`
+**Next step:** `/execute-plan workdocs/{feature-name}/plan.md`
 
 ### `/execute-plan`
 Implement a feature following the plan. Creates a checkpoint file to track progress across sessions.
 
 ```
-/execute-plan plans/scheduled-reports_plan.md
+/execute-plan workdocs/scheduled-reports/plan.md
 ```
-**Creates:** `{feature_name}_tasks.md` for progress tracking
+**Creates:** `workdocs/{feature-name}/tasks.md` for progress tracking
 **Next step:** `/ship-checklist`
 
 ### `/debug-issue`
@@ -153,8 +157,8 @@ Skills are evaluation lenses — they shift how Claude thinks about a problem.
 ### New Feature (idea → code → merge)
 ```
 /write-spec "feature idea"
-/plan-feature specs/{name}_spec.md
-/execute-plan plans/{name}_plan.md
+/plan-feature workdocs/{name}/spec.md
+/execute-plan workdocs/{name}/plan.md
 /ship-checklist
 # push + create PR
 /review-pr <pr-number>

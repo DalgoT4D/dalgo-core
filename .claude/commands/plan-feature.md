@@ -4,14 +4,13 @@
 
 Generate a complete planning document for feature implementation with thorough research.
 
-## Pre-Check: Look for Existing Spec
+## Pre-Check: Look for Existing Work
 
-Before starting research, check if a spec exists:
-1. If `$ARGUMENTS` points to a file in `specs/`, use it as the primary input.
-2. Otherwise, extract the feature name and check `specs/{feature-name}_spec.md`.
-3. Also check `plans/` for existing plans on the same topic.
-4. If a spec is found, use it as the primary input alongside the feature file. The spec provides problem statement, user stories, scope, and open questions that should inform the plan.
-5. If no spec exists, proceed with the standard research process below.
+Before starting research:
+1. If `$ARGUMENTS` points to a file (e.g. `workdocs/{feature-name}/spec.md`), use it as the primary input.
+2. Otherwise, extract the feature name and check `workdocs/{feature-name}/` for an existing spec or plan.
+3. If a spec is found, use it as the primary input. The spec provides problem statement, user stories, scope, and open questions that should inform the plan.
+4. If no spec exists, proceed with the standard research process below.
 
 ## Research Process
 
@@ -57,7 +56,9 @@ Before starting research, check if a spec exists:
 - Success criteria should have the test cases pass.
 
 ## Output
-Save as: `plans/{feature-name}_plan.md`
+Save as: `workdocs/{feature-name}/plan.md`
+
+Create the directory if it doesn't exist. If a spec already exists in the same folder, the plan sits alongside it.
 
 ## Quality Checklist
 - [ ] All necessary context included
@@ -65,8 +66,7 @@ Save as: `plans/{feature-name}_plan.md`
 - [ ] Clear implementation path for all affected service(s)
 - [ ] Error handling documented
 - [ ] Testing strategy defined
-- [ ] Technology choices evaluated (consider applying the `tal-lens` skill for non-trivial decisions)
 
 ## Next Step
 After saving the plan, print:
-"Next: Run `/execute-plan plans/{feature-name}_plan.md` to implement"
+"Next: Run `/execute-plan workdocs/{feature-name}/plan.md` to implement"
