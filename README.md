@@ -59,10 +59,15 @@ flowchart TD
     G --> |"Yes"| H["/product/write-spec\n→ Engineering Track"]
     G --> |"No"| I["Archive prototypes/{name}/\nDocument learnings"]
 
-    style A fill:#f3f4f6,stroke:#6b7280
-    style B fill:#dbeafe,stroke:#3b82f6
-    style H fill:#d1fae5,stroke:#10b981
-    style I fill:#fef3c7,stroke:#f59e0b
+    style A fill:#f3f4f6,stroke:#6b7280,color:#000
+    style B fill:#dbeafe,stroke:#3b82f6,color:#000
+    style C fill:#fff,stroke:#6b7280,color:#000
+    style D fill:#fff,stroke:#6b7280,color:#000
+    style E fill:#fff,stroke:#6b7280,color:#000
+    style F fill:#fff,stroke:#6b7280,color:#000
+    style G fill:#fff,stroke:#6b7280,color:#000
+    style H fill:#d1fae5,stroke:#10b981,color:#000
+    style I fill:#fef3c7,stroke:#f59e0b,color:#000
 ```
 
 ### Engineering Track (spec → plan → build → ship)
@@ -83,15 +88,17 @@ flowchart TD
     J --> |"Bug in prod"| K["/engineering/debug-issue"]
     J --> |"Ready for v2"| C
 
-    style A fill:#f3f4f6,stroke:#6b7280
-    style B fill:#dbeafe,stroke:#3b82f6
-    style C fill:#dbeafe,stroke:#3b82f6
-    style D fill:#e0e7ff,stroke:#6366f1
-    style F fill:#e0e7ff,stroke:#6366f1
-    style G fill:#fce7f3,stroke:#ec4899
-    style H fill:#fce7f3,stroke:#ec4899
-    style I fill:#d1fae5,stroke:#10b981
-    style K fill:#fee2e2,stroke:#ef4444
+    style A fill:#f3f4f6,stroke:#6b7280,color:#000
+    style B fill:#dbeafe,stroke:#3b82f6,color:#000
+    style C fill:#dbeafe,stroke:#3b82f6,color:#000
+    style D fill:#e0e7ff,stroke:#6366f1,color:#000
+    style E fill:#fff,stroke:#6b7280,color:#000
+    style F fill:#e0e7ff,stroke:#6366f1,color:#000
+    style G fill:#fce7f3,stroke:#ec4899,color:#000
+    style H fill:#fce7f3,stroke:#ec4899,color:#000
+    style I fill:#d1fae5,stroke:#10b981,color:#000
+    style J fill:#fff,stroke:#6b7280,color:#000
+    style K fill:#fee2e2,stroke:#ef4444,color:#000
 ```
 
 ### Spike vs Engineering — When to Use Which
