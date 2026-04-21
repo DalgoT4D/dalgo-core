@@ -4,7 +4,7 @@ Implement a feature using the planning document.
 
 ## Planning document: $ARGUMENTS
 
-Make sure to always generate a `tasks.md` in the same `workdocs/{feature-name}/` folder and mark tasks as finished as you execute them.
+Make sure to always generate a `tasks.md` in the same version folder (e.g. `workdocs/{feature-name}/v1/tasks.md`) and mark tasks as finished as you execute them.
 This should be your checkpoint when you start. So you don't have to repeat stuff.
 If the file is not present, create one. If it exists, use it to figure out where to start from.
 
@@ -12,6 +12,7 @@ If the file is not present, create one. If it exists, use it to figure out where
 
 1. **Load the planning document**
    - Read the specified planning document file
+   - Also read the research.md in the same folder if it exists
    - Understand all context and requirements
    - Follow all instructions in the planning document and extend the research if needed
    - Ensure you have all needed context to implement the planning document fully
@@ -25,6 +26,7 @@ If the file is not present, create one. If it exists, use it to figure out where
 3. **Execute the plan**
    - Implement all the code
    - Follow existing codebase patterns and conventions
+   - Work through milestones in order
 
 4. **Validate**
    - Make sure all services where code was changed are up & running
