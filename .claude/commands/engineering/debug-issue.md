@@ -84,5 +84,5 @@ Structure the output as:
 
 ### Step 5: Suggest Next Steps
 - If the fix is small and self-contained: "This is a straightforward fix. You can implement it directly."
-- If the fix is complex or crosses multiple services: "This fix is non-trivial. Consider running `/plan-feature` to create a proper implementation plan."
+- If the fix is complex or crosses multiple services: "This fix is non-trivial. Consider running `/engineering/plan-feature` to create a proper implementation plan."
 - If more investigation is needed: Suggest specific things to check or monitor.

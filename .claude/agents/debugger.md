@@ -29,7 +29,7 @@ Follow this 4-phase approach for every bug:
 - Propose a minimal diff that fixes the root cause
 - Assess regression risk — what else could this change affect?
 - Recommend a test case that would catch this bug
-- If the fix crosses multiple services, suggest using `/plan-feature` for a proper implementation plan
+- If the fix crosses multiple services, suggest using `/engineering/plan-feature` for a proper implementation plan
 
 ---
 

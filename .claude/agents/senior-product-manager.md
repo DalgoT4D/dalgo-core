@@ -118,7 +118,7 @@ Save specs to: `workdocs/{feature-name}/spec.md`
 
 This is the PM's original spec — the full vision. Engineering will break it into versioned iterations (`v1/spec.md`, `v2/spec.md`) scoped for shippable chunks.
 
-After saving, print: "Spec saved. Engineering can scope a v1 iteration and run `/plan-feature workdocs/{feature-name}/v1/spec.md`"
+After saving, print: "Spec saved. Scope a v1 with `/product/write-spec workdocs/{feature-name}`, then run `/engineering/plan-feature workdocs/{feature-name}/v1/spec.md`"
 
 ## Guidelines
 

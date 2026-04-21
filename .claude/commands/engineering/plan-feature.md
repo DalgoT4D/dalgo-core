@@ -116,4 +116,4 @@ Also save research to: `workdocs/{feature-name}/{version}/research.md`
 
 ## Next Step
 After saving the plan, print:
-"Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/execute-plan workdocs/{feature-name}/{version}/plan.md` to implement."
+"Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/engineering/execute-plan workdocs/{feature-name}/{version}/plan.md` to implement."

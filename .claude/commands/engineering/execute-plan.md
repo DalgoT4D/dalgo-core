@@ -42,8 +42,8 @@ If the file is not present, create one. If it exists, use it to figure out where
    - Read the plan again to ensure you have implemented everything
 
 6. **Pre-merge check**
-   - Suggest running `/ship-checklist` before committing
-   - Print: "Implementation complete. Run `/ship-checklist` to verify before merge."
+   - Suggest running `/engineering/ship-checklist` before committing
+   - Print: "Implementation complete. Run `/engineering/ship-checklist` to verify before merge."
 
 7. **Reference the plan**
    - You can always reference the planning document again if needed

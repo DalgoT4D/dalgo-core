@@ -16,12 +16,13 @@ Dalgo is an open-source data platform for NGOs. It replaces manual Excel/Google 
 Commands chain together — each step's output feeds into the next:
 
 ```
-/write-spec "feature idea"     → specs/{name}_spec.md
-/plan-feature specs/{name}     → plans/{name}_plan.md
-/execute-plan plans/{name}     → implements the code
-/ship-checklist                → pre-merge quality gate
-/review-pr <PR#>               → structured code review
-/debug-issue <Sentry URL>      → diagnose production bugs
+/product/write-spec "feature idea"          → workdocs/{name}/spec.md
+/product/write-spec workdocs/{name}         → workdocs/{name}/v1/spec.md (scope a version)
+/engineering/plan-feature workdocs/{name}/v1/spec.md → workdocs/{name}/v1/plan.md
+/engineering/execute-plan workdocs/{name}/v1/plan.md → implements the code
+/engineering/ship-checklist                 → pre-merge quality gate
+/engineering/review-pr <PR#>                → structured code review
+/engineering/debug-issue <Sentry URL>       → diagnose production bugs
 ```
 
 ## Skills (evaluation lenses)
