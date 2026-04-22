@@ -153,7 +153,7 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 
 ### Metric *(arriving in v1 of the Metrics & KPIs spec)*
 - **One-line identity:** A named, saved aggregation (e.g. "Active Students") — defined once in the library, referenced from Charts, KPIs, and Alerts.
-- **What it is (detail):** New DB model per the Metrics & KPIs spec. Two creation modes: Simple (`column_expression + aggregation`) and SQL (`sql_expression` returning numeric scalar). No filters, no tags. Validated on save by executing a test query against the warehouse. Serialized via `MetricSchema` for API responses; converted to `ChartMetric` when used in chart query execution.
+- **What it is (detail):** New DB model per the Metrics & KPIs spec. Two definition paths (mutually exclusive): Simple (`column` + `aggregation` via dropdowns) or Expression (`column_expression` — free-text for complex aggregations). No filters, no tags. Validated on save by executing a test query against the warehouse. Serialized via `MetricSchema` for API responses; converted to `ChartMetric` when used in chart query execution.
 - **Consumes:** Warehouse (`query-from`), Transform (`query-from`).
 - **Consumed by:**
   - Chart (`reference` — via `saved_metric_id` in `extra_config.metrics[]`)
@@ -352,7 +352,7 @@ Update order for the next team review session:
    - Explore (picker is NOT reused per Pratiksha — confirmed 2026-04-21; confirm any other MetricsSelector integrations)
    - Data Quality check (blocking vs non-blocking?)
    - Alert (paired spec shape)
-   - Metric / KPI (promote to `verified` after v1 ships; Metric has two modes: simple + SQL, no filters, no tags)
+   - Metric / KPI (promote to `verified` after v1 ships; Metric has two paths: simple column+agg or expression, no filters, no tags)
 2. Promote `draft` entries — read the actual models:
    - Source (`models/airbyte.py`, `ddpairbyte/`)
    - Warehouse (org config + adapter layer)
