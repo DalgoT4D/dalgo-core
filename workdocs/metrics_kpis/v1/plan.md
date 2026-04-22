@@ -14,7 +14,7 @@ Build the end-to-end chain: **Metric creation → reuse in charts → KPI defini
 
 **Services affected:**
 - **DDP_backend** — New Metric + KPI models, CRUD APIs, warehouse query execution for metric values, reference tracking
-- **webapp_v2** — Metrics library page, KPI page, KPI detail drawer, MeasureSelector refactor, KPI dashboard chart
+- **webapp_v2** — Metrics library page, KPI page, KPI detail drawer, MetricsSelector refactor, KPI dashboard chart
 
 **Not affected:** prefect-proxy (freshness polling deferred to follow-up)
 
@@ -26,7 +26,7 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 
 | Surface | Hop | Why affected | Edge type | Status | Notes |
 |---------|-----|-------------|-----------|--------|-------|
-| **Chart** | 1 from Metric | Charts can reference saved Metrics as Measures | `reference` | **In scope** | US-3: MeasureSelector refactor + saved Metric tab |
+| **Chart** | 1 from Metric | Charts can reference saved Metrics | `reference` | **In scope** | US-3: MetricsSelector refactor + saved Metric tab |
 | **KPI** | 1 from Metric | KPI has required FK to Metric | `reference` | **In scope** | US-4: Define a KPI |
 | **Dashboard** | 1 from KPI | KPI chart is a new DashboardComponentType | `compose` | **In scope** | US-7: KPI dashboard chart |
 | **Dashboard** | 2 from Metric (via Chart) | Charts with saved Metrics appear on dashboards | `compose` | **Auto-inherited** | No extra work — chart render already handles this |
@@ -34,11 +34,11 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 | **ReportSnapshot** | 2 from KPI (via Dashboard) | New KPI chart type needs render support in `frozen_chart_configs` | `snapshot-of` | **In scope** | Milestone 4: freeze KPI chart data into snapshot configs |
 | **Share link (live Dashboard)** | 2 from KPI (via Dashboard) | KPI charts auto-render on publicly shared dashboards | `embed` (live) | **Auto-inherited (OK)** | User confirmed this is acceptable. No extra filtering needed. |
 | **Share link (ReportSnapshot)** | 3 from KPI | Same as ReportSnapshot — render support needed | `embed` | **In scope** | Milestone 4: auto-inherited once ReportSnapshot handles KPI charts |
-| **Explore** | — | Explore does NOT reuse MeasureSelector (confirmed by Pratiksha 2026-04-21) | — | **Not affected** | Explore keeps its own picker; Saved Metrics land there in a future iteration |
+| **Explore** | — | Explore does NOT reuse MetricsSelector (confirmed by Pratiksha 2026-04-21) | — | **Not affected** | Explore keeps its own picker; Saved Metrics land there in a future iteration |
 | **Notification** | 3 from KPI (via Alert→Notification) | Only affected if Alerts fire on KPIs | `trigger` | **Not affected** | Blocked by Alert being deferred |
 
 ### Known v2 debt from this table
-1. **Explore** should eventually get Saved Metrics support via the shared MeasureSelector.
+1. **Explore** should eventually get Saved Metrics support via the shared MetricsSelector.
 2. **Alert → Metric/KPI integration** ships with the Alerts feature.
 
 ---
@@ -57,7 +57,7 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 │  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘ │
 │         │                 │                   │         │
 │  ┌──────┴─────────────────┴───────────────────┴───────┐ │
-│  │              MeasureSelector                       │ │
+│  │              MetricsSelector                       │ │
 │  │         (Saved Metrics tab + Ad-hoc tab)           │ │
 │  └────────────────────────┬───────────────────────────┘ │
 └───────────────────────────┼─────────────────────────────┘
@@ -86,7 +86,9 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 
 **Metric value computation:**
 1. Frontend requests metric preview or KPI current value
-2. Backend resolves Metric → builds `AggQueryBuilder` with column + aggregation
+2. Backend resolves Metric:
+   - Simple mode → builds `AggQueryBuilder` with column expression + aggregation
+   - SQL mode → executes raw SQL expression
 3. Executes against org's warehouse via `WarehouseFactory`
 4. Returns scalar numeric result
 
@@ -127,12 +129,14 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 |----------|--------|-----------|
 | **RAG computation** | Query-time, not stored | Values change when warehouse data refreshes; storing would go stale |
 | **Metric value caching** | No caching in v1 | Simpler; add Redis caching in v2 if needed |
-| **Metric has no filters** | Metric stores only column + aggregation | Filters belong on the chart or KPI level, not on the reusable metric definition |
+| **Metric has no filters, no tags** | Metric stores column expression + aggregation (Simple) or raw SQL (SQL mode) | Lean reusable entity; filters and tags belong on consumers |
+| **Two creation modes** | Simple (column expression + aggregation) and SQL (raw SQL scalar) | Simple covers most cases; SQL for complex calculations |
+| **Column expression validation** | Free-text field; query executed on save to verify it computes to a valid column | Guardrail against invalid expressions without restricting power users |
+| **No "measure" rename** | Keep `ChartMetric` and `MetricsSelector` as-is | Chart builder adds a "Saved Metrics" tab; no terminology change needed |
+| **MetricSchema layer** | DB `Metric` model → `MetricSchema` → convert to `ChartMetric` for query | Clean separation: persisted entity → API schema → chart-specific inline shape |
 | **KPI-Metric relationship** | Strict FK (required), `on_delete=PROTECT` | Every KPI must have exactly one Metric; delete-blocked pattern from spec |
 | **Dashboard KPI chart** | New component type `kpi` in `DashboardComponentType` | Aligns with existing `chart`/`text`/`heading` pattern |
-| **Saved Metric in chart builder** | `saved_metric_id` in `extra_config.metrics[]` | Extends existing ChartMeasure pattern without breaking ad-hoc mode |
-| **ChartMetric → ChartMeasure rename** | Rename existing `ChartMetric` schema to `ChartMeasure` everywhere | One `Metric` entity in the codebase; inline chart configs use "measure" terminology |
-| **MetricSchema layer** | DB `Metric` model → `MetricSchema` → convert to `ChartMeasure` for query | Clean separation: persisted entity → API schema → chart-specific inline shape |
+| **Saved Metric in chart builder** | `saved_metric_id` in `extra_config.metrics[]` | Extends existing ChartMetric pattern without breaking ad-hoc mode |
 | **Trend time-series query** | Group by `DATE_TRUNC(time_grain, dimension_col)` | Reuses existing `apply_time_grain()` from charts_service |
 | **KPI trendline rendering** | ECharts sparkline component | Used for KPI card (KPI page), KPI dashboard chart, and frozen KPI chart in ReportSnapshots |
 | **ReportSnapshot** | In scope (Milestone 4) | KPI chart data frozen into `frozen_chart_configs`; commenting support included |
@@ -147,6 +151,10 @@ Derived from `docs/domain-map.md` by traversing 1-hop and 2-hop consumers of the
 #### Metric model (`ddpui/models/metric.py` — new file)
 
 ```python
+class MetricMode(models.TextChoices):
+    SIMPLE = "simple"   # column expression + aggregation
+    SQL = "sql"         # raw SQL expression returning numeric scalar
+
 class Metric(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
@@ -156,12 +164,17 @@ class Metric(models.Model):
     schema_name = models.CharField(max_length=255)
     table_name = models.CharField(max_length=255)
 
-    # Simple mode: column + aggregation
-    column = models.CharField(max_length=255, null=True, blank=True)  # null for COUNT(*)
-    aggregation = models.CharField(max_length=30)  # sum/avg/count/min/max/count_distinct
+    # Creation mode
+    mode = models.CharField(max_length=10, choices=MetricMode.choices)
 
-    # Tags
-    tags = models.JSONField(default=list, blank=True)  # ["education", "quarterly"]
+    # Simple mode: column expression + aggregation
+    # column_expression is free-text (e.g. "amount", "col_a - col_b")
+    # Validated on save by executing a test query against the warehouse
+    column_expression = models.TextField(null=True, blank=True)
+    aggregation = models.CharField(max_length=30, null=True, blank=True)  # sum/avg/count/min/max/count_distinct
+
+    # SQL mode: raw SQL expression returning a numeric scalar
+    sql_expression = models.TextField(null=True, blank=True)
 
     # Org scoping + ownership (same pattern as Chart)
     org = models.ForeignKey("Org", on_delete=models.CASCADE)
@@ -177,6 +190,11 @@ class Metric(models.Model):
             models.UniqueConstraint(fields=["org", "name"], name="unique_metric_name_per_org")
         ]
 ```
+
+**Validation on save:**
+- For `simple` mode: build `SELECT AGG(column_expression) FROM schema.table LIMIT 1` and execute against warehouse. If query fails, reject with error.
+- For `sql` mode: execute `SELECT (sql_expression) LIMIT 1` against warehouse. Must return a single numeric value. If query fails or returns non-numeric, reject with error.
+- This ensures every saved Metric is a valid, executable definition.
 
 #### KPI model (same file)
 
@@ -237,28 +255,32 @@ class MetricCreate(Schema):
     description: Optional[str] = None
     schema_name: str
     table_name: str
-    column: Optional[str] = None
-    aggregation: str
-    tags: List[str] = []
+    mode: str  # "simple" or "sql"
+    # Simple mode fields
+    column_expression: Optional[str] = None  # e.g. "amount", "col_a - col_b"
+    aggregation: Optional[str] = None        # sum/avg/count/min/max/count_distinct
+    # SQL mode field
+    sql_expression: Optional[str] = None     # raw SQL returning numeric scalar
 
 class MetricUpdate(Schema):
     name: Optional[str] = None
     description: Optional[str] = None
-    column: Optional[str] = None
+    column_expression: Optional[str] = None
     aggregation: Optional[str] = None
-    tags: Optional[List[str]] = None
+    sql_expression: Optional[str] = None
 
 class MetricSchema(Schema):
     """Serializes DB Metric model → API response. Also used when resolving
-    saved_metric_id in chart builder before converting to ChartMeasure."""
+    saved_metric_id in chart builder before converting to ChartMetric."""
     id: int
     name: str
     description: Optional[str]
     schema_name: str
     table_name: str
-    column: Optional[str]
-    aggregation: str
-    tags: List[str]
+    mode: str
+    column_expression: Optional[str]
+    aggregation: Optional[str]
+    sql_expression: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -269,17 +291,6 @@ class MetricPreviewResponse(Schema):
 class MetricConsumersResponse(Schema):
     charts: List[dict]   # [{id, title, chart_type}]
     kpis: List[dict]     # [{id, name}]
-```
-
-#### ChartMeasure (`ddpui/schemas/chart_schema.py` — rename from `ChartMetric`)
-
-```python
-class ChartMeasure(Schema):
-    """Inline measure definition for chart extra_config.metrics[].
-    Renamed from ChartMetric to avoid confusion with the Metric DB entity."""
-    column: Optional[str] = None  # null for COUNT(*)
-    aggregation: str
-    alias: Optional[str] = None
 ```
 
 ```python
@@ -351,10 +362,11 @@ class KPITrendResponse(Schema):
 #### MetricService (`ddpui/services/metric_service.py` — new file)
 
 Key methods:
-- `create_metric(data, orguser)` → validates, creates Metric
+- `create_metric(data, orguser)` → validates mode-specific fields, runs validation query against warehouse, creates Metric
+- `validate_metric(metric, org_warehouse)` → executes test query to verify metric definition is valid
 - `get_metric(metric_id, org)` → fetch with org scoping
-- `list_metrics(org, search, dataset_filter, tags, page, page_size)` → paginated list
-- `update_metric(metric_id, org, orguser, **fields)` → update
+- `list_metrics(org, search, dataset_filter, page, page_size)` → paginated list
+- `update_metric(metric_id, org, orguser, **fields)` → update + re-validate if expression/aggregation changed
 - `delete_metric(metric_id, org, orguser)` → check for consumers first, block if referenced
 - `preview_metric_value(metric_id, org)` → build query, execute, return scalar
 - `get_metric_consumers(metric_id, org)` → find charts (scan `extra_config` for `saved_metric_id`) and KPIs (FK query)
@@ -363,10 +375,13 @@ Key methods:
 ```python
 def compute_metric_value(metric: Metric, org_warehouse: OrgWarehouse) -> float:
     warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
-    qb = AggQueryBuilder()
-    qb.fetch_from(metric.table_name, metric.schema_name)
-    qb.add_aggregate_column(metric.column, metric.aggregation, alias="metric_value")
-    results = execute_query(warehouse, qb)
+    if metric.mode == "simple":
+        qb = AggQueryBuilder()
+        qb.fetch_from(metric.table_name, metric.schema_name)
+        qb.add_aggregate_column(metric.column_expression, metric.aggregation, alias="metric_value")
+        results = execute_query(warehouse, qb)
+    elif metric.mode == "sql":
+        results = execute_raw_query(warehouse, metric.sql_expression)
     return results[0]["metric_value"] if results else None
 ```
 
@@ -410,7 +425,9 @@ def compute_rag_status(current_value, target_value, direction, green_pct, amber_
 
 When building a chart query and `extra_config.metrics[]` contains `{"saved_metric_id": 42}`:
 1. Resolve `Metric.objects.get(id=42, org=org)` in `charts_service.build_chart_data_payload()`
-2. Serialize to `MetricSchema`, then convert to `ChartMeasure(column=metric.column, aggregation=metric.aggregation)`
+2. Serialize to `MetricSchema`, then convert to `ChartMetric`:
+   - Simple mode: `ChartMetric(column=metric.column_expression, aggregation=metric.aggregation)`
+   - SQL mode: handled separately (inline the SQL expression into the query)
 3. Query execution proceeds as normal
 
 > **Open question:** Should the chart store only `saved_metric_id` (resolve at query time) or also snapshot column + aggregation alongside the reference? See §8 Open Questions.
@@ -429,8 +446,8 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 #### New Components
 
 **`components/metrics/`:**
-- `metrics-library.tsx` — List view with search, filter-by-dataset, filter-by-tag
-- `metric-form.tsx` — Create/edit form (dataset picker → column picker → aggregation → name/desc/tags → preview)
+- `metrics-library.tsx` — List view with search, filter-by-dataset
+- `metric-form.tsx` — Create/edit form (dataset picker → mode picker → [Simple: column expression + aggregation | SQL: sql expression] → name/desc → preview with validation)
 - `metric-card.tsx` — Card component for library grid
 - `metric-preview.tsx` — Shows computed value during creation
 
@@ -442,10 +459,9 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 - `kpi-chart.tsx` — Dashboard KPI chart renderer (value + target + RAG + trendline)
 
 **Modified `components/charts/`:**
-- Rename `MetricsSelector.tsx` → `MeasureSelector.tsx`
-- Add two tabs: "Saved Metrics" | "Ad-hoc"
+- Update `MetricsSelector.tsx` — add two tabs: "Saved Metrics" | "Ad-hoc"
 - "Saved Metrics" tab: searchable list filtered by current dataset
-- Update all imports across `ChartDataConfigurationV3.tsx`, `MapDataConfigurationV3.tsx`, tests
+- "Ad-hoc" tab: existing inline ChartMetric picker (unchanged)
 
 **Modified `components/dashboard/`:**
 - `chart-selector-modal.tsx` — Add "KPI" tab alongside charts
@@ -459,8 +475,7 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 
 #### New Types
 
-**`types/metrics.ts`** — Metric, MetricCreate, MetricUpdate interfaces
-**`types/charts.ts`** — Rename `ChartMetric` → `ChartMeasure` interface
+**`types/metrics.ts`** — Metric, MetricCreate, MetricUpdate, MetricMode interfaces
 **`types/kpis.ts`** — KPI, KPISummary, KPICreate, RAGStatus, RAG_COLORS
 
 ### 4.5 Navigation Updates
@@ -481,7 +496,10 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 
 ### Input Validation
 - All user input validated via Pydantic schemas at API boundary
-- `aggregation` validated against allowed list: `[sum, avg, count, min, max, count_distinct]`
+- `mode` validated: `[simple, sql]`
+- `aggregation` validated against allowed list: `[sum, avg, count, min, max, count_distinct]` (required for simple mode)
+- `column_expression` free-text but validated by executing test query on save
+- `sql_expression` free-text but validated by executing test query on save (must return single numeric scalar)
 - `direction` validated: `[increase, decrease]`
 - `time_grain` validated: `[daily, weekly, monthly, quarterly, yearly]`
 - `metric_type_tag` validated: `[input, output, outcome, impact]`
@@ -492,8 +510,9 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 - No cross-org data leakage possible
 
 ### Injection Risks
-- **No raw SQL**: All warehouse queries built via `AggQueryBuilder` (SQLAlchemy parameterized)
-- Column/table names come from warehouse metadata (user selects from dropdown, not free text)
+- **Simple mode**: column expressions are free-text but execute via `AggQueryBuilder` (SQLAlchemy parameterized) — expression is used as column reference, not interpolated into raw SQL
+- **SQL mode**: raw SQL expression entered by user, executed against their own org's warehouse. Risk is limited to the org's own data (no cross-org access). Validation query on save ensures expression is executable.
+- Column expressions validated on save — invalid expressions rejected before metric is persisted
 
 ### Public Share Impact
 - KPI charts auto-inherit on live public share URLs (confirmed acceptable)
@@ -512,11 +531,13 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 
 **Backend:**
 - `tests/services/test_metric_service.py`:
-  - Create metric with valid/invalid data
+  - Create metric in simple mode with valid/invalid column expression
+  - Create metric in SQL mode with valid/invalid sql expression
+  - Validation query rejects invalid expressions on save
   - List metrics with search, pagination
   - Delete metric blocked when referenced by KPI
   - Delete metric blocked when referenced by chart (saved_metric_id in extra_config)
-  - Preview metric value (mock warehouse)
+  - Preview metric value for both modes (mock warehouse)
 - `tests/services/test_kpi_service.py`:
   - Create KPI with valid/invalid metric_id
   - RAG computation: all combinations of direction × thresholds
@@ -538,12 +559,15 @@ When building a chart query and `extra_config.metrics[]` contains `{"saved_metri
 - `components/kpis/__tests__/`:
   - KPI card renders correct RAG color
   - KPI form defaults (amber threshold based on direction)
-- `components/charts/__tests__/MeasureSelector.test.tsx`:
+- `components/charts/__tests__/MetricsSelector.test.tsx`:
   - Tab switching between Saved Metrics and Ad-hoc
   - Saved metrics filtered by dataset
 
 ### Edge Cases
-- Metric with `COUNT(*)` (null column)
+- Metric with `COUNT(*)` (null column expression in simple mode)
+- Metric with column expression (e.g. `col_a - col_b`) — validation must confirm it computes to a valid numeric column
+- SQL mode metric with expression that returns non-numeric — validation rejects
+- SQL mode metric with expression that returns multiple rows — validation rejects
 - KPI without target (no RAG)
 - KPI with zero target (division by zero protection)
 - Empty warehouse table (no rows → null value)
@@ -557,57 +581,52 @@ Each milestone delivers a complete vertical slice (backend + frontend) that is t
 
 ### Milestone 1: Metrics + Chart Builder Integration
 
-**Deliverable:** Users can create, browse, edit, and delete metrics from the `/metrics` page with live value preview. Chart builder uses metrics via a refactored MeasureSelector with "Saved Metrics" and "Custom (Ad-hoc)" tabs. Existing `ChartMetric` renamed to `ChartMeasure` throughout.
+**Deliverable:** Users can create (Simple or SQL mode), browse, edit, and delete metrics from the `/metrics` page with validation on save and live value preview. Chart builder's MetricsSelector gets a "Saved Metrics" tab alongside the existing ad-hoc mode. Charts can reference saved metrics.
 
 **Services:** DDP_backend + webapp_v2
 
 **Backend tasks:**
-- [ ] Create `ddpui/models/metric.py` with `Metric` and `KPI` models
+- [ ] Create `ddpui/models/metric.py` with `Metric` (with `MetricMode`) and `KPI` models
 - [ ] Create migration `0158_metric_kpi.py` (tables + permission slugs)
 - [ ] Create `ddpui/schemas/metric_schema.py` (MetricSchema, MetricCreate, MetricUpdate, etc.)
-- [ ] Rename `ChartMetric` → `ChartMeasure` in `chart_schema.py` and all usages across backend
-- [ ] Create `ddpui/services/metric_service.py` (MetricService with CRUD + value computation)
+- [ ] Create `ddpui/services/metric_service.py` (MetricService with CRUD + validation query on save + value computation for both modes)
 - [ ] Modify `build_chart_data_payload()` in `charts_service.py` to resolve `saved_metric_id` references
-- [ ] When `saved_metric_id` present: resolve Metric → MetricSchema → convert to ChartMeasure
+- [ ] When `saved_metric_id` present: resolve Metric → MetricSchema → convert to ChartMetric (simple) or inline SQL (sql mode)
 - [ ] Create `ddpui/api/metric_api.py` (metric_router with CRUD + preview + consumers endpoints)
 - [ ] Register `metric_router` at `/api/metrics/` in `routes.py`
-- [ ] Write `tests/services/test_metric_service.py`
+- [ ] Write `tests/services/test_metric_service.py` (both modes, validation failures, expression edge cases)
 - [ ] Write `tests/api_tests/test_metric_api.py`
 
 **Frontend tasks:**
-- [ ] Create `types/metrics.ts`
-- [ ] Rename `ChartMetric` → `ChartMeasure` in `types/charts.ts` and all frontend usages
+- [ ] Create `types/metrics.ts` (Metric, MetricCreate, MetricUpdate, MetricMode)
 - [ ] Create `hooks/api/useMetrics.ts`
 - [ ] Create `components/metrics/metrics-library.tsx` (card grid with search/filter)
 - [ ] Create `components/metrics/metric-card.tsx`
-- [ ] Create `components/metrics/metric-form.tsx` (wizard: data source → column → aggregation → name/tags → preview)
+- [ ] Create `components/metrics/metric-form.tsx` (wizard: data source → mode picker → [Simple: column expression + aggregation | SQL: sql expression] → name/desc → preview with validation)
 - [ ] Create `components/metrics/metric-preview.tsx`
 - [ ] Create `app/metrics/page.tsx`
-- [ ] Rename `MetricsSelector.tsx` → `MeasureSelector.tsx`
-- [ ] Add two-tab UI: "Saved Metrics" | "Custom (Ad-hoc)"
+- [ ] Update `MetricsSelector.tsx` — add two tabs: "Saved Metrics" | "Ad-hoc"
 - [ ] Implement saved metrics tab: fetch from `/api/metrics/?schema_name=X&table_name=Y`
-- [ ] Update `ChartDataConfigurationV3.tsx` imports/usage
-- [ ] Update `MapDataConfigurationV3.tsx` imports/usage
-- [ ] Update labels from "Metric" to "Measure" across all chart type configs
 - [ ] Update `components/main-layout.tsx` — unhide Metrics nav item
 - [ ] Update tests (including existing `MetricsSelector.test.tsx`)
 - [ ] Write new frontend tests for metrics library
 
 **UI test plan — what you can verify after this milestone:**
 - [ ] Navigate to `/metrics` and see the metrics library (or empty state with CTA)
-- [ ] Click "Create Metric" → step through wizard: pick data source, field, calculation type
-- [ ] See live preview value at each step
-- [ ] Save metric → card appears in library with name, description, tags, current value
+- [ ] Click "Create Metric" → pick data source → choose Simple mode → enter column expression + aggregation → name/desc → save (validation query runs)
+- [ ] Click "Create Metric" → pick data source → choose SQL mode → enter SQL expression → name/desc → save (validation query runs)
+- [ ] Invalid expression → save rejected with error message
+- [ ] See live preview value during creation
+- [ ] Save metric → card appears in library with name, description, current value
 - [ ] Search by name, filter by data source
 - [ ] Edit a metric (click card → edit form)
 - [ ] Delete a metric (blocked if referenced — shows consumer list)
-- [ ] Open chart builder → see "Measure" section (not "Metrics")
-- [ ] Measure picker shows two tabs: "Saved Metrics" and "Custom (Ad-hoc)"
+- [ ] Open chart builder → MetricsSelector shows two tabs: "Saved Metrics" and "Ad-hoc"
 - [ ] Saved Metrics tab lists metrics filtered to the chart's current data source
 - [ ] Select a saved metric → chart preview updates correctly
-- [ ] Switch to Custom tab → existing ad-hoc behavior works exactly as before (no regression)
+- [ ] Switch to Ad-hoc tab → existing behavior works exactly as before (no regression)
 - [ ] Save chart with saved metric reference → chart renders correctly on dashboard
-- [ ] Create a new chart with ad-hoc measure → still works (backward compatibility)
+- [ ] Create a new chart with ad-hoc metric → still works (backward compatibility)
 
 ---
 
@@ -739,7 +758,7 @@ Each milestone delivers a complete vertical slice (backend + frontend) that is t
 | Warehouse query latency on KPI page (N queries for N KPIs) | Slow page load for orgs with many KPIs | Accept in v1; optimize with parallel queries or caching in v2 |
 | Time dimension column may not exist or have wrong type | Trend query fails | Validate column type during KPI creation; show error if not datetime |
 | Metric consumer tracking for charts relies on scanning `extra_config` JSON | Slow for orgs with many charts | Simple `Q(extra_config__contains=...)` filter; index if needed |
-| MeasureSelector rename may break existing chart builder usage | Regression in chart creation | Update all imports; run full test suite before merging |
+| MetricsSelector tab addition may break existing chart builder usage | Regression in chart creation | Run full test suite before merging |
 | ReportSnapshot won't render KPI charts (v2 debt) | Users snapshot a dashboard with KPI charts → broken render | Document limitation; consider graceful fallback (render placeholder instead of error) |
 
 ---
