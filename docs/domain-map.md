@@ -127,14 +127,14 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 
 ### Chart
 - **One-line identity:** A single visualization (bar / pie / line / number / map / table / pivot_table) configured via the chart builder, bound to a warehouse table.
-- **What it is (detail):** Currently stores `schema_name + table_name + extra_config` directly — no Metric reference. The v1 Metrics spec adds a reference path so Charts can point at saved Metrics as their Measure. Chart types are a fixed enum.
-- **Consumes:** Warehouse (`query-from`), Transform (`query-from`), Metric (`reference` — *arriving in v1 of Metrics spec*), ad-hoc column/aggregation picks inline.
+- **What it is (detail):** Stores `schema_name + table_name + extra_config`. The `extra_config.metrics[]` array contains `ChartMeasure` entries — either inline (`column + aggregation + alias`) or saved metric references (`saved_metric_id`). Chart types are a fixed enum.
+- **Consumes:** Warehouse (`query-from`), Transform (`query-from`), Metric (`reference` — via `saved_metric_id` in `extra_config.metrics[]`), ad-hoc ChartMeasure inline.
 - **Consumed by:**
   - Dashboard (`compose` — Charts are one of the DashboardComponentType values: CHART, TEXT, HEADING)
   - ReportSnapshot (`snapshot-of` Dashboard → captures `frozen_chart_configs` keyed by chart_id)
   - Explore page (`embed` — live exploration; relationship unclear — see Explore)
 - **Platform-specific behaviors:**
-  - Chart types are a **fixed enum**; adding a new type (e.g. a KPI widget) requires code changes, not config.
+  - Chart types are a **fixed enum**; adding a new type (e.g. a KPI chart) requires code changes, not config.
   - Chart config lives in `extra_config` as a JSON blob — loose schema, brittle to LLM introspection.
   - `computation_type` field is deprecated (kept for DB compatibility) — don't base new logic on it.
 - **Change impact:** Chart config ties to specific column names; upstream renames break rendering. Chart-type additions must be wired into both the builder and every render surface (Dashboard, ReportSnapshot, Explore, public share views).
@@ -142,52 +142,56 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 
 ### Measure *(sub-concept of Chart, not a standalone entity)*
 - **One-line identity:** The chart-builder's per-chart value picker — either a Saved Metric or an ad-hoc column+aggregation.
-- **What it is (detail):** Lives only in the chart-builder UI. Today the component is `MetricsSelector`; the v1 Metrics spec renames it `MeasureSelector` and adds a "Saved Metrics" tab.
+- **What it is (detail):** Lives in the chart-builder UI as `MeasureSelector` (renamed from `MetricsSelector`). Two modes: "Saved Metrics" tab (references a `Metric` by `saved_metric_id`) and "Custom (Ad-hoc)" tab (inline `ChartMeasure` with column + aggregation + alias). The backend schema for inline measures is `ChartMeasure` (renamed from `ChartMetric`).
 - **Consumes:** Metric (`reference`, optional), Warehouse column (`query-from`, inline mode).
 - **Consumed by:** Chart (`compose`).
-- **Platform-specific behaviors:** The terminology collision ("Metric" means one thing to users of the chart builder, another to KPI authors) is the exact reason the v1 spec introduces the rename.
-- **Change impact:** Rename affects screenshots, onboarding, and any user-facing copy that says "Metric" in a chart context.
+- **Platform-specific behaviors:**
+  - **Terminology:** "Measure" is the UI term in chart context; "Metric" is the saved, reusable entity. This separation eliminates the old "Metric" collision.
+  - `ChartMeasure` is the schema shape (`column + aggregation + alias`); `Metric` is the DB model. They are not interchangeable.
+- **Change impact:** Rename from MetricsSelector → MeasureSelector and ChartMetric → ChartMeasure affects all chart builder imports, tests, and user-facing copy.
 - **Confidence:** `draft`
 
 ### Metric *(arriving in v1 of the Metrics & KPIs spec)*
 - **One-line identity:** A named, saved aggregation (e.g. "Active Students") — defined once in the library, referenced from Charts, KPIs, and Alerts.
-- **What it is (detail):** New model per the Metrics & KPIs spec. Has `simple` / `derived` / `sql` creation modes (v1 simple only). Backed by a column + aggregation + optional filters.
+- **What it is (detail):** New DB model per the Metrics & KPIs spec. Stores `schema_name + table_name + column + aggregation` — no filters. Filters belong on the consumer (Chart or KPI level), not on the reusable metric definition. v1 uses simple mode only (column + aggregation); derived and SQL modes deferred. Serialized via `MetricSchema` for API responses; converted to `ChartMeasure` when used in chart query execution.
 - **Consumes:** Warehouse (`query-from`), Transform (`query-from`).
 - **Consumed by:**
-  - Chart (`reference` — as a Measure)
-  - KPI (`reference` — as base aggregation)
-  - Alert (`reference` — threshold evaluation against Metric value)
+  - Chart (`reference` — as a Measure via `saved_metric_id` in `extra_config.metrics[]`)
+  - KPI (`reference` — required FK, `on_delete=PROTECT`)
+  - Alert (`reference` — threshold evaluation against Metric value; deferred to Alerts spec)
 - **Platform-specific behaviors:**
   - **Does NOT have a direct render path to ReportSnapshot in Dalgo.** Metric values reach Reports only via Chart → Dashboard → ReportSnapshot. Do not treat Report as a direct Metric consumer.
-  - Delete-blocked if consumers exist (per v1 spec).
-  - v1 uses simple mode only; derived and SQL modes deferred.
-- **Change impact:** Formula/unit change flows live to every consumer on next evaluation. Renames are safe if consumers reference by ID; unsafe if by name. Deletion is blocked until consumers are removed.
+  - **One Metric entity in the codebase.** The existing inline chart config shape (`column + aggregation + alias`) is `ChartMeasure` (renamed from `ChartMetric`). `Metric` is the persisted, reusable entity; `ChartMeasure` is the inline, per-chart shape. When a chart uses a saved Metric, the resolution path is: `saved_metric_id` → `Metric` DB row → `MetricSchema` → `ChartMeasure`.
+  - Delete-blocked if consumers exist (Charts with `saved_metric_id` or KPIs with FK).
+- **Change impact:** Column/aggregation change flows live to every consumer on next evaluation. Renames are safe if consumers reference by ID. Deletion is blocked until consumers are removed.
 - **Confidence:** `tribal-knowledge-needed` — entity doesn't exist in code yet; this entry is written from the spec and must be re-confirmed once the feature ships.
 
 ### KPI *(arriving in v1 of the Metrics & KPIs spec)*
 - **One-line identity:** A Metric wrapped with target + direction + RAG thresholds + trendline; leadership-facing.
-- **What it is (detail):** New model. Has Metric FK, target, direction (increase/decrease), green/amber thresholds, time grain (daily/weekly/monthly/quarterly/yearly), trend periods, metric-type tag (Input/Output/Outcome/Impact).
+- **What it is (detail):** New model. Has Metric FK (`on_delete=PROTECT`), target, direction (increase/decrease), green/amber thresholds, time grain (daily/weekly/monthly/quarterly/yearly), trend periods, metric-type tag (Input/Output/Outcome/Impact).
 - **Consumes:** Metric (`reference` — required FK).
 - **Consumed by:**
-  - Dashboard (`compose` — new KPI widget type, v1 spec)
+  - Dashboard (`compose` — KPI chart type in `DashboardComponentType`)
+  - ReportSnapshot (2-hop via Dashboard — KPI chart data frozen into `frozen_chart_configs` at snapshot time)
   - Alert (`reference` — alerts can fire on RAG transitions; deferred to Alerts spec)
 - **Platform-specific behaviors:**
-  - Target is optional. If omitted, RAG is not shown — KPI renders as trend only.
+  - Target is optional. If omitted, RAG is not shown �� KPI renders as trend only.
   - RAG thresholds are % of target, with red auto-computed.
   - Per-KPI time grain (team feedback) — not a page-level filter.
-- **Change impact:** Target change recolors historical RAG — note on backdating. Threshold change affects Alert fire rate.
+  - KPI deletion cleans up references from dashboard `components` JSON.
+- **Change impact:** Target change recolors historical RAG — note on backdating. Threshold change affects Alert fire rate. KPI value/target changes appear live on dashboards and live share links, but NOT in already-captured ReportSnapshots (frozen).
 - **Confidence:** `tribal-knowledge-needed` — entity arriving in v1; confirm shape after ship.
 
 ### Dashboard
 - **One-line identity:** A user-composed canvas of Charts + text/heading blocks, with filters, optionally published for public viewing.
-- **What it is (detail):** Has `DashboardType` (NATIVE or SUPERSET), `DashboardComponentType` enum (CHART / TEXT / HEADING), a grid layout (`layout_config`), a JSON `components` blob, and separate `DashboardFilter` rows. Supports **two independent sharing surfaces**: live public share (via `is_public` + `public_share_token`) and snapshot share (via ReportSnapshot, with its *own* token).
-- **Consumes:** Chart (`compose`), filters (`compose`).
+- **What it is (detail):** Has `DashboardType` (NATIVE or SUPERSET), `DashboardComponentType` enum (CHART / TEXT / HEADING / KPI), a grid layout (`layout_config`), a JSON `components` blob, and separate `DashboardFilter` rows. Supports **two independent sharing surfaces**: live public share (via `is_public` + `public_share_token`) and snapshot share (via ReportSnapshot, with its *own* token).
+- **Consumes:** Chart (`compose`), KPI (`compose` — as KPI chart), filters (`compose`).
 - **Consumed by:**
   - ReportSnapshot (`snapshot-of` — freezes layout + chart configs at snapshot time)
   - Live public share view (`embed` — same Dashboard rendered behind a share token)
   - Explore page — no, Explore is separate (does not embed Dashboards)
 - **Platform-specific behaviors:**
-  - **Component types are a fixed enum (CHART / TEXT / HEADING).** Adding a new type (e.g. KPI widget) requires extending the enum and every render surface.
+  - **Component types are a fixed enum (CHART / TEXT / HEADING / KPI).** Adding a new type requires extending the enum and every render surface.
   - **Two sharing tokens exist:** Dashboard's `public_share_token` (live) and ReportSnapshot's `public_share_token` (frozen). Different URLs, different semantics.
   - `DashboardLock` provides editor-level concurrent-edit protection.
   - One dashboard per org can be marked `is_org_default` (landing page) — unique constraint enforced.
@@ -219,12 +223,12 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
   - Only mutable field is `summary` (executive-summary text).
   - Has its own `public_share_token` distinct from Dashboard's.
   - `period_start` + `period_end` define the date lens through which data is queried.
-- **Consumes:** Dashboard (`snapshot-of` — freezes dashboard config at snapshot time), Chart (`snapshot-of` — freezes chart configs), Warehouse (`query-from` — live data under a date filter).
+- **Consumes:** Dashboard (`snapshot-of` — freezes dashboard config at snapshot time), Chart (`snapshot-of` — freezes chart configs), KPI (`snapshot-of` — freezes KPI chart data: value, target, RAG, trend), Warehouse (`query-from` — live data under a date filter).
 - **Consumed by:** External stakeholders (terminal node inside Dalgo).
 - **Platform-specific behaviors:**
   - **This is the most commonly misunderstood entity in Dalgo.** It is **not** "a Dashboard with data frozen in time" — the **data is live**; the **layout and chart configs** are frozen. Two separate behaviors.
   - **Reports inherit new Dashboard widget types only for snapshots taken after the widget is added.** Existing snapshots stay as they were.
-  - **Adding a new chart type (e.g. KPI widget) requires updating ReportSnapshot's render code** to handle the new type in `frozen_chart_configs`, or the widget will fail to render in any snapshot that captured it.
+  - **KPI chart support in ReportSnapshot is in scope for v1** (Milestone 4). Snapshot creation freezes KPI chart data (current value, target, RAG status, trend) into `frozen_chart_configs`. Snapshot renders show the frozen values, not live.
   - **Report's public share is independent of Dashboard's public share.** Sharing a Dashboard publicly does NOT auto-share its snapshots.
   - No direct path from Metric or KPI to Report except via Dashboard → Chart.
 - **Change impact:**
@@ -317,7 +321,7 @@ With edge labels, the traversal now reasons about propagation semantics, not jus
 - Alert — `reference` → may flip fire state
 
 **2-hop (via Chart, KPI):**
-- Dashboard — `compose` on Chart + `compose` on KPI-widget → new Metric value appears in every dashboard that composed the affected Chart/KPI
+- Dashboard — `compose` on Chart + `compose` on KPI chart → new Metric value appears in every dashboard that composed the affected Chart/KPI
 - ReportSnapshot — `snapshot-of` Dashboard + `query-from` Warehouse → **frozen layout, live data**: historical snapshots render with the NEW Metric value, not the original (because data is live-queried). This is a non-obvious gotcha.
 - Share link (Dashboard mode) — `embed` → live; inherits change
 - Share link (ReportSnapshot mode) — `embed` → frozen layout, live data; inherits change
@@ -348,7 +352,7 @@ Update order for the next team review session:
    - Explore (picker is NOT reused per Pratiksha — confirmed 2026-04-21; confirm any other Measure-aware integrations)
    - Data Quality check (blocking vs non-blocking?)
    - Alert (paired spec shape)
-   - Metric / KPI (promote to `verified` after v1 ships)
+   - Metric / KPI (promote to `verified` after v1 ships; filters removed from Metric, ChartMetric→ChartMeasure rename confirmed)
 2. Promote `draft` entries — read the actual models:
    - Source (`models/airbyte.py`, `ddpairbyte/`)
    - Warehouse (org config + adapter layer)
