@@ -64,7 +64,9 @@ flowchart TD
     B --> |"brief.md"| C{"Build?"}
     C --> |Yes| D["Team review"]
     C --> |No| E["Share brief"]
-    D --> F["Test with NGO"]
+    D --> R{Ready?}
+    R --> |Yes| F["Test with NGO"]
+    R --> |No| C
     E --> F
     F --> G{Works?}
     G --> |Yes| H(["/product/write-spec"])
@@ -74,6 +76,7 @@ flowchart TD
     style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#fff,stroke:#6b7280,color:#000
+    style R fill:#fff,stroke:#6b7280,color:#000
     style E fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
