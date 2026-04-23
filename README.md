@@ -50,33 +50,34 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 | **Run** | `/product/prototype "feature idea"` or `/product/prototype path/to/notes.md` |
 | **Saves to** | `prototypes/{feature-name}/brief.md` |
 | **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
-| **Review** | `/design-review` — reviews prototype UI for NGO usability before showing to users |
+| **Review** | Team review before showing to users |
 | **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
 
 <img width="483" height="88" alt="Screenshot 2026-04-21 at 12 53 17 PM" src="https://github.com/user-attachments/assets/1a3135cf-bf03-4b1b-8a07-4ed7d3024d32" />
 
 ```mermaid
+---
+title: Spike Track
+---
 flowchart TD
-    A["Idea or NGO request"] --> B["/product/prototype"]
+    A["Idea or NGO request"] --> B(["/product/prototype"])
     B --> |"brief.md"| C{"Build?"}
-    C --> |Yes| D["Code ready"]
+    C --> |Yes| D["Team review"]
     C --> |No| E["Share brief"]
-    D --> DR["/design-review"]
-    DR --> F["Test with NGO"]
+    D --> F["Test with NGO"]
     E --> F
     F --> G{Works?}
-    G --> |Yes| H["/product/write-spec"]
+    G --> |Yes| H(["/product/write-spec"])
     G --> |No| I["Archive"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
-    style B fill:#dbeafe,stroke:#3b82f6,color:#000
+    style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#fff,stroke:#6b7280,color:#000
-    style DR fill:#fdf4ff,stroke:#a855f7,color:#000
     style E fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
-    style H fill:#d1fae5,stroke:#10b981,color:#000
+    style H fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style I fill:#fef3c7,stroke:#f59e0b,color:#000
 ```
 
@@ -85,30 +86,33 @@ flowchart TD
 Production-quality implementation for confirmed features. Engineering owns this. All artifacts in `workdocs/`.
 
 ```mermaid
+---
+title: Engineering Track
+---
 flowchart TD
-    A["Idea or validated spike"] --> B["/product/write-spec"]
+    A["Idea or validated spike"] --> B(["/product/write-spec"])
     B --> |"spec.md"| C["Scope version"]
-    C --> |"v1/spec.md"| D["/engineering/plan-feature"]
+    C --> |"v1/spec.md"| D(["/engineering/plan-feature"])
     D --> |"plan.md"| E["Review & iterate"]
-    E --> F["/engineering/execute-plan"]
-    F --> |"code"| G["/engineering/ship-checklist"]
-    G --> H["/engineering/review-pr"]
+    E --> F(["/engineering/execute-plan"])
+    F --> |"code"| G(["/engineering/ship-checklist"])
+    G --> H(["/engineering/review-pr"])
     H --> I["Merge + Deploy"]
     I --> J{Next?}
-    J --> |Bug| K["/engineering/debug-issue"]
+    J --> |Bug| K(["/engineering/debug-issue"])
     J --> |v2| C
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
-    style B fill:#dbeafe,stroke:#3b82f6,color:#000
-    style C fill:#dbeafe,stroke:#3b82f6,color:#000
-    style D fill:#e0e7ff,stroke:#6366f1,color:#000
+    style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style C fill:#fff,stroke:#6b7280,color:#000
+    style D fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style E fill:#fff,stroke:#6b7280,color:#000
-    style F fill:#e0e7ff,stroke:#6366f1,color:#000
-    style G fill:#fce7f3,stroke:#ec4899,color:#000
-    style H fill:#fce7f3,stroke:#ec4899,color:#000
+    style F fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style G fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style H fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style I fill:#d1fae5,stroke:#10b981,color:#000
     style J fill:#fff,stroke:#6b7280,color:#000
-    style K fill:#fee2e2,stroke:#ef4444,color:#000
+    style K fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
 ```
 
 ### When to use which
