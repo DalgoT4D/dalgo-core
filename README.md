@@ -56,9 +56,6 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 <img width="483" height="88" alt="Screenshot 2026-04-21 at 12 53 17 PM" src="https://github.com/user-attachments/assets/1a3135cf-bf03-4b1b-8a07-4ed7d3024d32" />
 
 ```mermaid
----
-title: Spike Track
----
 flowchart TD
     A["Idea or NGO request"] --> B(["/product/prototype"])
     B --> |"brief.md"| C["Build"]
@@ -86,9 +83,6 @@ flowchart TD
 Production-quality implementation for confirmed features. Engineering owns this. All artifacts in `workdocs/`.
 
 ```mermaid
----
-title: Engineering Track
----
 flowchart TD
     A["Idea or validated spike"] --> B(["/product/write-spec"])
     B --> |"spec.md"| C["Scope version"]
