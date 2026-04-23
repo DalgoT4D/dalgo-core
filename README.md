@@ -50,31 +50,33 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 | **Run** | `/product/prototype "feature idea"` or `/product/prototype path/to/notes.md` |
 | **Saves to** | `prototypes/{feature-name}/brief.md` |
 | **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
-| **Review** | Team review before showing to users |
+| **Review** | Show to the team before showing to users |
 | **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
 
 <img width="483" height="88" alt="Screenshot 2026-04-21 at 12 53 17 PM" src="https://github.com/user-attachments/assets/1a3135cf-bf03-4b1b-8a07-4ed7d3024d32" />
 
 ```mermaid
 flowchart TD
-    A["Idea or NGO request"] --> B(["/product/prototype"])
+    A["Idea or NGO request"] --> B["Prototype
+    Run /product/prototype"]
     B --> |"brief.md"| C["Build"]
-    C --> D["Team review"]
-    D --> R{Ready?}
-    R --> |Yes| F["Test with NGO"]
-    R --> |No| C
-    F --> G{Works?}
-    G --> |Yes| H(["/product/write-spec"])
-    G --> |No| I["Archive"]
+    C --> R{"Show to the team"}
+    R --> |"Approved"| F["Test with NGO"]
+    R --> C
+    R --> X["Discard"]
+    F --> G{Validated?}
+    G --> |Yes| H["Write spec
+    Run /product/write-spec"]
+    G --> |"Maybe / No"| I["Archive"]
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
-    style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style B fill:#fff,stroke:#6b7280,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
-    style D fill:#fff,stroke:#6b7280,color:#000
     style R fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
-    style H fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style H fill:#fff,stroke:#6b7280,color:#000
+    style X fill:#fef3c7,stroke:#f59e0b,color:#000
     style I fill:#fef3c7,stroke:#f59e0b,color:#000
 ```
 
@@ -84,34 +86,37 @@ Production-quality implementation for confirmed features. Engineering owns this.
 
 ```mermaid
 flowchart TD
-    A["Idea or validated spike"] --> B(["/product/write-spec"])
-    B --> |"spec.md"| DR["Design/UX review"]
-    DR --> DRG{Approved?}
-    DRG --> |Yes| C["Scope version"]
-    DRG --> |No| B
-    C --> |"v1/spec.md"| D(["/engineering/plan-feature"])
-    D --> |"plan.md"| E["Review & iterate"]
-    E --> F(["/engineering/execute-plan"])
-    F --> |"code"| G(["/engineering/ship-checklist"])
-    G --> H(["/engineering/review-pr"])
+    A["Write spec
+    Run /product/write-spec"] --> |"spec.md"| DR["Design/UX"]
+    DR --> |"spec.md + designs"| C["Scope version"]
+    DR --> A
+    C --> |"v1/spec.md"| D["Plan & iterate
+    Run /engineering/plan-feature"]
+    D --> |"plan.md"| F["Execute plan
+    Run /engineering/execute-plan"]
+    F --> DR2["Design review"]
+    DR2 --> G["Ship checklist
+    Run /engineering/ship-checklist"]
+    DR2 --> F
+    G --> H["Review PR
+    Run /engineering/review-pr"]
     H --> I["Merge + Deploy"]
     I --> J{Next?}
-    J --> |Bug| K(["/engineering/debug-issue"])
+    J --> |Bug| K["Debug issue
+    Run /engineering/debug-issue"]
     J --> |v2| C
 
-    style A fill:#f3f4f6,stroke:#6b7280,color:#000
-    style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style A fill:#fff,stroke:#6b7280,color:#000
     style DR fill:#fff,stroke:#6b7280,color:#000
-    style DRG fill:#fff,stroke:#6b7280,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
-    style D fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
-    style E fill:#fff,stroke:#6b7280,color:#000
-    style F fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
-    style G fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
-    style H fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style D fill:#fff,stroke:#6b7280,color:#000
+    style F fill:#fff,stroke:#6b7280,color:#000
+    style DR2 fill:#fff,stroke:#6b7280,color:#000
+    style G fill:#fff,stroke:#6b7280,color:#000
+    style H fill:#fff,stroke:#6b7280,color:#000
     style I fill:#d1fae5,stroke:#10b981,color:#000
     style J fill:#fff,stroke:#6b7280,color:#000
-    style K fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style K fill:#fff,stroke:#6b7280,color:#000
 ```
 
 ### When to use which
