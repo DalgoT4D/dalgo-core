@@ -85,7 +85,10 @@ Production-quality implementation for confirmed features. Engineering owns this.
 ```mermaid
 flowchart TD
     A["Idea or validated spike"] --> B(["/product/write-spec"])
-    B --> |"spec.md"| C["Scope version"]
+    B --> |"spec.md"| DR["Design/UX review"]
+    DR --> DRG{Approved?}
+    DRG --> |Yes| C["Scope version"]
+    DRG --> |No| B
     C --> |"v1/spec.md"| D(["/engineering/plan-feature"])
     D --> |"plan.md"| E["Review & iterate"]
     E --> F(["/engineering/execute-plan"])
@@ -98,6 +101,8 @@ flowchart TD
 
     style A fill:#f3f4f6,stroke:#6b7280,color:#000
     style B fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
+    style DR fill:#fff,stroke:#6b7280,color:#000
+    style DRG fill:#fff,stroke:#6b7280,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#dbeafe,stroke:#3b82f6,color:#000,stroke-width:2px
     style E fill:#fff,stroke:#6b7280,color:#000
