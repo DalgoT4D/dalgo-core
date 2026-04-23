@@ -61,8 +61,8 @@ title: Spike Track
 ---
 flowchart TD
     A["Idea or NGO request"] --> B(["/product/prototype"])
-    B --> |"brief.md"| C{"Build?"}
-    C --> |Yes| D["Team review"]
+    B --> |"brief.md"| C["Build"]
+    C --> D["Team review"]
     D --> R{Ready?}
     R --> |Yes| F["Test with NGO"]
     R --> |No| C
