@@ -1,62 +1,70 @@
 # Milestone 1 (COMPLETE)
 
 ## Backend
-- [x] Create `ddpui/models/metric.py` with Metric and KPI models
-- [x] Create migration `0158_metric_kpi.py` + seed permission data
-- [x] Create `ddpui/schemas/metric_schema.py`
-- [x] Create `ddpui/services/metric_service.py`
-- [x] Create `ddpui/api/metric_api.py` + register in `routes.py`
-- [x] Modify `charts_service.py` for `saved_metric_id` resolution (+ expression support via `literal_column`)
-- [x] Write `tests/services/test_metric_service.py` (29 tests)
-- [x] Write `tests/api_tests/test_metric_api.py` (19 tests)
+- [x] Metric + KPI models, migration `0158`, permissions (8 slugs), seed data (34 role mappings)
+- [x] Metric schemas, service (CRUD + validation + preview + consumers)
+- [x] Metric API: 7 endpoints at `/api/metrics/`
+- [x] Charts integration: `saved_metric_id` resolution + `column_expression` via `literal_column`
+- [x] Tests: 48 passing (29 service + 19 API)
 
 ## Frontend
-- [x] Create `types/metrics.ts`
-- [x] Create `hooks/api/useMetrics.ts`
-- [x] Create `components/metrics/metric-form-dialog.tsx` (DatasetSelector + column Combobox)
-- [x] Create `components/metrics/metrics-library.tsx` (table matching charts page pattern)
-- [x] Create `app/metrics/page.tsx`
-- [x] Update `MetricsSelector.tsx` — Saved Metrics / Ad-hoc tabs + inline Save button
-- [x] Update `ChartDataConfigurationV3.tsx` — pass schemaName/tableName to MetricsSelector
-- [x] Update `main-layout.tsx` — Metrics under Data section
-- [x] Update `types/charts.ts` — add saved_metric_id + column_expression to ChartMetric
-- [x] Update `chart_schema.py` — add column_expression to ChartMetric schema
+- [x] Types, hooks, metrics library page (table pattern matching charts page)
+- [x] Metric form dialog (DatasetSelector + column Combobox from warehouse)
+- [x] MetricsSelector: Saved Metrics / Ad-hoc tabs + inline Save button
+- [x] Navigation: Metrics under Data section
 
 ---
 
 # Milestone 2 (COMPLETE)
 
 ## Backend
-- [x] Create `ddpui/schemas/kpi_schema.py` (KPICreate, KPIUpdate, KPIResponse, KPIListResponse)
-- [x] Create `ddpui/services/kpi_service.py` (CRUD + RAG + `get_kpi_data()` + `_compute_trend()`)
-- [x] Implement `compute_rag_status()` pure function
-- [x] Implement `get_kpi_data()` — returns `{data, echarts_config}` (same pattern as chart data)
-- [x] Add `generate_kpi_trend_config()` to `EChartsConfigGenerator` (full + compact modes)
-- [x] Create `ddpui/api/kpi_api.py` — CRUD + `/{id}/data/` endpoint using `ChartDataResponse`
-- [x] Register `kpi_router` at `/api/kpis/` in `routes.py`
-- [x] Write `tests/services/test_kpi_service.py` (RAG computation, CRUD, dashboard cleanup, data)
-- [x] Write `tests/api_tests/test_kpi_api.py`
-- [x] All tests passing
+- [x] KPI schemas (KPICreate, KPIUpdate with `metric_id`, KPIResponse, KPIListResponse)
+- [x] KPI service: CRUD + RAG computation + `get_kpi_data()` + `_compute_trend()`
+- [x] `compute_rag_status()` pure function (direction-aware)
+- [x] `get_kpi_data()` returns `{data, echarts_config}` — line chart (with trend) or number chart (without)
+- [x] `generate_kpi_trend_config()` in EChartsConfigGenerator
+- [x] KPI API: CRUD + `/{id}/data/` endpoint, `metric_id` changeable on update
+- [x] Tests: 43 passing
 
 ## Frontend
-- [x] Create `types/kpis.ts` (KPI, KPICreate, KPIUpdate, RAG_COLORS, option constants)
-- [x] Create `hooks/api/useKPIs.ts` (useKPIs, useKPI, useKPIData, mutations)
-- [x] Create `components/kpis/kpi-page.tsx` — card grid with ECharts rendering via `/{id}/data/`
-- [x] Create `components/kpis/kpi-form.tsx` — 2-step form (Step 1: metric selection/creation, Step 2: KPI config)
-- [x] KPI form sections: Target & RAG Status, Time Configuration, Classification (metric type cards)
-- [x] Direction-aware RAG threshold defaults (increase: green=100/amber=80, decrease: green=100/amber=120)
-- [x] Time column dropdown filtered to date/timestamp types from warehouse
-- [x] Inline metric creation from KPI form step 1
-- [x] RAG badges on KPI cards (On Track / At Risk / Off Track)
-- [x] Create `app/kpis/page.tsx`
-- [x] Add KPIs nav item in `main-layout.tsx` (Target icon, between Impact and Charts)
-- [x] Filter by metric type + program tag on KPI page
-- [x] "Create KPI" action in metrics library dropdown (pre-fills metric in KPI form)
-- [x] Frontend builds successfully
+- [x] Types, hooks (useKPIs, useKPIData)
+- [x] KPI page: card grid with ECharts, value/target display, metric type + program tag filters
+- [x] KPI form: 2-step (metric selection → config), works for both create and edit
+- [x] Direction-aware RAG defaults, time column dropdown from warehouse, metric change resets time config
+- [x] "Create KPI" action in metrics library dropdown
+- [x] Number chart (gauge) when no time dimension, line chart when time dimension exists
+- [x] ECharts dispose/reinit on config type change
+- [x] Navigation: KPIs between Impact and Charts
 
-## Design decisions (deviations from plan)
-- Detail drawer removed — KPI cards show data directly with ECharts
-- Summary batch endpoint removed — cards fetch individually via `/{id}/data/`
-- KPI data endpoint uses `ChartDataResponse` schema — same pattern as charts
-- ECharts config generated server-side via `EChartsConfigGenerator`
-- KPI form is 2-step (metric selection → config) for both create and edit
+---
+
+# Milestone 3 (COMPLETE)
+
+## Backend
+- [x] Add `KPI = "kpi"` to `DashboardComponentType` enum
+- [x] Add `kpi` entry to `CHART_SIZE_CONSTRAINTS` (same size as standard charts)
+
+## Frontend
+- [x] Create `components/dashboard/kpi-chart-element.tsx` — fetches `/{id}/data/`, renders ECharts
+- [x] Update `chart-selector-modal.tsx` — Charts + KPIs tabs
+- [x] Update `dashboard-builder-v2.tsx` — KPI enum, `handleKPISelected`, render switch, action buttons (view + remove), `excludedKPIIds`
+- [x] Update `dashboard-native-view.tsx` — KPI case in view mode (public share works)
+- [x] KPI widget: same action button pattern as charts (hover overlay), no double borders
+- [x] All backend tests passing, frontend builds
+
+---
+
+# Milestone 4 (NOT STARTED)
+
+## Backend
+- [ ] Update ReportSnapshot creation to handle `kpi` component type in `frozen_chart_configs`
+- [ ] Freeze KPI data: current value, target, RAG status, trend data
+- [ ] Add `KPI = "kpi"` to `CommentTargetType` enum
+- [ ] Update comment service to accept `target_type="kpi"`
+- [ ] Tests for snapshot creation with KPI charts + commenting
+
+## Frontend
+- [ ] Update snapshot render code to handle `kpi` component type
+- [ ] Render frozen KPI chart (static data from snapshot, not live)
+- [ ] CommentPopover support for KPI charts in snapshot view
+- [ ] Tests
