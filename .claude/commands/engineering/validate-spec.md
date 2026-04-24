@@ -1,20 +1,34 @@
-# Pre-Merge Ship Checklist
+# Validate Spec
 
 ## Input: $ARGUMENTS
 
-Run automated quality checks before merging. Input is an optional branch name (defaults to current branch).
+Validate that the implementation matches the spec. Input is the path to the spec file (e.g. `workdocs/{feature-name}/v1/spec.md`). If no argument is provided, look for the most recent spec in `workdocs/`.
 
 ## Process
 
-### Step 1: Identify Changes
+### Step 1: Load the Spec
+
+- Read the spec file provided as input
+- Extract all requirements, acceptance criteria, and expected behaviors
+- Read the plan.md in the same folder if it exists
+
+### Step 2: Identify Changes
+
 ```bash
-# If branch specified, use it; otherwise use current branch
 git diff main...HEAD --stat
 ```
 
 Identify which files changed and which services are affected.
 
-### Step 2: Run Service-Specific Checks
+### Step 3: Validate Requirements Against Implementation
+
+For each requirement in the spec:
+- [ ] Find the corresponding implementation in the diff
+- [ ] Verify the implementation matches the spec's intent
+- [ ] Check that edge cases mentioned in the spec are handled
+- [ ] Verify any API contracts (endpoints, request/response shapes) match the spec
+
+### Step 4: Run Service-Specific Checks
 
 #### For DDP_backend Changes
 If any files under `DDP_backend/` changed:
@@ -28,7 +42,7 @@ If any files under `webapp_v2/` changed:
 - Run `npm run format:check` in webapp_v2
 - Run `npm test` for changed components (if test files exist)
 
-### Step 3: Scan Diff for Common Issues
+### Step 5: Scan Diff for Common Issues
 
 Scan the `git diff main...HEAD` output for these patterns:
 
@@ -55,14 +69,19 @@ Scan the `git diff main...HEAD` output for these patterns:
 - [ ] No large files (>500 lines) added without justification
 - [ ] No debug/development configuration left in code
 
-### Step 4: Output Checklist
+### Step 6: Output Report
 
 ```
-## Ship Checklist: {branch-name}
+## Spec Validation: {spec-path}
 
 **Branch**: {branch} → main
 **Files Changed**: {count}
 **Services Affected**: [list]
+
+### Spec Coverage
+- [COVERED/MISSING] Requirement 1: {description}
+- [COVERED/MISSING] Requirement 2: {description}
+...
 
 ### Automated Checks
 - [PASS/FAIL] Backend lint
@@ -82,7 +101,7 @@ Scan the `git diff main...HEAD` output for these patterns:
 - [PASS/FAIL] No .only/.skip in tests
 
 ### Result
-[ALL CLEAR — Ready to merge / {N} issue(s) found — see details above]
+[ALL CLEAR — Spec fully implemented / {N} issue(s) found — see details above]
 ```
 
 **Important:** All checks are read-only. This command does NOT modify code, auto-fix issues, or create commits. It only reports findings.

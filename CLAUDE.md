@@ -28,7 +28,7 @@ Skip the full pipeline. Get a working prototype to test with NGO partners. If va
 /product/write-spec workdocs/{name}         → workdocs/{name}/v1/spec.md (scope a version)
 /engineering/plan-feature workdocs/{name}/v1/spec.md → workdocs/{name}/v1/plan.md
 /engineering/execute-plan workdocs/{name}/v1/plan.md → implements the code
-/engineering/ship-checklist                 → pre-merge quality gate
+/engineering/validate-spec workdocs/{name}/v1/spec.md → validate implementation against spec
 /engineering/review-pr <PR#>                → structured code review
 /engineering/debug-issue <Sentry URL>       → diagnose production bugs
 ```

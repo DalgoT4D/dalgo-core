@@ -63,7 +63,7 @@ flowchart TD
     C --> R{"Show to the team"}
     R --> |"Approved"| F["Test with NGO"]
     R --> C
-    R --> X["Discard"]
+    R --> X["Reject"]
     F --> G{Validated?}
     G --> |Yes| H["Write spec
     Run /product/write-spec"]
@@ -95,8 +95,8 @@ flowchart TD
     D --> |"plan.md"| F["Execute plan
     Run /engineering/execute-plan"]
     F --> DR2["Design review"]
-    DR2 --> G["Ship checklist
-    Run /engineering/ship-checklist"]
+    DR2 --> G["Validate spec
+    Run /engineering/validate-spec"]
     DR2 --> F
     G --> H["Review PR
     Run /engineering/review-pr"]
@@ -180,7 +180,7 @@ Implement the feature following the plan, with checkpointing.
 /engineering/execute-plan workdocs/scheduled-reports/v1/plan.md
 ```
 **Creates:** `workdocs/{feature-name}/v1/tasks.md` for progress tracking
-**Next step:** `/engineering/ship-checklist`
+**Next step:** `/engineering/validate-spec`
 
 #### `/engineering/debug-issue`
 Diagnose a bug from a Sentry URL, error message, or behavior description.
@@ -199,11 +199,11 @@ Structured code review — checks service-specific conventions, security, testin
 ```
 Does NOT auto-post to GitHub — outputs the review for you to use.
 
-#### `/engineering/ship-checklist`
-Pre-merge quality gate. Runs lint, tests, migration checks, scans diff for common issues. Read-only.
+#### `/engineering/validate-spec`
+Validates the implementation against the spec. Checks that all spec requirements are met, runs lint, tests, and migration checks. Read-only.
 
 ```
-/engineering/ship-checklist
+/engineering/validate-spec
 ```
 
 ---
@@ -247,7 +247,7 @@ Agents are specialized personas that Claude invokes automatically when the conte
 /engineering/plan-feature workdocs/{name}/v1/spec.md
 # iterate on plan...
 /engineering/execute-plan workdocs/{name}/v1/plan.md
-/engineering/ship-checklist
+/engineering/validate-spec
 /engineering/review-pr <pr-number>
 ```
 
@@ -255,7 +255,7 @@ Agents are specialized personas that Claude invokes automatically when the conte
 ```
 /engineering/debug-issue "error description or Sentry URL"
 # implement the fix
-/engineering/ship-checklist
+/engineering/validate-spec
 ```
 
 ### Design Feedback
