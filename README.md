@@ -49,7 +49,7 @@ Quick validation with NGO partners before committing engineering time. PM owns t
 |---|---|
 | **Run** | `/product/prototype "feature idea"` or `/product/prototype path/to/notes.md` |
 | **Saves to** | `prototypes/{feature-name}/brief.md` |
-| **Then** | Optionally builds prototype code with `# PROTOTYPE` markers |
+| **Then** | Optionally builds prototype code in a separate branch |
 | **Review** | Show to the team before showing to users |
 | **After testing** | Validated → `/product/write-spec` to promote. Didn't work → archive & move on. |
 

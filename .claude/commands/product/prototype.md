@@ -104,7 +104,6 @@ Wait for the PM's response.
 
 - Follow the Quick Plan steps in order
 - Keep changes minimal
-- Mark shortcuts with `# PROTOTYPE` comments in code
 - Skip tests unless asked
 
 When done, print:
