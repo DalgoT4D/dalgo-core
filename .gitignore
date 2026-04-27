@@ -2,3 +2,10 @@
 # Symlinks to sibling repos (local only)
 DDP_backend
 webapp_v2
+
+# mac stuff
+.DS_Store
+.claude/.DS_Store
+
+# obsidian
+.obsidian/

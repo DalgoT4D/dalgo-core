@@ -63,7 +63,7 @@ flowchart TD
     C --> R{"Show to the team"}
     R --> |"Approved"| F["Test with NGO"]
     R --> C
-    R --> X["Reject"]
+    R --> |"Rejected"|X["Archive"]
     F --> G{Validated?}
     G --> |Yes| H["Write spec
     Run /product/write-spec"]
