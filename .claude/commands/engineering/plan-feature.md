@@ -16,8 +16,8 @@ Read these two files first — they are the canonical references for how Dalgo w
 Do not skip these. Without them, you will miss downstream surfaces and plan an incomplete feature. The reason this step exists: historically, specs have silently dropped downstream surfaces (e.g. a Metrics spec that forgot Reports) because the planner had no map of product-level relationships.
 
 ### 2. Load the spec
-1. If `$ARGUMENTS` points to a file (e.g. `workdocs/{feature-name}/v1/spec.md`), use it as the primary input.
-2. Otherwise, extract the feature name and check `workdocs/{feature-name}/` for existing specs or plans.
+1. If `$ARGUMENTS` points to a file (e.g. `features/{feature-name}/v1/spec.md`), use it as the primary input.
+2. Otherwise, extract the feature name and check `features/{feature-name}/` for existing specs or plans.
 3. If a top-level `spec.md` exists (PM's original spec), read it for full context.
 4. If a versioned `v1/spec.md` exists, use it as the scoped input for this iteration.
 5. If no spec exists, proceed with the standard research process below.
@@ -55,7 +55,7 @@ Do not skip these. Without them, you will miss downstream surfaces and plan an i
    - Think about integration testing, functional testing, and unit testing.
 
 5. **Save Research**
-   - Save research findings to `workdocs/{feature-name}/{version}/research.md`
+   - Save research findings to `features/{feature-name}/{version}/research.md`
    - This preserves context for future reference and plan iterations.
 
 ## Plan Document Structure
@@ -132,9 +132,9 @@ Format:
 - Migration risks
 
 ## Output
-Save as: `workdocs/{feature-name}/{version}/plan.md`
+Save as: `features/{feature-name}/{version}/plan.md`
 
-Also save research to: `workdocs/{feature-name}/{version}/research.md`
+Also save research to: `features/{feature-name}/{version}/research.md`
 
 ## Quality Checklist
 - [ ] `README.md` and `docs/domain-map.md` were read before research began
@@ -150,4 +150,4 @@ Also save research to: `workdocs/{feature-name}/{version}/research.md`
 
 ## Next Step
 After saving the plan, print:
-"Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/engineering/execute-plan workdocs/{feature-name}/{version}/plan.md` to implement."
+"Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/engineering/execute-plan features/{feature-name}/{version}/plan.md` to implement."

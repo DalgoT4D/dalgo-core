@@ -2,7 +2,7 @@
 
 ## Input: $ARGUMENTS
 
-Validate that the implementation matches the spec. Input is the path to the spec file (e.g. `workdocs/{feature-name}/v1/spec.md`). If no argument is provided, look for the most recent spec in `workdocs/`.
+Validate that the implementation matches the spec. Input is the path to the spec file (e.g. `features/{feature-name}/v1/spec.md`). If no argument is provided, look for the most recent spec in `features/`.
 
 ## Process
 

@@ -11,28 +11,28 @@ Write a new feature spec from an idea, or scope a versioned iteration from an ex
 **Mode A — New Spec** (default):
 - `$ARGUMENTS` is an inline feature description (e.g. `"scheduled report emails"`)
 - Or `$ARGUMENTS` is a file path to notes/requirements to read as input
-- Creates `workdocs/{feature-name}/spec.md`
+- Creates `features/{feature-name}/spec.md`
 
 **Mode B — Scope a Version**:
-- `$ARGUMENTS` points to an existing feature folder (e.g. `workdocs/metrics_kpis`)
-- Or `$ARGUMENTS` points to an existing spec (e.g. `workdocs/metrics_kpis/spec.md`)
-- Creates `workdocs/{feature-name}/v{N}/spec.md`
+- `$ARGUMENTS` points to an existing feature folder (e.g. `features/metrics_kpis`)
+- Or `$ARGUMENTS` points to an existing spec (e.g. `features/metrics_kpis/spec.md`)
+- Creates `features/{feature-name}/v{N}/spec.md`
 
-To determine mode: check if `$ARGUMENTS` matches an existing `workdocs/` folder or spec. If yes, Mode B. Otherwise, Mode A.
+To determine mode: check if `$ARGUMENTS` matches an existing `features/` folder or spec. If yes, Mode B. Otherwise, Mode A.
 
 ---
 
 ## Mode A: New Spec (full vision)
 
 ### Check for Existing Work
-Search `workdocs/` for an existing folder with a similar feature name.
+Search `features/` for an existing folder with a similar feature name.
 - If a related spec exists, inform the user and ask whether to update or create new.
 
 ### Write the Spec
 Use the senior-product-manager agent approach:
 
 1. **Understand the idea** — Parse the input, identify the core problem being solved.
-2. **Research context** — Search the codebase for related features, check existing workdocs.
+2. **Research context** — Search the codebase for related features, check existing features.
 3. **Pressure-test from user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
 4. **Structure the spec** with these sections:
    - Problem Statement — What problem, for whom?
@@ -45,18 +45,18 @@ Use the senior-product-manager agent approach:
    - Handoff Checklist — Is this ready for engineering?
 
 ### Save
-Save to: `workdocs/{feature-name}/spec.md`
+Save to: `features/{feature-name}/spec.md`
 
 This is the **PM's original spec** — the full vision. Use snake_case feature name. Create the directory if needed.
 
 ### Print Next Step
 ```
-Spec saved to: workdocs/{feature-name}/spec.md
+Spec saved to: features/{feature-name}/spec.md
 
 Next steps:
 1. Review with the team
-2. Scope a v1: /product/write-spec workdocs/{feature-name}
-3. Then plan: /engineering/plan-feature workdocs/{feature-name}/v1/spec.md
+2. Scope a v1: /product/write-spec features/{feature-name}
+3. Then plan: /engineering/plan-feature features/{feature-name}/v1/spec.md
 ```
 
 ---
@@ -64,7 +64,7 @@ Next steps:
 ## Mode B: Scope a Version
 
 ### Read the Original Spec
-- Read `workdocs/{feature-name}/spec.md` (the PM's full vision)
+- Read `features/{feature-name}/spec.md` (the PM's full vision)
 
 ### Determine Version Number
 - Check which versions already exist (`v1/`, `v2/`, etc.)
@@ -84,7 +84,7 @@ For each version, consider:
 - What's the logical ordering?
 
 ### Write the Versioned Spec
-Create `workdocs/{feature-name}/v{N}/spec.md` with:
+Create `features/{feature-name}/v{N}/spec.md` with:
 
 ```markdown
 # {Feature Name} — v{N}
@@ -122,9 +122,9 @@ Create `workdocs/{feature-name}/v{N}/spec.md` with:
 
 ### Print Next Step
 ```
-Scoped version saved to: workdocs/{feature-name}/v{N}/spec.md
+Scoped version saved to: features/{feature-name}/v{N}/spec.md
 
-Next: /engineering/plan-feature workdocs/{feature-name}/v{N}/spec.md
+Next: /engineering/plan-feature features/{feature-name}/v{N}/spec.md
 ```
 
 ---

@@ -19,16 +19,16 @@ Dalgo is an open-source data platform for NGOs. It replaces manual Excel/Google 
 /product/prototype "feature idea"           → prototypes/{name}/brief.md + build
 ```
 
-Skip the full pipeline. Get a working prototype to test with NGO partners. If validated, promote to full feature with the standard workflow below. PM artifacts live in `prototypes/`, separate from engineering's `workdocs/`.
+Skip the full pipeline. Get a working prototype to test with NGO partners. If validated, promote to full feature with the standard workflow below. PM artifacts live in `prototypes/`, separate from engineering's `features/`.
 
 ### Standard track (spec → plan → build → ship)
 
 ```
-/product/write-spec "feature idea"          → workdocs/{name}/spec.md
-/product/write-spec workdocs/{name}         → workdocs/{name}/v1/spec.md (scope a version)
-/engineering/plan-feature workdocs/{name}/v1/spec.md → workdocs/{name}/v1/plan.md
-/engineering/execute-plan workdocs/{name}/v1/plan.md → implements the code
-/engineering/validate-spec workdocs/{name}/v1/spec.md → validate implementation against spec
+/product/write-spec "feature idea"          → features/{name}/spec.md
+/product/write-spec features/{name}         → features/{name}/v1/spec.md (scope a version)
+/engineering/plan-feature features/{name}/v1/spec.md → features/{name}/v1/plan.md
+/engineering/execute-plan features/{name}/v1/plan.md → implements the code
+/engineering/validate-spec features/{name}/v1/spec.md → validate implementation against spec
 /engineering/review-pr <PR#>                → structured code review
 /engineering/debug-issue <Sentry URL>       → diagnose production bugs
 ```

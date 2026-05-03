@@ -4,7 +4,7 @@ Implement a feature using the planning document.
 
 ## Planning document: $ARGUMENTS
 
-Make sure to always generate a `tasks.md` in the same version folder (e.g. `workdocs/{feature-name}/v1/tasks.md`) and mark tasks as finished as you execute them.
+Make sure to always generate a `tasks.md` in the same version folder (e.g. `features/{feature-name}/v1/tasks.md`) and mark tasks as finished as you execute them.
 This should be your checkpoint when you start. So you don't have to repeat stuff.
 If the file is not present, create one. If it exists, use it to figure out where to start from.
 

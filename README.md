@@ -15,7 +15,7 @@ dalgo-core/
 ├── prototypes/
 │   └── {feature-name}/
 │       └── brief.md             # PM's prototype brief (spike)
-├── workdocs/
+├── features/
 │   └── {feature-name}/
 │       ├── spec.md              # PM's original spec (full vision)
 │       ├── v1/
@@ -82,7 +82,7 @@ flowchart TD
 
 ### Engineering Track
 
-Production-quality implementation for confirmed features. Engineering owns this. All artifacts in `workdocs/`.
+Production-quality implementation for confirmed features. Engineering owns this. All artifacts in `features/`.
 
 ```mermaid
 flowchart TD
@@ -126,7 +126,7 @@ flowchart TD
 | **Confidence** | "I think this might work" | "We know we need this" |
 | **Goal** | Validate with an NGO user | Ship to production |
 | **Time** | Hours | Days |
-| **Workspace** | `prototypes/` | `workdocs/` |
+| **Workspace** | `prototypes/` | `features/` |
 | **Command** | `/product/prototype` | `/product/write-spec` → `/engineering/*` |
 
 ---
@@ -152,14 +152,14 @@ Two modes in one command:
 ```
 /product/write-spec "scheduled report emails for dashboard owners"
 ```
-**Output:** `workdocs/{feature-name}/spec.md` (full vision)
+**Output:** `features/{feature-name}/spec.md` (full vision)
 
 **Mode B — Scope a version** (from an existing spec):
 ```
-/product/write-spec workdocs/scheduled-reports
+/product/write-spec features/scheduled-reports
 ```
-**Output:** `workdocs/{feature-name}/v1/spec.md` (or v2, v3, etc.)
-**Next step:** `/engineering/plan-feature workdocs/{feature-name}/v1/spec.md`
+**Output:** `features/{feature-name}/v1/spec.md` (or v2, v3, etc.)
+**Next step:** `/engineering/plan-feature features/{feature-name}/v1/spec.md`
 
 ### Engineering Commands
 
@@ -167,9 +167,9 @@ Two modes in one command:
 Generate an implementation plan with HLD, LLD, security review, and milestones.
 
 ```
-/engineering/plan-feature workdocs/scheduled-reports/v1/spec.md
+/engineering/plan-feature features/scheduled-reports/v1/spec.md
 ```
-**Output:** `workdocs/{feature-name}/v1/plan.md` + `research.md`
+**Output:** `features/{feature-name}/v1/plan.md` + `research.md`
 
 The plan is a **draft** — engineers iterate on it through conversation. Claude updates `plan.md` in place.
 
@@ -177,9 +177,9 @@ The plan is a **draft** — engineers iterate on it through conversation. Claude
 Implement the feature following the plan, with checkpointing.
 
 ```
-/engineering/execute-plan workdocs/scheduled-reports/v1/plan.md
+/engineering/execute-plan features/scheduled-reports/v1/plan.md
 ```
-**Creates:** `workdocs/{feature-name}/v1/tasks.md` for progress tracking
+**Creates:** `features/{feature-name}/v1/tasks.md` for progress tracking
 **Next step:** `/engineering/validate-spec`
 
 #### `/engineering/debug-issue`
@@ -243,10 +243,10 @@ Agents are specialized personas that Claude invokes automatically when the conte
 ### New Feature (idea to merge)
 ```
 /product/write-spec "feature idea"
-/product/write-spec workdocs/{name}
-/engineering/plan-feature workdocs/{name}/v1/spec.md
+/product/write-spec features/{name}
+/engineering/plan-feature features/{name}/v1/spec.md
 # iterate on plan...
-/engineering/execute-plan workdocs/{name}/v1/plan.md
+/engineering/execute-plan features/{name}/v1/plan.md
 /engineering/validate-spec
 /engineering/review-pr <pr-number>
 ```
@@ -265,9 +265,9 @@ Agents are specialized personas that Claude invokes automatically when the conte
 
 ### Next Iteration
 ```
-/product/write-spec workdocs/{name}
+/product/write-spec features/{name}
 # creates v2/spec.md from remaining items in original spec
-/engineering/plan-feature workdocs/{name}/v2/spec.md
+/engineering/plan-feature features/{name}/v2/spec.md
 ```
 
 ---
