@@ -779,4 +779,417 @@ Each milestone delivers a complete vertical slice (backend + frontend) that is t
 
 ---
 
-*Plan generated from [v1 spec](./spec.md), [codebase research](./research.md), and [domain map](../../../docs/domain-map.md).*
+*Plan for Milestones 1-4 generated from [v1 spec](./spec.md), [codebase research](./research.md), and [domain map](../../../docs/domain-map.md).*
+
+---
+
+# Milestones 5-8 — Completion Plan
+
+**Date:** 2026-05-03
+**Status:** Draft v1
+**Context:** Milestones 1-4 are complete. This section covers the remaining gaps between the current implementation (branch `prod/metrics_kpis_alerts` in `DDP_backend_metrics` worktree) and the spec.
+
+Key gaps: `_compute_trend()` method missing (breaks PoP change + report KPI periods), no annotation/timeline system, no metric tags, no metric detail view, orphaned frontend components.
+
+## Updated Blast Radius (confirmed 2026-05-03)
+
+| Surface | Status | Notes |
+|---------|--------|-------|
+| Chart | in-scope | Metric picker exists, works |
+| KPI | in-scope | Core feature |
+| Dashboard | in-scope | KPI widget exists, works |
+| ReportSnapshot | in-scope | Freezing + rendering exists, needs `_compute_trend` fix |
+| Share link (live) | in-scope | Auto-inherits from Dashboard, acceptable |
+| Share link (report) | in-scope | Auto-inherits from ReportSnapshot, acceptable |
+| Alert | deferred | Alerts spec |
+| Explore page | out-of-scope | Per user decision |
+| Notification | deferred | Downstream of Alert |
+
+## Open Questions — Decisions
+
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| Metric filters (baked-in vs layered) | **Defer to v2** | High complexity, no current user request. Expression path covers simple filter cases. |
+| Calculated SQL validation | Blocklist + test query | Already validated via test query. Add keyword blocklist for safety. |
+| Time-window: filter annotations? | **No** — annotations show full history | Preserves context, simpler. |
+| MetricEntry restoration | Build fresh as `AnnotationEntry` | Clean model, no old code to restore. |
+
+---
+
+### Milestone 5: Fix `_compute_trend` + Wire Orphaned Components
+
+**Deliverable:** `_compute_trend()` works, trend + summary API endpoints exist, KPI detail drawer is wired into the KPI page, report snapshots freeze period data correctly.
+
+**Services:** DDP_backend + webapp_v2
+
+#### Backend (`DDP_backend_metrics`)
+
+**5.1 — Implement `_compute_trend()` in `kpi_service.py`**
+
+The trend logic already exists inline in `compute_kpi_data()` (lines 372-429). Extract it into a standalone `@staticmethod` on `KPIService`:
+
+```python
+@staticmethod
+def _compute_trend(kpi: KPI, org_warehouse: OrgWarehouse, limit: Optional[int] = None) -> List[dict]:
+```
+
+- Reuse the same `AggQueryBuilder` + `apply_time_grain` + `format_time_grain_label` pattern from lines 377-427
+- Takes a KPI model instance (not a payload dict) — uses `kpi.metric`, `kpi.time_grain`, `kpi.time_dimension_column`, `kpi.trend_periods`
+- Returns `[{period: str, value: float|None}, ...]` ordered ascending
+- Place between `_validate_fields` and `get_kpi` (~line 104)
+- Remove dead `return periods` at line 534
+
+Keep `compute_kpi_data()` as-is (it works with payload dicts for reports). `_compute_trend()` is the model-based version used by `get_kpi_summary()` and `_freeze_chart_configs()`.
+
+- **File:** `ddpui/services/kpi_service.py`
+
+**5.2 — Add `/api/kpis/{kpi_id}/trend/` endpoint**
+
+```python
+@kpi_router.get("/{kpi_id}/trend/")
+@has_permission(["can_view_kpis"])
+def get_kpi_trend(request, kpi_id: int, periods: int = None):
+```
+
+Returns `{periods: [{period, value}, ...], time_grain: str}`. Used by frontend `useKPITrend` hook.
+
+- **File:** `ddpui/api/kpi_api.py`
+
+**5.3 — Add `/api/kpis/summary/` endpoint**
+
+The service method `get_kpi_summary()` exists but has no API route. Add:
+
+```python
+@kpi_router.get("/summary/")
+@has_permission(["can_view_kpis"])
+def get_kpi_summary(request):
+```
+
+**Important:** Register this route BEFORE `/{kpi_id}/` to avoid Django Ninja treating "summary" as a kpi_id.
+
+- **File:** `ddpui/api/kpi_api.py`
+
+#### Frontend (`webapp_v2`)
+
+**5.4 — Add missing types to `types/kpis.ts`**
+
+```typescript
+export interface KPISummary {
+  id: number;
+  name: string;
+  metric_name: string;
+  current_value: number | null;
+  target_value: number | null;
+  direction: 'increase' | 'decrease';
+  rag_status: RAGStatus | null;
+  achievement_pct: number | null;
+  period_over_period_change: number | null;
+  time_grain: string;
+  metric_type_tag: string | null;
+  program_tags: string[];
+  updated_at: string;
+}
+```
+
+**5.5 — Add `useKPITrend` and `useKPISummary` hooks to `hooks/api/useKPIs.ts`**
+
+```typescript
+export function useKPITrend(kpiId: number | null, periods?: number) { ... }
+export function useKPISummary() { ... }
+```
+
+**5.6 — Wire `KPIDetailDrawer` into `kpi-page.tsx`**
+
+- Add `selectedKpiId` state
+- On card click → open drawer (currently opens edit form)
+- Import and render `<KPIDetailDrawer>` with `onEdit` callback
+- Keep the existing inline `KPICardWithData` component
+- **Delete orphaned `kpi-card.tsx`**
+
+#### Testing
+- Backend: Unit test `_compute_trend()` with mocked warehouse. Test trend + summary endpoints.
+- Frontend: Verify drawer opens, shows trend chart and PoP change. Verify report snapshots freeze period data.
+
+#### UI test plan
+- [ ] Navigate to `/kpis` → cards show period-over-period change (was `null` before)
+- [ ] Click a KPI card → detail drawer opens with full trend chart
+- [ ] Drawer shows: trend chart, PoP change, configuration details, Edit button
+- [ ] Create report snapshot from dashboard with KPI → frozen KPI has period data
+- [ ] View report → KPI widget shows trendline (was empty before)
+
+---
+
+### Milestone 6: Metric Tags + Detail View + Edit Blast-Radius
+
+**Deliverable:** Metrics have tags (searchable/filterable), a detail drawer with references panel, and edit confirmation showing affected consumers.
+
+**Services:** DDP_backend + webapp_v2
+
+#### Backend
+
+**6.1 — Add `tags` JSONField to Metric model**
+
+```python
+tags = models.JSONField(default=list, blank=True)
+```
+
+New migration. Add `tags` to `MetricCreate`, `MetricUpdate`, `MetricResponse` schemas. Add `tag` query param to `list_metrics` with `Q(tags__contains=[tag])` filter.
+
+- **Files:** `ddpui/models/metric.py`, `ddpui/schemas/metric_schema.py`, `ddpui/services/metric_service.py`, `ddpui/api/metric_api.py`
+- **New:** migration file
+
+#### Frontend
+
+**6.2 — Add tags to Metric form and library**
+
+- Add comma-separated tags input to `metric-form-dialog.tsx` (same pattern as `programTagsInput` in `kpi-form.tsx`)
+- Show tag badges on metric rows in `metrics-library.tsx`
+- Add tag filter to library header
+
+**6.3 — Build Metric Detail Drawer**
+
+New component: `components/metrics/metric-detail-drawer.tsx`
+
+Uses `Sheet` (Shadcn). Sections:
+- Full definition: dataset, column/expression, aggregation, description, tags
+- References panel: calls `getMetricConsumers(id)` → "Used by N charts, M KPIs" with names
+- Current value: calls existing preview endpoint
+- Edit / Delete buttons
+
+Wire into `metrics-library.tsx` — clicking a metric row opens the drawer.
+
+**6.4 — Add edit blast-radius confirmation**
+
+In `metric-form-dialog.tsx`, before submitting an update:
+1. Call `getMetricConsumers(metricId)`
+2. If consumers exist → show `ConfirmationDialog`: "This change affects N charts and M KPIs. Changes propagate immediately. Continue?"
+3. On confirm → submit
+
+#### Testing
+- Backend: Test tags CRUD and filtering.
+- Frontend: Test detail drawer renders references. Test edit confirmation shows when consumers exist.
+
+#### UI test plan
+- [ ] Create a metric with tags → tags appear in library table
+- [ ] Search/filter by tag → library filters correctly
+- [ ] Click a metric row → detail drawer opens with full definition + references
+- [ ] Edit a metric that has KPIs → confirmation dialog shows affected consumers
+- [ ] Confirm edit → metric updates, KPIs reflect new values
+
+---
+
+### Milestone 7: KPI Annotations (AnnotationEntry)
+
+**Deliverable:** KPIs have a timeline of annotations (comments + beneficiary quotes) with auto-captured snapshots.
+
+**Services:** DDP_backend + webapp_v2
+
+#### Backend
+
+**7.1 — Add `AnnotationEntry` model to `models/metric.py`**
+
+```python
+ENTRY_TYPE_CHOICES = [("comment", "Comment"), ("quote", "Beneficiary Quote")]
+
+class AnnotationEntry(models.Model):
+    kpi = models.ForeignKey(KPI, on_delete=CASCADE, related_name="annotation_entries")
+    entry_type = models.CharField(max_length=10, choices=ENTRY_TYPE_CHOICES)
+    period_key = models.CharField(max_length=50)  # e.g. "Jan 2026"
+    content = models.TextField()
+    attribution = models.CharField(max_length=255, null=True, blank=True)  # quotes only
+    snapshot_value = models.FloatField(null=True, blank=True)
+    snapshot_rag = models.CharField(max_length=10, null=True, blank=True)
+    snapshot_achievement_pct = models.FloatField(null=True, blank=True)
+    created_by = models.ForeignKey(OrgUser, on_delete=CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+```
+
+- **New:** migration file
+
+**7.2 — Add annotation schemas to `kpi_schema.py`**
+
+```python
+class AnnotationEntryCreate(Schema):
+    entry_type: str  # "comment" or "quote"
+    period_key: str
+    content: str
+    attribution: Optional[str] = None
+
+class AnnotationEntryResponse(Schema):
+    id: int
+    entry_type: str
+    period_key: str
+    content: str
+    attribution: Optional[str]
+    snapshot_value: Optional[float]
+    snapshot_rag: Optional[str]
+    snapshot_achievement_pct: Optional[float]
+    created_by_name: str
+    created_at: datetime
+```
+
+**7.3 — Add annotation service methods to `kpi_service.py`**
+
+- `list_entries(kpi_id, org)` → returns entries for a KPI
+- `create_entry(kpi_id, org, orguser, payload)` → validates KPI, computes current value + RAG snapshot via `MetricService.compute_metric_value()` and `compute_rag_status()`, creates entry
+- `delete_entry(kpi_id, entry_id, org, orguser)` → validates ownership (author or edit permission)
+
+**7.4 — Add annotation endpoints to `kpi_api.py`**
+
+```
+GET    /api/kpis/{kpi_id}/entries/                  → list entries
+POST   /api/kpis/{kpi_id}/entries/                  → create entry (auto-snapshots)
+DELETE /api/kpis/{kpi_id}/entries/{entry_id}/        → delete entry
+```
+
+Permissions: `can_view_kpis` for list, `can_edit_kpis` for create/delete.
+
+#### Frontend
+
+**7.5 — Add annotation types and hooks**
+
+Types in `types/kpis.ts`:
+```typescript
+export interface AnnotationEntry {
+  id: number;
+  entry_type: 'comment' | 'quote';
+  period_key: string;
+  content: string;
+  attribution: string | null;
+  snapshot_value: number | null;
+  snapshot_rag: RAGStatus | null;
+  snapshot_achievement_pct: number | null;
+  created_by_name: string;
+  created_at: string;
+}
+```
+
+Hooks in `hooks/api/useKPIs.ts`:
+```typescript
+export function useAnnotationEntries(kpiId: number | null) { ... }
+export async function createAnnotationEntry(kpiId: number, data: ...) { ... }
+export async function deleteAnnotationEntry(kpiId: number, entryId: number) { ... }
+```
+
+**7.6 — Add annotation timeline to `KPIDetailDrawer`**
+
+Extend `kpi-detail-drawer.tsx`:
+- "Add Entry" button → opens a form/popover
+- Entry form: type selector (Comment/Quote tabs), period dropdown (from trend periods), content textarea, attribution field (quote only)
+- Timeline section below the trend chart: entries grouped by `period_key`, each showing type badge, content, attribution, snapshot value+RAG, delta since previous period, author, timestamp
+- Delete button on entries (with confirmation)
+
+Period dropdown values come from `useKPITrend` response (the period labels).
+
+#### Testing
+- Backend: Test CRUD for entries. Test snapshot captures correct value/RAG. Test delete permissions.
+- Frontend: Test entry form, timeline grouping, delete.
+
+#### UI test plan
+- [ ] Open KPI detail drawer → "Add Entry" button visible
+- [ ] Click "Add Entry" → form appears with type selector, period dropdown, content field
+- [ ] Select "Beneficiary Quote" → attribution field appears
+- [ ] Submit entry → appears in timeline with auto-captured value + RAG snapshot
+- [ ] Multiple entries per period → grouped correctly
+- [ ] Delete an entry → removed with confirmation
+- [ ] Entry shows delta since previous period (e.g. "+230 since last month")
+
+---
+
+### Milestone 8: UX Polish
+
+**Deliverable:** Time-window selector in KPI drawer, SQL expression safety blocklist.
+
+**Services:** DDP_backend + webapp_v2
+
+#### Frontend
+
+**8.1 — KPI time-window selector in drawer**
+
+Add a `<Select>` above the trend chart in `kpi-detail-drawer.tsx`. Options computed from `time_grain`:
+- monthly: "Last 6 / 12 / 24 months"
+- quarterly: "Last 4 / 8 / 12 quarters"
+- yearly: "Last 3 / 5 / 10 years"
+
+Default: KPI's configured `trend_periods`. Session-only (component state). Pass selected count to `useKPITrend(kpiId, selectedPeriods)`. Annotations are NOT filtered — full history always shown.
+
+#### Backend
+
+**8.2 — SQL expression blocklist**
+
+In `MetricService.validate_metric_definition()`, when `column_expression` is set, add:
+```python
+BLOCKED_KEYWORDS = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE"]
+upper_expr = column_expression.upper()
+for kw in BLOCKED_KEYWORDS:
+    if re.search(rf'\b{kw}\b', upper_expr):
+        raise MetricValidationError(f"SQL expressions cannot contain '{kw}' statements")
+```
+
+#### Testing
+- Manual: verify time-window selector changes trend range, annotations stay visible.
+- Backend: test SQL blocklist rejects mutating statements.
+
+#### UI test plan
+- [ ] Open KPI drawer → time-window selector above trend chart
+- [ ] Change window from "Last 12 months" to "Last 6 months" → trendline updates
+- [ ] Annotations stay visible regardless of window selection
+- [ ] Create metric with SQL expression containing "DROP" → rejected with error
+
+---
+
+## Milestone Dependency Graph (5-8)
+
+```
+M5 (fix _compute_trend + wire drawer)  ←── start here
+ │
+ ├── M6 (metric tags + detail view)    ←── can run in parallel with M5
+ │
+ └── M7 (annotations)                  ←── depends on M5 (needs trend endpoint for period dropdown)
+      │
+      └── M8 (polish)                  ←── depends on M7 (time-window in same drawer)
+```
+
+**Start M5 and M6 in parallel.** M7 follows once M5's trend endpoint is ready.
+
+## Key Files Summary (M5-M8)
+
+| File | Milestones | Changes |
+|------|-----------|---------|
+| `DDP_backend_metrics/ddpui/services/kpi_service.py` | 5, 7 | Add `_compute_trend()`, annotation methods, remove dead code |
+| `DDP_backend_metrics/ddpui/api/kpi_api.py` | 5, 7 | Add trend, summary, annotation endpoints |
+| `DDP_backend_metrics/ddpui/models/metric.py` | 6, 7 | Add `tags` field, `AnnotationEntry` model |
+| `DDP_backend_metrics/ddpui/schemas/metric_schema.py` | 6 | Add `tags` to schemas |
+| `DDP_backend_metrics/ddpui/schemas/kpi_schema.py` | 7 | Add annotation schemas |
+| `DDP_backend_metrics/ddpui/services/metric_service.py` | 6, 8 | Tags handling, SQL blocklist |
+| `DDP_backend_metrics/ddpui/api/metric_api.py` | 6 | Add tag filter param |
+| `webapp_v2/types/kpis.ts` | 5, 7 | Add KPISummary, AnnotationEntry |
+| `webapp_v2/types/metrics.ts` | 6 | Add tags |
+| `webapp_v2/hooks/api/useKPIs.ts` | 5, 7 | Add useKPITrend, useKPISummary, annotation hooks |
+| `webapp_v2/components/kpis/kpi-page.tsx` | 5 | Wire detail drawer |
+| `webapp_v2/components/kpis/kpi-detail-drawer.tsx` | 5, 7, 8 | Fix imports, add timeline, time-window |
+| `webapp_v2/components/metrics/metrics-library.tsx` | 6 | Tags display/filter, detail drawer trigger |
+| `webapp_v2/components/metrics/metric-form-dialog.tsx` | 6 | Tags input, edit blast-radius |
+| **New:** `webapp_v2/components/metrics/metric-detail-drawer.tsx` | 6 | Metric detail view |
+| **New:** 2 migration files | 6, 7 | tags field, AnnotationEntry model |
+| **Delete:** `webapp_v2/components/kpis/kpi-card.tsx` | 5 | Orphaned, replaced by inline KPICardWithData |
+
+## Verification (M5-M8)
+
+After each milestone:
+1. Backend: `cd DDP_backend_metrics && uv run pytest ddpui/tests` — all tests pass
+2. Frontend: `cd webapp_v2 && npm run lint && npm test` — no regressions
+3. Manual: start services via PM2, verify end-to-end in the browser
+
+End-to-end flow after all milestones:
+1. Create a Metric with tags → verify in library with search/filter
+2. Open Metric detail drawer → verify references panel and current value
+3. Edit Metric → verify blast-radius confirmation appears
+4. Create a KPI from Metric → verify on KPI page with PoP change
+5. Open KPI drawer → verify trend chart, time-window selector, add annotation entry
+6. Add KPI to dashboard → verify widget renders
+7. Create report snapshot from dashboard → verify KPI data is frozen
+8. View report → verify KPI widget renders from frozen data
