@@ -87,17 +87,19 @@ Production-quality implementation for confirmed features. Engineering owns this.
 ```mermaid
 flowchart TD
     A["Write spec
-    Run /product/write-spec"] --> |"spec.md"| DR["Design/UX"]
-    DR --> |"spec.md + designs"| C["Scope version"]
-    DR --> A
+    Run /product/write-spec"] --> |"spec.md"| B["Review Product Spec"]
+    B --> C["Scope version"]
+    B --> |"feedback review loop"| A
     C --> |"v1/spec.md"| D["Plan & iterate
     Run /engineering/plan-feature"]
+    C --> |"v1/spec.md"| E["Design/UX"]
     D --> |"plan.md"| F["Execute plan
     Run /engineering/execute-plan"]
-    F --> DR2["Design review"]
-    DR2 --> G["Validate spec
+    F --> DR1["Design review"]
+    DR1 --> F
+    E --> DR1
+    DR1 --> |"Design incorporated"| G["Validate spec
     Run /engineering/validate-spec"]
-    DR2 --> F
     G --> H["Review PR
     Run /engineering/review-pr"]
     H --> I["Merge + Deploy"]
@@ -107,11 +109,9 @@ flowchart TD
     J --> |v2| C
 
     style A fill:#fff,stroke:#6b7280,color:#000
-    style DR fill:#fff,stroke:#6b7280,color:#000
     style C fill:#fff,stroke:#6b7280,color:#000
     style D fill:#fff,stroke:#6b7280,color:#000
     style F fill:#fff,stroke:#6b7280,color:#000
-    style DR2 fill:#fff,stroke:#6b7280,color:#000
     style G fill:#fff,stroke:#6b7280,color:#000
     style H fill:#fff,stroke:#6b7280,color:#000
     style I fill:#d1fae5,stroke:#10b981,color:#000
