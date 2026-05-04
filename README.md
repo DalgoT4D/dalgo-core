@@ -87,17 +87,19 @@ Production-quality implementation for confirmed features. Engineering owns this.
 ```mermaid
 flowchart TD
     A["Write spec
-    Run /product/write-spec"] --> |"spec.md"| DR["Design/UX"]
-    DR --> |"spec.md + designs"| C["Scope version"]
-    DR --> A
+    Run /product/write-spec"] --> |"spec.md"| B["Review Product Spec"]
+    B --> C["Scope version"]
+    B --> |"feedback review loop"| A
     C --> |"v1/spec.md"| D["Plan & iterate
     Run /engineering/plan-feature"]
+    C --> |"v1/spec.md"| E["Design/UX"]
     D --> |"plan.md"| F["Execute plan
     Run /engineering/execute-plan"]
-    F --> DR2["Design review"]
-    DR2 --> G["Validate spec
+    F --> DR1["Design review"]
+    DR1 --> D
+    E --> DR1
+    DR1 --> G["Validate spec
     Run /engineering/validate-spec"]
-    DR2 --> F
     G --> H["Review PR
     Run /engineering/review-pr"]
     H --> I["Merge + Deploy"]
