@@ -53,24 +53,24 @@ Short text walk-throughs; no wireframes yet.
 
 1. The user opens the Metrics library and clicks "New Metric."  
 2. Picks a dataset (schema.table from the warehouse).  
-3. Picks creation mode:  
-   - **Simple** — column \+ aggregation, or a column expression (e.g. `col_a - col_b` before aggregating)  
-   - **SQL** — raw SQL expression returning a numeric scalar  
+3. Creation mode:  
+   - **Simple** — column \+ aggregation- as is currently avaialable on chart creation
+   - **Calculated** — raw SQL expression returning a numeric scalar  
 4. For Simple: picks the column (or column expression), picks an aggregation (sum / avg / count / min / max / count\_distinct).  
-5. For SQL: writes a raw SQL expression returning a numeric scalar.  
+5. For Calculated: writes a raw SQL expression returning a numeric scalar.  
 6. Optionally adds filters (e.g. "active beneficiaries only"). Decides whether each filter is baked-in (always applied when the Metric is used) or layered (consumers can opt out).  
-7. Names the Metric, writes a description, adds tags.  
+7. Names the Metric, writes a description.  
 8. Saves.
 
 ### 4.2 Browse the Metrics library
 
-- Search by name or tag  
-- Filter by dataset, creation mode, creator  
-- List view shows name, description, dataset, tags, number of consumers (charts / KPIs / alerts using it)
+- Search/filter by name regex match.  
+- Filter by dataset, creator  
+- List view shows name, description, dataset, number of consumers (charts / KPIs / alerts using it)
 
 ### 4.3 View a Metric's detail
 
-- Full definition (dataset, column or SQL expression, aggregation, filters, tags, description)  
+- Full definition (dataset, column or SQL expression, aggregation, filters, description)  
 - **References panel**: "Used by 3 charts, 2 KPIs, 1 alert" — click through to each  
 - Recent value \+ trend snapshot (running the Metric against the warehouse, like today's MetricDataPoint)  
 - Edit / delete actions (gated by reference check)
@@ -96,7 +96,7 @@ Short text walk-throughs; no wireframes yet.
 ### 4.7 Use a Metric as the basis for a KPI
 
 - From the KPIs page, "New KPI" flow lets user pick an existing Metric OR define one inline (same "create Metric" form embedded).  
-- After the Metric is chosen, the form asks for target, direction, RAG thresholds, trend config, tags. See flow 5.1.
+- After the Metric is chosen, the form asks for target, direction, RAG thresholds, trend config. See flow 5.1.
 
 ### 4.8 Use a Metric in an alert
 
@@ -118,7 +118,7 @@ See [`alerts-spec.md`](http://./alerts-spec.md) § 4\. Entry points are the same
 ### 5.2 Browse the KPIs page
 
 - Search, filter by program tag, metric type, group-by (same as today's MetricsList)  
-- Each card shows: current value, target, RAG badge, trendline with readable X-axis, period-over-period change, last-updated timestamp  
+- Each card shows: current value, target, RAG badge, trendline with readable X-axis, period-over-period change.
 - **Linked-alerts indicator** (dot or small badge) on each card when alerts are linked to that KPI. Does NOT show firing state or counts — just "has alerts." Full state available from the alert list.  
 - No page-level time filter — each KPI is scoped by its own trend config, which avoids confusion when the page mixes time grains (team feedback).
 
@@ -164,9 +164,7 @@ See [`alerts-spec.md`](http://./alerts-spec.md) § 4.1.
 ## 6\. Functional requirements — Metrics
 
 - **Dataset \+ table \+ column \+ aggregation** (sum / avg / count / min / max / count\_distinct)  
-- **Column expressions in Simple mode** — a Metric's column slot can be a simple arithmetic expression over columns (e.g. `col_a - col_b`), evaluated before aggregation.  
-- **Optional filters at definition time** (e.g. "active beneficiaries only"). User chooses at creation time whether a filter is baked into the Metric (always applied) or layered by the consumer (passed in at reference time).  
-- **Name, description, tags**  
+- **Name, description**  
 - **Reference tracking**: given a Metric, list every chart / KPI / alert that uses it.  
 - **Chart builder's Metric picker** offers saved Metrics alongside ad-hoc column+aggregation. Ad-hoc is always available — never gated.  
 - **Inline Metric creation** — when picking a Metric (in chart builder, KPI creation, or Alert creation), user can define a brand-new Metric inline and save it to the library without leaving the current flow.  
@@ -184,54 +182,13 @@ See [`alerts-spec.md`](http://./alerts-spec.md) § 4.1.
 - **Annotations timeline** — timeline-of-entries model (Linear-style activity feed). Each entry: type (comment / beneficiary quote), period, content, attribution (for quotes), snapshot of value \+ RAG at entry time, author, timestamp. Multiple entries per period allowed. Delta-since-last-period (anchored to the KPI's time grain) computed. Full audit trail.  
 - **KPI as a dashboard chart type** — one render at v1 (value \+ target \+ RAG \+ trendline with X-axis in one widget). Editable placement and size.  
 - **Linked-alerts indicator** on cards — KPIs page only, not on dashboard widgets. Simple "has alerts" marker, no counts or firing-state on the indicator.  
-- **Freshness** — surface a "last updated" label anchored to the last completed transform/pipeline that fed this KPI's data. Data refresh: poll on page load; additionally re-poll when a new transform completes (if engineering-feasible; otherwise ship on-load-only and add the transform-completion poll in a follow-up).
 
 **Access controls** (view/edit/delete permissions) are out of scope for this spec — covered in the separate Access Controls spec.
 
-## 8\. Data model — conceptual
+## 8\. Out of scope (explicit)
 
-Entities and relationships at a conceptual level; schema details deferred to engineering design.
-
-- **`Metric`** — the reusable primitive.  
-    
-  - Identity: `id`, `name`, `description`, `tags`  
-  - Source: `dataset_id`, creation mode (simple / sql)  
-  - For simple mode: `column` (or column expression), `aggregation`, optional `filters` (with a flag per filter: baked-in vs layered)  
-  - For SQL mode: raw SQL formula string  
-  - Metadata: `created_by`, `created_at`, `updated_at`  
-  - Indexes for reference-tracking queries (find all consumers of Metric X)
-
-
-- **`KPI`** — the tracked layer.  
-    
-  - `metric_id` (FK to Metric — required)  
-  - `target_value` (nullable — no target \= tracking-only)  
-  - `direction` (increase / decrease)  
-  - `green_threshold_pct`, `amber_threshold_pct`  
-  - `trend_grain` (month / quarter / year — inherits from Metric by default)  
-  - `trend_periods` (default 12\)  
-  - `metric_type_tag` (Input / Output / Outcome / Impact)  
-  - `program_tag`, general tags  
-  - `display_order`  
-  - Timestamps \+ `created_by`
-
-
-- **`AnnotationEntry`** — timeline model.  
-    
-  - `kpi_id` (FK)  
-  - `entry_type` (comment / quote)  
-  - `period_key`  
-  - `content`  
-  - `attribution` (nullable — used for quotes)  
-  - `snapshot_value`, `snapshot_rag`, `snapshot_achievement_pct` — captured at save time  
-  - `created_by`, `created_at`  
-  - Multiple entries per (kpi\_id, period\_key) are allowed.
-
-
-- **`DashboardWidget` reference** — on the dashboard side, points at a KPI. The existing dashboard-widget model extends to accept `kpi_id` as a source.
-
-## 9\. Out of scope (explicit)
-
+- **Column expressions in Simple mode** — a Metric's column slot can be a simple arithmetic expression over columns (e.g. col_a - col_b), evaluated before aggregation.
+- **Freshness** — surface a "last updated" label anchored to the last completed transform/pipeline that fed this KPI's data. Data refresh: poll on page load; additionally re-poll when a new transform completes (if engineering-feasible; otherwise ship on-load-only and add the transform-completion poll in a follow-up).
 - **Time-intelligence helpers** (YoY / MoM / QoQ / rolling windows / cumulative as first-class Metric attributes). People can still compute period-over-period inside a chart or KPI, just not reusably at the Metric level. Deferred.  
 - **Derived Metrics as a dedicated creation mode** — metric-over-metric composition lives in Calculated SQL, not a separate builder UI.  
 - **Access controls, row-level security, per-object ACLs** — covered in the separate Access Controls spec.  
