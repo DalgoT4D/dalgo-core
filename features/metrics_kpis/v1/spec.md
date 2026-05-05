@@ -57,10 +57,9 @@ Short text walk-throughs; no wireframes yet.
    - **Simple** — column \+ aggregation- as is currently avaialable on chart creation
    - **Calculated** — raw SQL expression returning a numeric scalar  
 4. For Simple: picks the column (or column expression), picks an aggregation (sum / avg / count / min / max / count\_distinct).  
-5. For Calculated: writes a raw SQL expression returning a numeric scalar.  
-6. Optionally adds filters (e.g. "active beneficiaries only"). Decides whether each filter is baked-in (always applied when the Metric is used) or layered (consumers can opt out).  
-7. Names the Metric, writes a description.  
-8. Saves.
+5. For Calculated: writes a raw SQL expression returning a numeric scalar, can incorporate CASE WHEN or FILTER here.  
+6. Names the Metric, writes a description.  
+7. Saves.
 
 ### 4.2 Browse the Metrics library
 
