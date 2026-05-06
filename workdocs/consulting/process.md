@@ -6,9 +6,9 @@ This document captures the end-to-end consulting workflow for building dbt SQL m
 
 ## Overview
 
-The consulting engagement bridges two worlds: the client's M&E (Monitoring & Evaluation) logic, and the technical dbt data model that implements it. The workflow moves through four phases — **Discovery → Framework → Data Exploration → Model Development**.
+The consulting engagement bridges two worlds: the client's M&E (Monitoring & Evaluation) logic, and the technical dbt data model that implements it. The workflow moves through four phases — **Discovery → Data Exploration → Framework → Model Development**.
 
-The framework and data exploration phases have a feedback loop: the framework captures business logic first, but once raw data is explored, the calculation logic may need to be revised to reflect what is actually available in the data.
+The Requirements Sheet captures business intent first. Raw data is then ingested and explored. Only after both are available does the consultant or LLM turn that input into the KPI Framework Sheet.
 
 There are two tracks:
 - **New engagement** — full four-phase process for a new client or program
@@ -22,29 +22,26 @@ There are two tracks:
 flowchart TD
     A([Start Engagement]) --> B[M&E Goal Conversation]
     B --> C[Client fills Requirements Sheet]
-    C --> D[Curate Metrics List]
-    D --> E[Build KPI Framework Sheet v1]
-    E --> F[Ingest Raw Data via Airbyte]
-    F --> G[Explore Raw Table Structure]
-    G --> H{KPI Framework\nrevision needed?}
-    H -- Yes --> I[Revise KPI Framework Sheet]
-    I --> J[Design ER Diagram]
-    H -- No --> J
-    J --> K[Write Staging Models]
-    K --> L[dbt run — Staging]
-    L --> M{Output\ncorrect?}
-    M -- No --> K
-    M -- Yes --> N[Write Intermediate Models]
-    N --> O[dbt run — Intermediate]
-    O --> P{Output\ncorrect?}
-    P -- No --> N
-    P -- Yes --> Q[Write Mart Models]
-    Q --> R[dbt run — Marts]
-    R --> S{KPIs match\nframework?}
-    S -- No --> Q
-    S -- Yes --> T[Generate Data Dictionary Sheet]
-    T --> U[Finalization]
-    U --> V([Engagement Complete])
+    C --> D[Ingest Raw Data via Airbyte]
+    D --> E[Explore Raw Table Structure]
+    E --> F[Curate Metrics List]
+    F --> G[Build KPI Framework Sheet]
+    G --> H[Design ER Diagram]
+    H --> I[Write Staging Models]
+    I --> J[dbt run — Staging]
+    J --> K{Output\ncorrect?}
+    K -- No --> I
+    K -- Yes --> L[Write Intermediate Models]
+    L --> M[dbt run — Intermediate]
+    M --> N{Output\ncorrect?}
+    N -- No --> L
+    N -- Yes --> O[Write Mart Models]
+    O --> P[dbt run — Marts]
+    P --> Q{KPIs match\nframework?}
+    Q -- No --> O
+    Q -- Yes --> R[Generate Data Dictionary Sheet]
+    R --> S[Finalization]
+    S --> T([Engagement Complete])
 ```
 
 ## Flowchart — Modification Track
@@ -55,15 +52,14 @@ flowchart TD
     B --> C[Update KPI Framework Sheet]
     C --> D{New data source?}
     D -- Yes --> E[Ingest + Explore new tables]
-    E --> F[Revise KPI Framework Sheet if needed]
-    F --> G[Modify or add dbt models]
-    D -- No --> G
-    G --> H[dbt run — affected layers only]
-    H --> I{Output correct?}
-    I -- No --> G
-    I -- Yes --> J[Update Data Dictionary Sheet]
-    J --> K[Finalization]
-    K --> L([Done])
+    E --> F[Modify or add dbt models]
+    D -- No --> F
+    F --> G[dbt run — affected layers only]
+    G --> H{Output correct?}
+    H -- No --> F
+    H -- Yes --> I[Update Data Dictionary Sheet]
+    I --> J[Finalization]
+    J --> K([Done])
 ```
 
 ---
@@ -84,7 +80,7 @@ flowchart TD
    - The client fills in their existing logical framework / logframe — what they want to measure, with what formulas, from what data sources, and with what breakdown dimensions.
    - This is the primary client input artifact for the entire engagement. Keep the form simple: one row per metric they want, with columns for calculation intent, data source, and reporting audience.
    - The consultant reviews this sheet and adds annotations in a dedicated "Consultant Notes" column.
-   - This sheet is the input that feeds metric list curation in Phase 2. It does not need to be re-created — it is updated in-place as the engagement progresses.
+   - This sheet is the input that later feeds KPI Framework creation after data exploration. It does not need to be re-created — it is updated in-place as the engagement progresses.
 
 ### Artifacts
 
@@ -95,65 +91,17 @@ flowchart TD
 
 ---
 
-## Phase 2: Framework
+## Phase 2: Data Exploration
 
-**Goal:** Translate the requirements sheet into a structured, implementation-ready KPI Framework that is ready for data engineers to build against.
-
-**KPI Framework vs. Requirements Sheet — the distinction:**
-
-The Requirements Sheet is written by the client in program/M&E language. It captures intent. The client does not need to know anything about databases to fill it.
-
-The KPI Framework Sheet is built by the consultant in data/technical language. It captures implementation. It cannot be filled without knowing the actual raw table structure.
-
-The same metric looks like this in each:
-
-| | Requirements Sheet (client fills) | KPI Framework Sheet (consultant builds) |
-|---|---|---|
-| What it says | "% of female beneficiaries who completed the full training cycle — completions divided by enrolled, by gender, monthly, for donor report" | `COUNT(DISTINCT beneficiary_id WHERE gender='F' AND sessions_attended >= required_sessions) / COUNT(DISTINCT beneficiary_id WHERE gender='F')` — from `kobo_training_responses` joined to `enrollment_master` on `beneficiary_id`, filter `program_id = 'prog_x'`, grain: monthly per program, mart: `fct_training_completion` |
-| Who can fill it | The M&E manager | The consultant (after data exploration) |
-| When it locks | After requirements review | After data exploration |
-
-They are separate sheets because they have different audiences (client vs. data team) and different lifecycles (Requirements locks early; KPI Framework stays live through data exploration).
+**Goal:** Understand the actual shape of the raw data before the consultant or LLM turns the Requirements Sheet into the KPI Framework.
 
 ### Steps
 
-3. **Curate Metrics List**
-   - Read the Requirements Sheet and enumerate all KPIs that need to be tracked.
-   - Deduplicate, consolidate overlapping metrics, and flag anything ambiguous for client clarification.
-   - This list becomes the rows of the KPI Framework Sheet.
+3. **Ingest Raw Data**
+   - Data sources (KoboToolbox, Google Sheets, ODK, CRMs, etc.) are ingested via Airbyte into raw tables in the warehouse.
+   - Confirm the source systems referenced in the Requirements Sheet are actually available.
 
-4. **Build the KPI Framework Sheet**
-   - One row per KPI. Columns:
-     - **KPI name** — human-readable label
-     - **Requirements alignment** — which row in the Requirements Sheet this maps to
-     - **Definition** — plain English definition of what is being measured
-     - **Calculation logic** — formula or aggregation (e.g., `COUNT(DISTINCT beneficiary_id) WHERE activity_type = 'training'`)
-     - **Data source(s)** — which raw table(s) feed it (filled in/confirmed after data exploration)
-     - **Filters / conditions** — time ranges, cohort conditions, exclusions
-     - **Granularity** — per-beneficiary / per-location / per-period
-     - **Mart model** — which `fct_` or `dim_` model will expose this metric
-     - **Status** — draft / confirmed / revised
-   - At this stage, Data Source and Mart Model columns may be partially filled — they are completed and locked after data exploration.
-
-### Artifacts
-
-| Artifact | Format | Owner | Purpose |
-|---|---|---|---|
-| KPI Framework Sheet | Google Sheet | Consultant | Technical spec for every metric: definition, calculation logic, sources, granularity. Living document through data exploration. |
-
----
-
-## Phase 3: Data Exploration
-
-**Goal:** Understand the actual shape of the raw data before designing models. Validate and revise the KPI Framework against what is actually in the data.
-
-### Steps
-
-5. **Ingest Raw Data**
-   - Data sources (KoboToolbox, Google Sheets, ODK, CRMs, etc.) ingested via Airbyte into raw tables in the warehouse.
-   - Confirm all sources listed in the KPI Framework are available.
-
-6. **Explore Raw Table Structure**
+4. **Explore Raw Table Structure**
    - For each raw table, query to understand:
      - Column names and data types
      - Null rates and cardinality for key columns
@@ -162,25 +110,64 @@ They are separate sheets because they have different audiences (client vs. data 
      - Date/time fields and formats
      - Anomalies, duplicates, encoding issues
 
-7. **Revise KPI Framework Sheet (if needed)**
-   - After exploring raw tables, revisit each KPI row in the Framework Sheet.
-   - Update if data structure, quality, or available fields differ from assumptions:
-     - Calculation logic (e.g., assumed a direct field but need a derived one)
-     - Data source mapping (e.g., missing join key, alternate path needed)
-     - Filters/conditions (e.g., status field has unexpected values)
-   - Mark revised rows as "Revised" in the Status column. The post-exploration version is the binding reference for model development.
-
-8. **Design ER Diagram**
-   - Start from the standard NGO entity pattern (beneficiary → program enrollment → activity → outcome) and adapt to this program.
-   - Document: entities and grain, relationships and cardinalities, which raw tables map to which entities, join paths needed for each metric.
-
 ### Artifacts
 
 | Artifact | Format | Owner | Purpose |
 |---|---|---|---|
 | `table_profiles.md` | Markdown | Consultant | Per-table structure notes from exploration |
-| `er_diagram.md` / `.png` | Markdown / Image | Consultant | Entity-relationship diagram |
-| KPI Framework Sheet | Google Sheet | Consultant | Updated with confirmed data sources and revised calculation logic |
+
+---
+
+## Phase 3: Framework
+
+**Goal:** Translate the Requirements Sheet into a structured, implementation-ready KPI Framework using what was learned during data exploration.
+
+**KPI Framework vs. Requirements Sheet — the distinction:**
+
+The Requirements Sheet is written by the client in program/M&E language. It captures intent. The client does not need to know anything about databases to fill it.
+
+The KPI Framework Sheet is built by the consultant in data/technical language. It captures implementation. It is written only after the raw table structure has been explored.
+
+The same metric looks like this in each:
+
+| | Requirements Sheet (client fills) | KPI Framework Sheet (consultant builds) |
+|---|---|---|
+| What it says | "% of female beneficiaries who completed the full training cycle — completions divided by enrolled, by gender, monthly, for donor report" | `COUNT(DISTINCT beneficiary_id WHERE gender='F' AND sessions_attended >= required_sessions) / COUNT(DISTINCT beneficiary_id WHERE gender='F')` — from `kobo_training_responses` joined to `enrollment_master` on `beneficiary_id`, filter `program_id = 'prog_x'`, grain: monthly per program, mart: `fct_training_completion` |
+| Who can fill it | The M&E manager | The consultant or LLM, after data exploration |
+| When it locks | After requirements review | After framework review, using explored raw data as input |
+
+They are separate sheets because they have different audiences (client vs. data team) and different lifecycles (Requirements captures intent early; KPI Framework is the technical interpretation grounded in the real data shape).
+
+### Steps
+
+5. **Curate Metrics List**
+   - Read the Requirements Sheet and enumerate all KPIs that need to be tracked.
+   - Use the explored raw tables to deduplicate, consolidate overlapping metrics, and flag anything ambiguous for clarification.
+   - This list becomes the rows of the KPI Framework Sheet.
+
+6. **Build the KPI Framework Sheet**
+   - One row per KPI. Columns:
+     - **KPI name** — human-readable label
+     - **Requirements alignment** — which row in the Requirements Sheet this maps to
+     - **Definition** — plain English definition of what is being measured
+     - **Calculation logic** — formula or aggregation (e.g., `COUNT(DISTINCT beneficiary_id) WHERE activity_type = 'training'`)
+     - **Data source(s)** — which raw table(s) feed it, based on data exploration
+     - **Filters / conditions** — time ranges, cohort conditions, exclusions
+     - **Granularity** — per-beneficiary / per-location / per-period
+     - **Mart model** — which `fct_` or `dim_` model will expose this metric
+     - **Status** — draft / confirmed / revised
+   - The consultant or LLM should build this sheet from both inputs together: the Requirements Sheet and the explored raw data.
+
+7. **Design ER Diagram**
+   - Use the KPI Framework Sheet to decide which entities, joins, and dbt model boundaries are needed.
+   - Document: entities and grain, relationships and cardinalities, which raw tables map to which entities, and the join paths needed for each KPI.
+
+### Artifacts
+
+| Artifact | Format | Owner | Purpose |
+|---|---|---|---|
+| KPI Framework Sheet | Google Sheet | Consultant | Technical spec for every metric: definition, calculation logic, sources, granularity. Built after data exploration and used as the contract for model development. |
+| `er_diagram.md` / `.png` | Markdown / Image | Consultant | Entity-relationship diagram derived from the KPI Framework and used to shape dbt models. |
 
 ---
 
@@ -311,7 +298,7 @@ For clients already live on Dalgo who want to add or change metrics — no full 
 
 - **Requirements Sheet drives scope:** The client fills this once at the start and it is the input to the KPI Framework. Avoid scope creep by requiring changes to go through an explicit update to the Framework Sheet.
 - **KPI Framework is the technical contract:** Every dbt model traces back to a row in the KPI Framework Sheet. No model is written without a corresponding KPI definition.
-- **KPI Framework is living until data exploration is complete:** Business intent is captured upfront, but calculation logic is confirmed only after raw tables are explored. Post-exploration version is binding.
+- **Data exploration comes before KPI Framework authoring:** Business intent is captured upfront, raw tables are explored next, and only then is the KPI Framework written.
 - **Data Dictionary is a client deliverable:** Not just internal documentation — it is the handoff artifact that lets the client's team understand and maintain their data independently.
 - **Modification track is the default for live clients:** Once a client is set up, almost all work flows through the modification track. Avoid re-running the full process unless the program structure has fundamentally changed.
 - **Layer-by-layer verification:** Models are run and validated at each layer boundary before the next layer is written.
