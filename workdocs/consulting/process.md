@@ -43,7 +43,8 @@ flowchart TD
     R --> S{KPIs match\nframework?}
     S -- No --> Q
     S -- Yes --> T[Generate Data Dictionary Sheet]
-    T --> U([Engagement Complete])
+    T --> U[Finalization]
+    U --> V([Engagement Complete])
 ```
 
 ## Flowchart — Modification Track
@@ -60,8 +61,8 @@ flowchart TD
     G --> H[dbt run — affected layers only]
     H --> I{Output correct?}
     I -- No --> G
-    I -- Yes --> J[Update schema.yml]
-    J --> K[Update Data Dictionary Sheet]
+    I -- Yes --> J[Update Data Dictionary Sheet]
+    J --> K[Finalization]
     K --> L([Done])
 ```
 
@@ -230,6 +231,25 @@ Columns:
 
 This sheet, alongside the dbt lineage and auto-generated dbt docs, is the handoff artifact to the client's data team.
 
+### Finalization
+
+This is the single final step after the Data Dictionary is generated, for both new engagements and modification work.
+
+1. **Lint and fix all models**
+   - Run SQLFluff across the full dbt model set, not just the files changed in the current task.
+   - Fix lint violations before moving forward.
+
+2. **Run dbt-osmosis refactor and generate**
+   - Use dbt-osmosis to refactor and generate documentation across the project.
+   - Let it use AI to create any missing documentation and propagate it into the dbt project.
+   - This includes updating `schema.yml` documentation as part of the final documentation pass.
+   - Treat this as the final documentation pass after model logic and `schema.yml` are stable.
+
+3. **Create a new branch and open a GitHub PR to `main`**
+   - All consulting code changes should be delivered on a dedicated git branch, not pushed directly to a shared branch.
+   - Push that branch to GitHub and open a pull request against `main`.
+   - The PR is the review and merge gate for both new-engagement work and modification work.
+
 ### Artifacts
 
 | Artifact | Format | Owner | Purpose |
@@ -237,7 +257,7 @@ This sheet, alongside the dbt lineage and auto-generated dbt docs, is the handof
 | `models/staging/stg_*.sql` | SQL | Engineer | Staging models |
 | `models/intermediate/int_*.sql` | SQL | Engineer | Intermediate models |
 | `models/marts/fct_*.sql`, `dim_*.sql` | SQL | Engineer | Mart models |
-| `models/schema.yml` | YAML | Engineer | Column descriptions and dbt tests |
+| `models/schema.yml` | YAML | Engineer | Column descriptions, dbt tests, and dbt-osmosis-synced model documentation |
 | dbt docs site | Generated | Engineer | Auto-generated lineage and documentation |
 | Data Dictionary Sheet | Google Sheet | Engineer → Client | All tables and columns with definitions — client-facing handoff artifact |
 
@@ -277,8 +297,8 @@ For clients already live on Dalgo who want to add or change metrics — no full 
 3. If the change involves a new data source: ingest via Airbyte, explore the new tables, update table_profiles.md, update the ER diagram if relationships change.
 4. Identify the affected dbt model layers. Only rewrite or modify the models that are impacted — do not rebuild the full model set.
 5. Run dbt for affected models only. Verify output.
-6. Update `schema.yml` for any new or modified columns.
-7. Update the Data Dictionary Sheet to reflect added/changed tables and columns.
+6. Update the Data Dictionary Sheet to reflect added/changed tables and columns.
+7. Run the same **Finalization** step used in the new-engagement flow.
 
 **Artifacts updated (not recreated):**
 - KPI Framework Sheet — revised rows marked with date and change reason
@@ -295,4 +315,8 @@ For clients already live on Dalgo who want to add or change metrics — no full 
 - **Data Dictionary is a client deliverable:** Not just internal documentation — it is the handoff artifact that lets the client's team understand and maintain their data independently.
 - **Modification track is the default for live clients:** Once a client is set up, almost all work flows through the modification track. Avoid re-running the full process unless the program structure has fundamentally changed.
 - **Layer-by-layer verification:** Models are run and validated at each layer boundary before the next layer is written.
+- **Finalization is mandatory:** After the Data Dictionary step, always run the single Finalization step before delivery.
+- **Documentation is part of delivery, not cleanup:** Use dbt-osmosis refactor and generate to fill missing documentation and propagate it through the dbt project.
+- **Lint the whole model set:** SQLFluff is run across all models for both new builds and modifications, and lint issues are fixed before the PR is opened.
+- **Delivery is PR-based:** Consulting changes ship through a dedicated branch and GitHub pull request to `main`, never by direct push to a shared branch.
 - **NGO data quality is often poor:** Paper-to-digital conversion, inconsistent enumerators, mid-program schema changes. The staging layer must be defensive; document assumptions explicitly in table_profiles.md and schema.yml.
