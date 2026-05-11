@@ -34,6 +34,162 @@ The most underserved persona today is **James (Viewer)** — NGOs cannot safely 
 
 ---
 
+## Access Control Model: WHO x WHAT x WHERE
+
+### Why the current model is broken
+
+Today, Dalgo's access control is tightly coupled — a role is a flat list of boolean permissions that apply globally to every resource in the org:
+
+```
+Role --> [can_view_dashboards, can_edit_pipelines, ...] --> applies to ALL resources
+```
+
+This means "Analyst" = can edit **every** dashboard. "Viewer" = can see **nothing** unless explicitly shared. There's no way to say "Priya can edit the Program Outcomes dashboard but only view the Donor Report dashboard." The role decides everything; the resource has no say.
+
+This is like GitHub giving someone "Read" access to an organization and that meaning they can read **every** repo. GitHub doesn't work this way — and neither should Dalgo.
+
+### Three independent axes
+
+Access control should answer three independent questions, not one:
+
+```
+WHO  x  WHAT  x  WHERE
+```
+
+| Axis | Question | Dalgo concepts |
+|------|----------|----------------|
+| **WHO** (Principal) | Who is requesting access? | A user (James) or a group (Field Staff) |
+| **WHAT** (Permission level) | What can they do? | View, Edit, or Admin |
+| **WHERE** (Resource scope) | On which resource? | A specific dashboard, all dashboards, the whole org |
+
+Every access grant is a binding of all three:
+
+```
+(WHO: James,        WHAT: View,   WHERE: Dashboard "Field Performance")
+(WHO: Field Staff,  WHAT: View,   WHERE: Dashboards module)
+(WHO: Priya,        WHAT: Edit,   WHERE: Dashboards module)
+(WHO: Raj,          WHAT: Edit,   WHERE: Pipelines module)
+(WHO: Sarah,        WHAT: Admin,  WHERE: Organization)
+```
+
+### Permission levels
+
+Three levels, universally understood:
+
+| Level | Means |
+|-------|-------|
+| **View** | See the resource, interact with filters, export |
+| **Edit** | View + create, modify, delete resources |
+| **Admin** | Edit + share with others, manage settings, invite users |
+
+Not 73 booleans. Three levels.
+
+### Resource hierarchy
+
+Access can be granted at any level in this tree. Granting at a higher level cascades down.
+
+```
+Organization
+|-- Pipelines (module)
+|   |-- Pipeline: Kobo --> Warehouse
+|   +-- Pipeline: Commcare --> Warehouse
+|-- Transforms (module)
+|   +-- dbt Project: Program Outcomes
+|-- Orchestration (module)
+|   +-- Flow: Nightly Sync
+|-- Dashboards (module)
+|   |-- Dashboard: Field Performance
+|   |   |-- Chart: Monthly Enrollment
+|   |   +-- Chart: Regional Breakdown
+|   +-- Dashboard: Donor Report
+|-- Reports (module)
+|-- Data Explorer (module)
++-- Settings
+    |-- Users & Groups
+    +-- Billing
+```
+
+### Roles are templates, not enforcers
+
+Roles still exist — they're the primary UX for inviting users. But a role is a **template** that generates a set of default access grants on invite, not a fixed identity that dictates everything forever.
+
+#### Default grants generated per role on invite
+
+| Role | Default grants created | Rationale |
+|------|----------------------|-----------|
+| **Viewer** | **None** — inviter selects specific resources during invite flow | Viewers are external/restricted by nature. Blanket access defeats the purpose. |
+| **Analyst** | (User, Edit, Dashboards module), (User, Edit, Charts module), (User, Edit, Reports module), (User, View, Data Explorer) | Internal staff who need broad access to reporting resources. |
+| **Pipeline Manager** | (User, Edit, Pipelines module), (User, Edit, Transforms module), (User, Edit, Orchestration module), (User, Edit, Dashboards module), (User, View, Data Explorer) | Implementation partners who need full infrastructure access. |
+| **Account Manager** | (User, Admin, Organization) | Full access — one grant covers everything. |
+
+#### Viewer invite flow
+
+Since Viewers get no default grants, the invite flow must collect resource access upfront:
+
+```
+Step 1:  Enter email, choose "Viewer"
+Step 2:  "What should they have access to?"
+         [ ] All dashboards
+         [ ] Specific dashboards: [picker]
+         [ ] All reports
+         [ ] Specific reports: [picker]
+Step 3:  Send invite
+```
+
+The invite creates both the user invitation AND the access grants. When James accepts the invite, his grants are already waiting.
+
+#### Customizing defaults after invite
+
+After the role generates its defaults, individual grants can be modified:
+
+```
+"Priya should only access the Field Performance dashboard, not all dashboards"
+--> Remove: (Priya, Edit, Dashboards module)
+--> Add:    (Priya, Edit, Dashboard: Field Performance)
+```
+
+For most orgs, the role defaults will be sufficient. The customization is there when needed, invisible when not.
+
+### Module-level vs resource-level grants
+
+This distinction matters for how access behaves over time:
+
+| Grant type | Example | Covers future resources? |
+|------------|---------|------------------------|
+| **Module-level** | (Priya, Edit, Dashboards module) | Yes — any new dashboard created tomorrow is automatically accessible |
+| **Resource-level** | (James, View, Dashboard: Field Performance) | No — only this specific dashboard. New dashboards require new grants. |
+
+This is the right default behavior: Analysts and Pipeline Managers (module-level grants) automatically see new resources as the org grows. Viewers (resource-level grants) only see what was explicitly shared with them.
+
+### How permission resolution works
+
+When a user tries to access a resource, the system collects all matching grants (direct + via groups) and resolves:
+
+```
+Effective Access(User, Resource) =
+    max permission level across:
+      - Direct grants on this specific resource
+      - Direct grants on the parent module
+      - Direct grants on the organization
+      - Group grants on this specific resource
+      - Group grants on the parent module
+      - Group grants on the organization
+```
+
+If no grants match, access is denied.
+
+### What this enables that the current model can't
+
+| Scenario | Old model (coupled) | New model (WHO x WHAT x WHERE) |
+|----------|--------------------|---------------------------------|
+| James views only 2 dashboards | Viewer role + 2 ResourceShares (separate system) | 2 access grants — same system |
+| Priya edits dashboards but can only view one pipeline | Impossible — Analyst has zero pipeline access | (Priya, Edit, Dashboards module) + (Priya, View, Pipeline: Kobo) |
+| Field Staff views all dashboards | Must share each dashboard individually | (Field Staff, View, Dashboards module) — one grant |
+| Raj manages pipelines but shouldn't see the donor dashboard | Impossible — Pipeline Manager sees all dashboards | Grant pipeline/transform modules; grant only specific dashboards |
+| New Analyst starts read-only on dashboards | Impossible — Analyst = Edit on all dashboards | Override: (NewAnalyst, View, Dashboards module) instead of Edit |
+
+---
+
 ## Success Metrics
 
 | Metric | Baseline | Target |
