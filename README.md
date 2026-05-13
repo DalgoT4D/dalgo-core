@@ -206,6 +206,66 @@ Validates the implementation against the spec. Checks that all spec requirements
 /engineering/validate-spec
 ```
 
+#### `/product/generate-docs`
+Generate or update a Docusaurus documentation page for a Dalgo feature.
+
+**Mode A — Feature name:**
+```
+/product/generate-docs "orchestrate"
+/product/generate-docs "data quality"
+```
+
+**Mode B — PR or commit range:**
+```
+/product/generate-docs "#142"
+/product/generate-docs "abc123..def456"
+```
+
+**Output:** Markdown page in `dalgo_docs/docs/` at the correct location per the IA, screenshots in `dalgo_docs/static/img/{feature}/`, and updated `dalgo_docs/sidebars.js` if it's a new page.
+
+The skill reads `.claude/skills/docs-generation/SKILL.md` for the feature-to-route mapping and sidebar structure, and `style-guide.md` for writing conventions.
+
+---
+
+### Screenshot Script
+
+Captures all documentation screenshots from the staging environment in one run. Output goes directly into `dalgo_docs/static/img/`.
+
+**Setup — create `dalgo_docs/.env`:**
+```
+E2E_ADMIN_EMAIL=your@email.com
+E2E_ADMIN_PASSWORD=yourpassword
+E2E_BASE_URL=https://staging-app.dalgo.org
+```
+
+**Run:**
+```bash
+cd dalgo-core
+
+# Using .env file
+export $(cat ../dalgo_docs/.env | xargs) && python3 scripts/screenshot_docs_all.py
+
+# Or inline
+E2E_ADMIN_EMAIL=your@email.com \
+E2E_ADMIN_PASSWORD=yourpassword \
+E2E_BASE_URL=https://staging-app.dalgo.org \
+python3 scripts/screenshot_docs_all.py
+```
+
+**What it captures:** pipeline overview, pipeline logs, user management, usage dashboard, ingest (connections, sources, warehouse form), dashboards, orchestrate, reports (list, create, detail, share, comment).
+
+**Requirements:**
+```bash
+pip install playwright python-dotenv
+playwright install chromium
+```
+
+**Staging environment:**
+
+![Staging app — Impact at a Glance](/scripts/staging_screenshot.png)
+
+> The staging environment is at `https://staging-app.dalgo.org`. Ask the team for access credentials if you don't have them.
+
 ---
 
 ## Agents
@@ -227,6 +287,7 @@ Agents are specialized personas that Claude invokes automatically when the conte
 |-------|-------------|
 | **design-review** | Combined UX expert + NGO user evaluation of UI components or screenshots. |
 | **tal-lens** | Tal Raviv's technology philosophy — demystify, build first, anti-hype, clarity over cleverness. |
+| **docs-generation** | Feature-to-route mapping, sidebar structure, file locations, and writing conventions for Dalgo docs. Loaded automatically by `/product/generate-docs`. |
 
 ---
 
@@ -261,6 +322,22 @@ Agents are specialized personas that Claude invokes automatically when the conte
 ### Design Feedback
 ```
 /design-review
+```
+
+### Writing or Updating Docs
+
+```bash
+# Generate a doc page for a feature
+/product/generate-docs "reports"
+
+# After a PR lands, update affected docs
+/product/generate-docs "#142"
+
+# Capture all screenshots from staging in one run
+export $(cat ../dalgo_docs/.env | xargs) && python3 scripts/screenshot_docs_all.py
+
+# Preview the docs site locally
+cd ../dalgo_docs && npm start
 ```
 
 ### Next Iteration

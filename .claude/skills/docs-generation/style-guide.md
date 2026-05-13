@@ -1,21 +1,28 @@
 # Dalgo Documentation Style Guide
 
-Writing conventions for Dalgo's user-facing documentation. This guide codifies the patterns observed across existing doc pages and establishes standards for new content.
+Writing conventions for Dalgo's user-facing documentation. Read at least two existing pages before writing a new one — match their tone and density, don't exceed them in length.
+
+---
 
 ## Audience
 
-Dalgo users are **non-technical NGO staff**: program managers, data coordinators, M&E officers, and field staff. Many are using a data platform for the first time.
+Two personas, one voice:
 
-**Plain language principles:**
-- Write at a high-school reading level
-- Explain what things do, not how they work internally
-- If a technical term is unavoidable (e.g. "warehouse", "pipeline"), explain it in context the first time
-- Use "you" and "your" — address the reader directly
-- Prefer short sentences. One idea per sentence.
+- **Trained Dalgo user** — NGO program manager or M&E officer. Knows the platform, needs quick reference. Doesn't want theory.
+- **First-time user** — same profile, but starting from scratch. Guided through the Quickstart. Needs plain language and reassurance.
 
-## Document Structure
+**Plain language rules:**
+- Write at a high-school reading level.
+- Explain what things do, not how they work internally.
+- If a technical term is unavoidable (e.g. "warehouse", "pipeline", "dbt"), explain it in context the first time. Or link to the glossary.
+- Use "you" and "your". Address the reader directly.
+- One idea per sentence. Short sentences.
 
-Every doc page follows this structure:
+---
+
+## Page structure
+
+Every page follows this structure:
 
 ```markdown
 ---
@@ -24,9 +31,9 @@ sidebar_position: {number}
 
 # {Feature Name}
 
-**{One-sentence summary of what this feature lets you do.}**
+**{One-sentence summary of what this feature does or lets you do.}**
 
-{1-2 paragraph introduction if needed. What is this? When would you use it?}
+{1–2 paragraph introduction if needed. What is this? When would you use it?}
 
 ## {First Section}
 
@@ -35,27 +42,33 @@ sidebar_position: {number}
 ## {Second Section}
 
 {Continue as needed.}
+
+---
+
+**Next:** [Adjacent page](../path/page.md) · [Related page](../path/page.md)
 ```
 
-### Frontmatter
+### H1 titles are bare nouns matching the product nav label
 
-Required fields:
-- `sidebar_position` — determines ordering within a sidebar category
+Use the product's label as the H1 — not a gerund, not a sentence.
 
-Optional fields:
-- `slug` — custom URL path (only use for special pages like `intro`)
+| Product label | H1 | Not this |
+|---|---|---|
+| Charts | `# Charts` | `# Creating Charts` |
+| Warehouse | `# Warehouse` | `# Setting up your Warehouse` |
+| Orchestrate | `# Orchestrate` | `# Orchestrating your Pipeline` |
 
-Do not add other frontmatter fields unless Docusaurus requires them.
+Task-focused headings (`## Creating a chart`, `## Editing a connection`) live at H2 level inside the page.
 
-### H1 + Bold One-Liner
+### Bold one-liner after H1
 
-Every page starts with an H1 heading matching the feature name, immediately followed by a **bold one-liner** that summarizes what the feature does. This is the first thing a user reads.
+Every page's first line after the H1 is a **bold one-sentence promise**: what this page covers or what the feature does.
 
 Good:
 ```markdown
 # Orchestrate
 
-**Through this step Dalgo enables you to automate your data pipeline by setting up scheduled ingestion and transformation.**
+**Orchestrate lets you schedule your data pipeline to run automatically — combining sync connections and transformation tasks into a single job.**
 ```
 
 Bad:
@@ -65,56 +78,92 @@ Bad:
 The orchestration module provides pipeline scheduling capabilities with cron-based execution.
 ```
 
-## Instructions Format
+### Every page ends with a "Next" line
 
-Use numbered steps for sequential actions. Each step should describe exactly one action the user takes.
+Two or three cross-references to logically adjacent pages. This stitches pages into a system.
+
+```markdown
+---
+
+**Next:** [Transform](../transform/index.md) · [Overview](../overview.md)
+```
+
+Or for category index pages:
+```markdown
+---
+
+**Related:** [Dashboards](../dashboards/index.md) · [Reports](../reports/index.md)
+```
+
+---
+
+## Instructions format
+
+Use numbered steps for sequential actions. Each step = one action.
 
 ### Rules
 
-1. **Bold every UI element** the user needs to interact with: button labels, tab names, field labels, menu items.
+1. **Bold every UI element** the user needs to interact with: button labels, tab names, field labels, menu items, icon names.
 2. Place a screenshot after the step it illustrates, not before.
 3. Keep steps atomic — one click or one fill per step.
-4. Use quotes for exact text the user should type, bold for UI labels they should click.
+4. Use "Select" not "Click" (works for touchscreens too).
+5. Use quotes for exact text the user should type, bold for UI labels they click.
 
 ### Example
 
 ```markdown
-1. Select **Orchestrate** on the left menu panel. You will see a list of your existing pipelines.
+1. Select **Data** in the left menu, then select **Ingest**.
 
-![Pipeline list](/img/orchestrate/pipeline_list.png)
+![Connections list](/img/ingest/connections_list.png)
 
-2. Select **"+ Create Pipeline"** — this will take you to the "Create Pipeline" screen.
-
-![Create pipeline](/img/orchestrate/pipeline_create.png)
-
-3. Give your pipeline a name.
-4. Select one or more of the connections you have set up.
+2. Select **+ Add Connection**.
+3. Give your connection a name and select the source you want to sync.
+4. Select **Connect** to save.
 ```
+
+---
+
+## Voice
+
+| Don't | Do instead |
+|---|---|
+| "Click the button" | "Select **Create Pipeline**" |
+| "The user should navigate to" | "Select **Reports** in the left menu" |
+| "It is possible to" | "You can" |
+| "In order to" | "To" |
+| Passive voice | Active, second-person, present tense |
+
+---
 
 ## Admonitions
 
-Use Docusaurus admonitions sparingly. Only when the information is genuinely important and should stand out from the surrounding text.
+Use sparingly. Only when the content genuinely needs to stand out.
 
-### `:::info` — Automatic or background behavior
+### `:::info` — Automatic behaviour or "good to know"
 
-Use when the system does something automatically that the user should know about but doesn't need to act on.
+Use when the system does something the user should know about but doesn't act on. Also use for "Screenshot coming soon" when a screenshot isn't available yet.
 
 ```markdown
 :::info
-The following tasks are automatically added before your transformation tasks and do not need to be configured manually:
-1. **Git pull/clone** — pulls the latest code from the default branch.
-2. **dbt clean** — removes compiled dbt artifacts.
-3. **dbt deps** — installs dbt package dependencies.
+Dalgo creates a draft dashboard the moment you select **+ Create Dashboard**. If you leave without saving, the draft is kept.
+:::
+
+:::info Screenshot coming soon
+A screenshot of the warehouse connection test will be added here.
 :::
 ```
 
-### `:::note` — Helpful context
+### `:::note` — Helpful context or prerequisites
 
-Use for supplementary information that adds useful context but isn't critical to completing the task.
+Use for supplementary information that adds useful context but isn't critical to completing the task. Also use for conditional feature availability.
 
 ```markdown
 :::note
-Superset is only available if you have subscribed to Dalgo with Superset.
+Superset is only available to organisations on the **Dalgo + Superset** plan.
+:::
+
+:::note
+You may need to whitelist these IP addresses in your firewall: `13.202.128.47`, `65.2.173.97`
 :::
 ```
 
@@ -124,126 +173,113 @@ Use when an action could cause data loss or is difficult to undo.
 
 ```markdown
 :::warning
-Deleting a connection will remove all sync history. This cannot be undone.
+Deleting a connection is permanent and removes all its sync history. This cannot be undone.
 :::
 ```
 
-**Do not** use `:::tip`, `:::danger`, or `:::caution` — keep to the three types above for consistency.
+**Do not use** `:::tip`, `:::danger`, or `:::caution`. Stick to these three.
+
+### Declaring conditional features
+
+When a feature requires a specific subscription or setup, declare it at the top of the page with `:::note`:
+
+```markdown
+:::note
+The Superset Usage dashboard requires a **Dalgo + Superset** subscription. Contact support@dalgo.org to add it to your subscription.
+:::
+```
+
+---
+
+## Quickstart pages
+
+Quickstart pages are different from reference pages. They:
+- Cover one screen each — short enough to read in 60 seconds
+- End with "→ Next: [next step]" and "→ Reference: [reference page]" links
+- Don't duplicate reference page content — they link to it
+- Use a reassuring, forward-moving tone
+
+Template:
+```markdown
+---
+sidebar_position: {N}
+---
+
+# {Step name}
+
+**{What this step achieves in one sentence.}**
+
+## Steps
+
+1. ...
+2. ...
+
+:::note
+{Optional prerequisite or "if this doesn't work" note}
+:::
+
+---
+
+→ Next: [{next step}]({next-step}.md)
+→ Reference: [{reference page}]({../section/page}.md)
+```
+
+---
 
 ## Images
 
-### Naming Convention
+### Naming convention
 
 ```
 {feature}_{description}.png
 ```
 
-Examples:
-- `pipeline_list.png`
-- `pipeline_create.png`
-- `pipeline_edit.png`
-- `pipeline_history.png`
-- `elementary.png`
+Examples: `pipeline_list.png`, `reports_create.png`, `sources_add.png`
 
-Use lowercase, underscores between words. Keep names short and descriptive.
+Lowercase, underscores, short and descriptive.
 
-### Directory Mapping
+### Directory mapping
 
-| Feature Area | Image Directory |
-|-------------|-----------------|
+| Content area | Image directory |
+|---|---|
+| Charts / Dashboards | `static/img/analysis/` |
 | Orchestrate | `static/img/orchestrate/` |
 | Transform | `static/img/transform/` |
-| Managing Data | `static/img/managedata/` |
+| Pipeline overview, Data Quality, User Management | `static/img/managedata/` |
 | Reports | `static/img/reports/` |
-| Ingest | `static/img/ingest/` |
-| Dashboards | `static/img/dashboards/` |
+| Ingest (warehouse, sources, connections) | `static/img/ingest/` |
+| Settings | `static/img/settings/` |
 
-Create a new directory for a new feature area. Use the shortest reasonable name.
+### Markdown reference syntax
 
-### Markdown Reference Syntax
-
-Always use standard markdown:
+Always use standard markdown. Never import+JSX.
 
 ```markdown
-![Pipeline list](/img/orchestrate/pipeline_list.png)
+![Sources list](/img/ingest/sources_list.png)
 ```
 
-The path starts with `/img/` because Docusaurus serves the `static/` directory at the site root.
+### Missing screenshots
 
-### Screenshot Placeholders
-
-When screenshots aren't available yet, use an HTML comment:
+If a real screenshot isn't available, use `:::info Screenshot coming soon` — not an HTML comment.
 
 ```markdown
-<!-- SCREENSHOT: Description of what this screenshot should show -->
+:::info Screenshot coming soon
+A screenshot of the warehouse connection test will be added here.
+:::
 ```
 
-This makes it easy to find and replace later. Existing docs use this pattern (see `reports.md`).
+---
 
-## Sidebar Updates
+## What not to do
 
-When adding a new doc page, update `dalgo_docs/sidebars.js`.
-
-### Adding to an existing category
-
-Add the doc ID string to the category's `items` array:
-
-```javascript
-{
-  type: 'category',
-  label: 'Managing Data',
-  items: [
-    'managing-data/data-quality',
-    'managing-data/pipeline-overview',
-    'managing-data/usage-dashboard',
-    'managing-data/user-management',
-    'managing-data/new-page',        // new entry
-  ],
-}
-```
-
-### Adding a new top-level page
-
-Add the doc ID string to the `tutorialSidebar` array at the appropriate position:
-
-```javascript
-const sidebars = {
-  tutorialSidebar: [
-    'intro',
-    // ... existing items
-    'new-top-level-page',
-    'reports',
-  ],
-};
-```
-
-### Adding a new category
-
-```javascript
-{
-  type: 'category',
-  label: 'New Category Name',
-  link: {type: 'doc', id: 'new-category/index'},
-  items: [
-    'new-category/first-page',
-    'new-category/second-page',
-  ],
-}
-```
-
-The `link` property is optional — include it if the category should have its own landing page (an `index.md` file).
-
-## Anti-Patterns
-
-Things to avoid in Dalgo documentation:
-
-| Don't | Do Instead |
-|-------|------------|
-| `import Image from '/static/img/...'` + JSX `<img src={Image} />` | `![Alt text](/img/path.png)` |
-| External GitHub URLs for images (`https://github.com/...assets/...`) | Local images in `static/img/` |
-| Code-structured docs (API references, config examples as primary content) | Task-oriented docs ("how to do X") |
-| Passive voice ("The pipeline can be created by...") | Active voice ("Select **Create Pipeline** to...") |
-| Jargon without explanation ("Configure the DAG schedule") | Plain language ("Set when your pipeline runs") |
-| Long paragraphs of explanation before the first action | H1 + bold one-liner, then straight to steps |
-| Multiple features on one page | One page per feature, split into sub-pages if needed |
-| `:::tip` or `:::danger` admonitions | Stick to `:::info`, `:::note`, `:::warning` |
+| Don't | Why |
+|---|---|
+| `import Image from '/static/img/...'` + JSX | Docusaurus markdown renderer doesn't need it — breaks consistency |
+| `<!-- SCREENSHOT: ... -->` HTML comments shipped to main | Invisible in rendered docs — dishonest gap; use `:::info` instead |
+| External GitHub URLs for images | Images move; use local `static/img/` |
+| H1 titles with gerunds ("Creating your Dashboard") | Product labels are the H1 — gerunds live at H2 |
+| Blockquotes for important notes (`> Note:`) | Use admonitions (`:::note`) — they render properly |
+| Multiple unrelated features on one page | One page per feature — split if needed |
+| `:::tip`, `:::danger`, `:::caution` | Not used in Dalgo docs — inconsistent rendering |
+| Duplicating dbt or Superset upstream docs | Link to docs.getdbt.com or superset.apache.org instead |
+| Long intro paragraphs before the first action | H1 + bold one-liner → straight into steps |
