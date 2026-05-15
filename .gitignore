@@ -9,3 +9,8 @@ webapp_v2
 
 # obsidian
 .obsidian/
+# Google service account keys and other secrets
+secrets/
+
+# Bizdev config — contains Sheet ID and service account path
+workdocs/bizdev/districts.json

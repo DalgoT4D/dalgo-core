@@ -46,3 +46,54 @@ Use these at any point in the workflow:
 - ~20 partner NGOs, ~₹2L/year budgets, small engineering team
 - Users on slow internet and old devices — performance and simplicity matter
 - Open source (AGPL-3.0)
+
+## Bizdev — NGO Prospecting Pipeline
+
+Scripts and commands for scraping give.do district listings and researching NGO prospects.
+
+### Folder layout
+
+| Path | Purpose |
+|------|---------|
+| `scripts/give_do_scraper.py` | Scrapes NGO name, location, FY revenue from give.do district pages |
+| `scripts/run_scraper.sh` | One-click runner — checks deps, then runs the scraper |
+| `scripts/give_do_requirements.txt` | Python dependencies for the scraper |
+| `workdocs/bizdev/districts.json` | Registered districts, sheet ID, and service account path |
+| `workdocs/bizdev/research/` | Saved NGO research briefs (`{ngo-slug}.md`) |
+| `secrets/dalgo-demo-jaffle-shop-05f08cd333e2.json` | Google service account key (gitignored) |
+
+### Bizdev Commands
+
+```
+/bizdev/scraping/refresh-source
+```
+Re-scrapes all districts in `workdocs/bizdev/districts.json` and updates Google Sheets.
+
+```
+/bizdev/scraping/add-district <DistrictName>
+```
+Validates a new give.do district URL and registers it in `workdocs/bizdev/districts.json`.
+
+```
+/bizdev/research/research-ngo <NGO Name>
+```
+Deep-dives on a specific NGO. Saves a structured brief to `workdocs/bizdev/research/{ngo-slug}.md`.
+
+### Key Config
+
+All sensitive config (Sheet ID, service account path) lives in `workdocs/bizdev/districts.json`, which is gitignored. Do not hardcode these values in CLAUDE.md or any committed file.
+
+- **Districts config**: `workdocs/bizdev/districts.json` (gitignored — read this file for Sheet ID and service account path)
+
+### Running the scraper manually
+
+```bash
+# All registered districts
+bash scripts/run_scraper.sh
+
+# One specific district
+bash scripts/run_scraper.sh --district Kochi
+
+# One-off URL (not in config)
+bash scripts/run_scraper.sh --url "https://give.do/discover/project-district/Kochi/" --tab "Kochi"
+```
