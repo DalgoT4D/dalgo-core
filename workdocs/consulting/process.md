@@ -73,7 +73,7 @@ flowchart TD
 1. **M&E Goal Conversation**
    - Meet with client to understand program objectives and M&E goals per program/intervention.
    - Capture: program names, reporting cadence, audience (internal vs. donor), key questions the data must answer.
-   - Output: consultant fills `me_goals.md` — this stays as a lightweight MD summary.
+   - Output: LLM generated `me_goals.md` — this stays as a lightweight MD summary.
 
 2. **Client Fills Requirements Sheet**
    - Share the **Requirements Sheet** (Google Sheet template) with the client.
