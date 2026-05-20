@@ -14,3 +14,4 @@ secrets/
 
 # Bizdev config — contains Sheet ID and service account path
 workdocs/bizdev/districts.json
+workdocs/bizdev/

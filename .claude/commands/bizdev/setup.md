@@ -75,7 +75,7 @@ If not gitignored, add it:
 echo "secrets/" >> .gitignore
 ```
 
-### Step 6 — Create the Google Sheet
+### Step 6 — Create the Scraper Sheet
 
 1. Go to https://sheets.google.com → create a new blank spreadsheet
 2. Give it a name like "Dalgo — NGO Prospects"
@@ -84,20 +84,29 @@ echo "secrets/" >> .gitignore
    https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit
    ```
 
-### Step 7 — Share the Sheet with the Service Account
+### Step 7 — Create the Research Sheet
 
-In Google Sheets: Share → paste the `client_email` from the JSON key → set role
-to **Editor** → Send.
+1. Create a second blank spreadsheet (or use an existing one)
+2. Give it a name like "Dalgo — NGO Research"
+3. Copy its Sheet ID the same way
 
-This is the auth step — without it the scraper will get a 403.
+This sheet will hold the output of `/bizdev/research/research-ngo` in a tab
+called **"NGO Research"** (created automatically on first run).
 
-### Step 8 — Create the directory structure
+### Step 8 — Share Both Sheets with the Service Account
+
+For **each** of the two sheets: Share → paste the `client_email` from the JSON
+key → set role to **Editor** → Send.
+
+Without this, the scraper and research scripts will get a 403.
+
+### Step 9 — Create the directory structure
 
 ```bash
-mkdir -p workdocs/bizdev/research
+mkdir -p workdocs/bizdev
 ```
 
-Confirm `workdocs/bizdev/` is gitignored (it holds the config with Sheet ID):
+Confirm `workdocs/bizdev/` is gitignored (it holds the config with Sheet IDs):
 ```bash
 git check-ignore -v workdocs/bizdev/
 ```
@@ -107,13 +116,14 @@ If not gitignored, add it:
 echo "workdocs/bizdev/" >> .gitignore
 ```
 
-### Step 9 — Create `workdocs/bizdev/districts.json`
+### Step 10 — Create `workdocs/bizdev/districts.json`
 
 Create the file at `workdocs/bizdev/districts.json` with this structure:
 
 ```json
 {
   "sheet_id": "<SHEET_ID from Step 6>",
+  "research_sheet_id": "<SHEET_ID from Step 7>",
   "service_account_file": "../../secrets/<key-filename>.json",
   "districts": [
     {
@@ -126,20 +136,22 @@ Create the file at `workdocs/bizdev/districts.json` with this structure:
 ```
 
 Notes:
-- `service_account_file` is relative to the `scripts/` directory (where the
-  scraper runs from), so use `../../secrets/...` to reach `secrets/` at the repo root.
-- `tab` is the Google Sheet tab name that will be created or overwritten.
-- Start with one district — more can be added later with `/bizdev/scraping/add-district`.
+- `sheet_id` — the scraper sheet (district tabs written by `run_scraper.sh`)
+- `research_sheet_id` — the research sheet (NGO Research tab written by the profile scraper)
+- `service_account_file` is relative to the `scripts/` directory, so use `../../secrets/...`
+- `tab` is the Google Sheet tab name that will be created or overwritten
+- Start with one district — more can be added later with `/bizdev/scraping/add-district`
 
 Ask the user for:
-1. Their Sheet ID
-2. Their service account JSON filename
-3. Which district(s) they want to start with (suggest Bangalore, Hyderabad,
+1. Their scraper Sheet ID
+2. Their research Sheet ID
+3. Their service account JSON filename
+4. Which district(s) they want to start with (suggest Bangalore, Hyderabad,
    Chennai, Kochi as common starting points)
 
 Then write the file with their values.
 
-### Step 10 — Smoke test
+### Step 11 — Smoke test
 
 Run a single-district scrape to verify the full pipeline:
 
@@ -151,12 +163,12 @@ Expected output:
 - Python version check ✓
 - Dependencies ready ✓
 - NGO count printed, pages scraped
-- Rows written to the Sheet
+- Rows written to the scraper Sheet
 
-Open the Google Sheet and confirm rows appeared.
+Open the scraper Google Sheet and confirm rows appeared.
 
-**If 403 error:** Service account doesn't have Sheet access → revisit Step 7.
-**If FileNotFoundError on districts.json:** Path issue → check Step 9 structure.
+**If 403 error:** Service account doesn't have Sheet access → revisit Step 8.
+**If FileNotFoundError on districts.json:** Path issue → check Step 10 structure.
 **If ModuleNotFoundError:** Dependencies missing → re-run Step 2.
 
 ---
@@ -170,7 +182,7 @@ Once the smoke test passes, tell the user:
 > - `bash scripts/run_scraper.sh` — scrape all districts
 > - `/bizdev/scraping/refresh-source` — same, via Claude
 > - `/bizdev/scraping/add-district <Name>` — register a new district
-> - `/bizdev/research/research-ngo <NGO Name>` — deep research on a specific NGO
+> - `/bizdev/research/research-ngo <NGO Name>` — research an NGO and log to the Research Sheet
 >
-> Scraped data lives in your Google Sheet. Research briefs are saved to
-> `workdocs/bizdev/research/`.
+> Scraped data lives in your scraper Google Sheet. Research results are logged
+> to the "NGO Research" tab of your research Google Sheet.

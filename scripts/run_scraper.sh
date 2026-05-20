@@ -32,14 +32,14 @@ echo ""
 # ── 2. Install dependencies ────────────────────────────────
 echo "▶  Installing dependencies..."
 python3 -m pip install -q --upgrade pip
-python3 -m pip install -q -r requirements.txt
+python3 -m pip install -q -r give_do_requirements.txt
 echo "   Dependencies ready ✓"
 echo ""
 
 # ── 3. Check required files ────────────────────────────────
 echo "▶  Checking required files..."
-if [ ! -f "districts.json" ]; then
-  echo "❌  districts.json not found in $SCRIPT_DIR"
+if [ ! -f "../workdocs/bizdev/districts.json" ]; then
+  echo "❌  districts.json not found at workdocs/bizdev/districts.json"
   exit 1
 fi
 echo "   districts.json ✓"

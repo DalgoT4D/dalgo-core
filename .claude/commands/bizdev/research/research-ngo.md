@@ -1,10 +1,10 @@
 # /bizdev/research/research-ngo
 
-Research a specific NGO and save a structured brief to `scripts/research/`.
+Research a specific NGO and log findings to the Research Google Sheet.
 
 ## Input: $ARGUMENTS
 
-The NGO name, as listed on give.do or commonly known.
+The NGO name, exactly as it appears in the scraper sheet.
 
 Examples:
 - `/bizdev/research/research-ngo Pallium India`
@@ -12,115 +12,57 @@ Examples:
 
 ## Output
 
-Saves a markdown file to:
-```
-workdocs/bizdev/research/{ngo-slug}.md
-```
+Upserts a row (keyed by NGO name) into the **"NGO Research"** tab of the
+research Google Sheet configured in `workdocs/bizdev/districts.json`.
 
-Where `ngo-slug` is the NGO name lowercased with spaces replaced by hyphens
-(e.g., `pallium-india.md`).
+Columns written:
+`NGO Name | Profile URL | Cause Areas | Program Count | Impact Metric Count | Leadership | Researched At`
 
 ## Steps
 
-### 1. Find the give.do profile
+### 1. Verify config
 
-Search give.do for the NGO:
-- Try fetching: `https://give.do/discover/?q={NGO+Name}` 
-- Or search web for: `site:give.do {NGO Name}`
-- Identify their give.do profile URL (pattern: `give.do/discover/{ID}/{slug}/`)
+Check that `workdocs/bizdev/districts.json` exists and has a non-empty
+`research_sheet_id`. If missing, stop and tell the user to run `/bizdev-setup`
+or manually add `"research_sheet_id": "<sheet-id>"` to that file.
 
-Fetch the profile page and extract:
-- Official name
-- HQ location (city, state)
-- Registration details (FCRA, 80G, 12A, CSR-1 status)
-- Transparency/certification rating
-- FY year and Total Revenue
-- Total Expenses
-- Sector / cause areas
-- Brief description
+### 2. Run the profile scraper
 
-### 2. Research leadership & contacts
+```bash
+python3 scripts/give_do_profile_scraper.py "<NGO Name>"
+```
 
-Web search for:
-- `"{NGO Name}" founder OR "executive director" OR CEO`
-- `"{NGO Name}" board members`
+The script will:
+1. Look up the NGO's give.do Profile URL from the scraper sheet (column "Profile URL"
+   across all district tabs).
+2. Fetch the profile page and extract:
+   - **Cause areas** — category tags on the profile
+   - **Program count** — number of program/project cards
+   - **Impact metric count** — number of impact stat tiles
+   - **Leadership** — names and LinkedIn links from the team section
+3. Upsert the results into the "NGO Research" tab of the research sheet.
 
-Extract:
-- Founder(s) with brief background if available
-- Current leadership (ED/CEO name and title)
-- Any publicly listed contact (email, phone) from their website or give.do
+### 3. Report the result
 
-### 3. Research programs & focus areas
+After the script exits successfully, tell the user:
 
-From give.do profile + web search:
-- What programs do they run?
-- Which geographies / states do they operate in?
-- Who are their beneficiaries?
-- Any notable funders, CSR partners, or government tie-ups mentioned?
+```
+Research logged for: <NGO Name>
 
-### 4. Write the brief
+- Profile URL:    <url>
+- Cause Areas:    <value>
+- Programs:       <count>
+- Impact Metrics: <count>
+- Leadership:     <names>
 
-Save to `/Users/rroy/Documents/dalgo-core/workdocs/bizdev/research/{ngo-slug}.md` using this template:
+Sheet: https://docs.google.com/spreadsheets/d/<research_sheet_id>/
+```
 
-```markdown
-# {NGO Name}
+### Troubleshooting
 
-**Researched**: {date}
-**give.do Profile**: {url}
-**Location**: {city, state}
-
----
-
-## At a Glance
-
-| Field | Value |
+| Error | Fix |
 |---|---|
-| Sector | {sector/cause areas} |
-| Founded | {year if known} |
-| FY Revenue | {amount} ({FY year}) |
-| FY Expenses | {amount} |
-| Transparency | {rating} |
-| Certifications | {FCRA / 80G / 12A / CSR-1} |
-
----
-
-## Programs & Focus Areas
-
-{2-4 sentences describing what they do, where they operate, and who they serve.}
-
-**Key programs:**
-- {Program 1}
-- {Program 2}
-
-**Geographies:** {states/districts}
-**Beneficiaries:** {who they serve}
-
----
-
-## Leadership & Contacts
-
-| Name | Role |
-|---|---|
-| {Name} | {Founder / Executive Director / etc.} |
-
-**Website**: {url if found}
-**Contact**: {email or phone if publicly available}
-
----
-
-## Notes
-
-{Any other relevant context — funders, CSR partners, notable work, red flags, or open questions.}
-```
-
-### 5. Confirm
-
-Tell the user:
-```
-Research saved to: workdocs/bizdev/research/{ngo-slug}.md
-
-Key findings:
-- Revenue: {amount} ({FY})
-- Location: {city, state}
-- Focus: {1-line summary}
-```
+| `research_sheet_id` not set | Add it to `workdocs/bizdev/districts.json` and share the sheet with the service account |
+| NGO not found in any district tab | Run `bash scripts/run_scraper.sh` first to populate the scraper sheet |
+| HTTP 403 on profile fetch | give.do may be rate-limiting; wait 60 s and retry |
+| Cause areas / counts all "N/A" | give.do may have changed its HTML — inspect the page and update selectors in `scripts/give_do_profile_scraper.py` |
