@@ -73,7 +73,7 @@ flowchart TD
 1. **M&E Goal Conversation**
    - Meet with client to understand program objectives and M&E goals per program/intervention.
    - Capture: program names, reporting cadence, audience (internal vs. donor), key questions the data must answer.
-   - Output: consultant fills `me_goals.md` — this stays as a lightweight MD summary.
+   - Output: LLM generated `me_goals.md` — this stays as a lightweight MD summary.
 
 2. **Client Fills Requirements Sheet**
    - Share the **Requirements Sheet** (Google Sheet template) with the client.
@@ -82,12 +82,18 @@ flowchart TD
    - The consultant reviews this sheet and adds annotations in a dedicated "Consultant Notes" column.
    - This sheet is the input that later feeds KPI Framework creation after data exploration. It does not need to be re-created — it is updated in-place as the engagement progresses.
 
+2. **Create md_goals summary** (/discover)
+   - LLM curates summary from notes of the meeting with the client, requirements sheet, NGO Website etc
+   - Input: *JSON structured file* containing some of the below - natural language summary of M&E Goals, meeting notes, websites/resources for organization context, requirements sheet
+   - Output: *me_goals.md*
+
+
 ### Artifacts
 
 | Artifact | Format | Owner | Purpose |
 |---|---|---|---|
-| `me_goals.md` | Markdown | Consultant | Summary of goals conversation |
-| Requirements Sheet | Google Sheet | Client (consultant annotates) | Client's intended metrics, data sources, calculation intent — primary requirements input |
+| `me_goals.md` | Markdown | LLM | Summary of goals conversation |
+| Requirements Sheet | Google Sheet | Client (consultant reviews) | Client's intended metrics, data sources, calculation intent — primary requirements input |
 
 ---
 
@@ -98,10 +104,10 @@ flowchart TD
 ### Steps
 
 3. **Ingest Raw Data**
-   - Data sources (KoboToolbox, Google Sheets, ODK, CRMs, etc.) are ingested via Airbyte into raw tables in the warehouse.
+   - Data sources (KoboToolbox, Google Sheets, ODK, CRMs, etc.) are ingested via Airbyte into raw tables in the warehouse by the consultant.
    - Confirm the source systems referenced in the Requirements Sheet are actually available.
 
-4. **Explore Raw Table Structure**
+4. **Explore Raw Table Structure** (/explore_data)
    - For each raw table, query to understand:
      - Column names and data types
      - Null rates and cardinality for key columns
@@ -109,12 +115,17 @@ flowchart TD
      - Join keys (IDs linking tables)
      - Date/time fields and formats
      - Anomalies, duplicates, encoding issues
+   - It avoids looking at and querying PII columns, consulting will have pre-filled column level documentation for PII columns
+   - Input: *sources.yml* created by consultant containing relevant raw tables and their schemas
+   - Output: *sources.yml* enhanced and populated with column level information and llm notes to improve future usage and decision making
+   - 
 
 ### Artifacts
 
 | Artifact | Format | Owner | Purpose |
 |---|---|---|---|
-| `table_profiles.md` | Markdown | Consultant | Per-table structure notes from exploration |
+| `sources.yml` | Markdown | Consultant | Input for LLM to begin data exploration, with pii columns marked and documented |
+| `sources.yml` | Markdown | LLM | Per-table structure notes from exploration |
 
 ---
 
@@ -140,12 +151,14 @@ They are separate sheets because they have different audiences (client vs. data 
 
 ### Steps
 
-5. **Curate Metrics List**
+5. **Curate Metrics List** (/curate_metrics)
    - Read the Requirements Sheet and enumerate all KPIs that need to be tracked.
    - Use the explored raw tables to deduplicate, consolidate overlapping metrics, and flag anything ambiguous for clarification.
    - This list becomes the rows of the KPI Framework Sheet.
+   - Input: sources.yml, requirements sheet
+   - Ouput: 'metrics.md' 
 
-6. **Build the KPI Framework Sheet**
+6. **Build the KPI Framework Sheet** (/build_kpi_sheet)
    - One row per KPI. Columns:
      - **KPI name** — human-readable label
      - **Requirements alignment** — which row in the Requirements Sheet this maps to
@@ -157,10 +170,14 @@ They are separate sheets because they have different audiences (client vs. data 
      - **Mart model** — which `fct_` or `dim_` model will expose this metric
      - **Status** — draft / confirmed / revised
    - The consultant or LLM should build this sheet from both inputs together: the Requirements Sheet and the explored raw data.
+   - Input:requirements sheet, sources.yml
+   - Output: 
 
-7. **Design ER Diagram**
+7. **Design ER Diagram** (/generate_er_diagram)
    - Use the KPI Framework Sheet to decide which entities, joins, and dbt model boundaries are needed.
    - Document: entities and grain, relationships and cardinalities, which raw tables map to which entities, and the join paths needed for each KPI.
+   - Input: KPI Framework, sources.yml, requirement sheets
+   - Output: 'er_diagram.md'
 
 ### Artifacts
 
