@@ -108,6 +108,7 @@ Use numbered steps for sequential actions. Each step = one action.
 3. Keep steps atomic — one click or one fill per step.
 4. Use "Select" not "Click" (works for touchscreens too).
 5. Use quotes for exact text the user should type, bold for UI labels they click.
+6. **Never break a numbered list with an admonition block.** Docusaurus resets the counter after any block-level element, so a step numbered "5." after a `:::info` block renders as "1.". Either place the admonition after the last step, or fold the note inline within the step text.
 
 ### Example
 
@@ -169,7 +170,7 @@ You may need to whitelist these IP addresses in your firewall: `13.202.128.47`, 
 
 ### `:::warning` — Destructive or irreversible actions
 
-Use when an action could cause data loss or is difficult to undo.
+Use when an action could cause data loss or is difficult to undo *once confirmed*. Dalgo often shows a confirmation dialog before a destructive action — the `:::warning` belongs near the action, not on the confirmation step itself. Do not write "This cannot be undone without canceling" — that is confusing. Write what happens after the user confirms.
 
 ```markdown
 :::warning
