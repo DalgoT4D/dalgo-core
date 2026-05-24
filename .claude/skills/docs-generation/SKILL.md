@@ -7,6 +7,27 @@ description: Generate and maintain Docusaurus documentation for Dalgo features. 
 
 Reference for generating Dalgo's user-facing documentation. Maps features to webapp routes and doc locations, defines the doc repo structure, sidebar conventions, and the IA principles that govern where content lives.
 
+## PR Filtering Rules (for bi-weekly scan)
+
+When scanning merged PRs for documentation needs, apply these rules:
+
+**Always document:**
+- New UI pages, flows, or settings the user interacts with
+- New pipeline/dashboard/report behaviours or configuration options
+- UX changes that alter how a user completes a task (e.g. a new "Load more" button changes how users read logs)
+
+**Document briefly (one sentence update to the relevant section):**
+- Bug fixes that restore previously broken behaviour for a specific named integration (e.g. "SharePoint source connector creation now works correctly")
+
+**Skip:**
+- Internal refactors, test-only changes, CI/CD, dependency bumps
+- Monitoring/error-tracking changes (Sentry, Pendo, analytics) — these are invisible to users
+- Infrastructure changes (worker pools, queues, EKS) — no user-visible effect
+- Bug fixes that restore generic behaviour already described by existing docs (no mention needed)
+
+**Paired PRs (backend + frontend for the same feature):**
+When a backend repo and a frontend repo both have PRs for the same feature (e.g. "add multi-tab support to dashboards"), document the feature **once** from the user's perspective. Reference both PR numbers in the commit message but don't write separate docs for each. The user only cares what they can see and do — not which layer implemented it.
+
 ## IA Principles (read before writing anything)
 
 The sidebar mirrors the product left-nav exactly. Sections 1–3 are docs-only orientation. Sections 4–9 match the product navigation order. Section 10 is support convention.
@@ -236,6 +257,24 @@ tutorialSidebar: [
 - **No `<!-- SCREENSHOT: ... -->` HTML comment placeholders** shipped to main. If a real screenshot is not available, use a `:::info Screenshot coming soon` admonition instead. It's honest and renders correctly.
 - Screenshots live in `static/img/{feature}/`. File naming: `{feature}_{description}.png`, lowercase, underscores.
 - Capture with the Playwright script at `scripts/screenshot_docs_all.py` using the staging environment.
+
+## Self-improvement workflow
+
+When improving this skill after a bi-weekly run, **never commit to `main`**. Always use a branch:
+
+```bash
+git checkout -b improve/docs-generation-skill
+git add .claude/skills/docs-generation/SKILL.md
+git commit -m "improve(skills): ..."
+git push -u origin improve/docs-generation-skill
+# open a PR — do not merge automatically
+```
+
+If `git push` returns 403 (the session's git credentials may not have write access), use `mcp__github__push_files` targeting the branch name instead of `main`:
+
+```
+mcp__github__push_files  owner=dalgot4d  repo=dalgo-core  branch=improve/docs-generation-skill
+```
 
 ## Related Files
 
