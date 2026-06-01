@@ -237,6 +237,30 @@ tutorialSidebar: [
 - Screenshots live in `static/img/{feature}/`. File naming: `{feature}_{description}.png`, lowercase, underscores.
 - Capture with the Playwright script at `scripts/screenshot_docs_all.py` using the staging environment.
 
+## Deployment in Remote Environments
+
+When running in a remote Claude Code session (e.g. via claude.ai/code or GitHub Actions), GitHub MCP tools are scoped to a single allowed repo. They cannot push to `DalgoT4D/dalgo_docs` directly.
+
+**Fallback workflow when push to dalgo_docs is blocked:**
+
+1. Clone via git: `git clone https://github.com/DalgoT4D/dalgo_docs.git /tmp/dalgo_docs`
+2. Create a branch, apply all doc edits to the clone.
+3. Attempt `git push -u origin <branch>` — this will fail without HTTPS credentials.
+4. Report the prepared diff clearly. Example report format:
+
+```
+## Changes ready to apply (push blocked)
+The following files were updated in /tmp/dalgo_docs:
+- docs/charts/creating-a-chart.md — [what changed and why]
+- docs/data/ingest/sources.md — [what changed and why]
+
+To apply: cherry-pick the commit or copy the diff below and apply manually.
+```
+
+5. Include the full `git diff` output so a team member can `git apply` it directly.
+
+Note: commit signing (`/tmp/code-sign`) is scoped to the primary session repo (dalgo-core). Commits to external repo clones will fail with "missing source". This is expected — report it; do not bypass signing with `--no-gpg-sign`.
+
 ## Related Files
 
 - `style-guide.md` in this directory — writing conventions, page structure, voice, admonition rules
