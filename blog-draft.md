@@ -1,106 +1,75 @@
-# How I Used Claude to Manage an Entire Open Source Project in One Session
+# Building and Shipping an MCP Server for NGO Data Infrastructure
 
-*A walkthrough of reviewing 250 issues, auditing 12 pull requests, and shipping automated CI — without leaving the chat.*
-
----
-
-A few weeks ago I sat down with a growing list of tasks for [Dalgo MCP](https://github.com/DalgoT4D/dalgo-mcp) — a new MCP server we're building that lets AI assistants talk directly to Dalgo's data platform. There were Linear issues stacking up, a dozen open pull requests waiting for review, and no CI pipeline to catch regressions.
-
-I decided to do something different. Instead of grinding through it tab by tab, I opened a Claude Code session and just… talked my way through it.
-
-This is what happened.
+*How we used Claude Code to manage 250 issues, audit 12 pull requests, ship automated CI — and what it taught us about running MCP servers in production.*
 
 ---
 
-## The Problem: Too Many Things, Not Enough Eyes
+A few weeks ago I sat down with a growing list of tasks for [Dalgo MCP](https://github.com/DalgoT4D/dalgo-mcp) — a new MCP server we're building that lets AI assistants talk directly to Dalgo's data platform. There were Linear issues stacking up, a dozen open pull requests waiting for review, no CI pipeline, and a longer-term question I'd been putting off: what does it actually take to run an MCP server in production?
 
-Dalgo is an open-source data platform built for NGOs. We help small organisations — the kind running on Excel sheets and good intentions — set up automated data pipelines, dashboards, and reporting. The team is lean: a handful of engineers, a PM, a design lead, some consultants.
-
-The `dalgo-mcp` repo is our newest bet: an MCP server so that AI tools like Claude can query your Dalgo pipelines, dashboards, and warehouse directly in conversation. It's been moving fast.
-
-Fast, in this case, meant 12 open pull requests and nobody had reviewed a single one.
+I decided to tackle all of it in one session using Claude Code. This is what happened — and what I learned about the gap between "it works on my machine" and production-ready AI tooling.
 
 ---
 
-## Step 1: Pulling the Full Picture from Linear
+## What Dalgo MCP Does
 
-I started by asking Claude to pull all our open issues from Linear.
+[Dalgo](https://github.com/DalgoT4D/DDP_backend) is an open-source data platform built for NGOs. We help small organisations — the kind running on Excel sheets and good intentions — set up automated data pipelines, dashboards, and reporting.
 
-Two hundred and fifty issues came back — spanning engineering, marketing, consulting, and design. Not just `dalgo-mcp` stuff — the full picture of what the organisation was tracking. At a glance I could see:
+The MCP server is our newest layer: instead of logging into a dashboard to check if a pipeline ran or to query your data warehouse, you ask Claude. The server exposes ~50 tools that let an AI assistant list pipelines, trigger syncs, browse schemas, query charts, create reports, and search documentation — all through the Model Context Protocol.
 
-- **21 Dalgo MCP issues** — all in Backlog, assigned to me, ranging from urgent (PII masking gap, JWT token leak) to low (auto-generate README table)
-- **Metrics & KPIs sprint** was mid-flight with several dogfood sign-offs still pending
-- **Prefect upgrade to 3.6.24** was broken into 5 phases, all in progress
-- A smattering of marketing, brand, and consulting tasks mixed in
-
-The important thing wasn't the count. It was having the whole board in front of me in one read, grouped by project and priority, without clicking through ten Linear views. Thirty seconds of parsing instead of five minutes of navigation.
+It's built on [FastMCP](https://github.com/jlowin/fastmcp) in Python, with two transport modes: `stdio` for Claude Desktop and `streamable-http` for the Anthropic MCP connector.
 
 ---
 
-## Step 2: Reviewing PRs in dalgo-core
+## Part 1: Managing the Project with Claude
 
-Next I pulled all pull requests from `dalgo-core`, our monorepo. Nineteen total — one still open.
+### Pulling 250 Issues from Linear
 
-PR #19 — *"improve(skills): strengthen docs-generation for bi-weekly scan"* — had been sitting open since May 24. It added filtering rules for what to document during bi-weekly doc scans, a paired-PR rule for features that span backend and frontend, and a self-improvement workflow for the skill itself.
+The session started with pulling our full issue board. Two hundred and fifty issues came back across engineering, marketing, consulting, and design. At a glance:
 
-Small PR, clear scope, no obvious issues. I noted it for a quick merge.
+- **21 Dalgo MCP issues** — Backlog, ranging from urgent (PII masking gap, JWT token leak) to low (auto-generate README table)
+- **Metrics & KPIs sprint** mid-flight with several sign-offs pending
+- **Prefect 3.6.24 upgrade** broken into 5 phases, all in progress
 
-The other 18 were all merged. Looking at them in sequence told a story: the team had been steadily building out the skills and commands system — spec writing, PR review, debugging — and iterating on the consulting workflow process.
+The value wasn't the count. It was having the whole board in one read, without clicking through ten views. Thirty seconds of parsing instead of five minutes of navigation.
 
-Useful context. All of it in two minutes.
+### Auditing 12 Open PRs
 
----
+The `dalgo-mcp` repo had 12 open pull requests — all generated in a prior session where Claude had worked through the Linear backlog and created a PR per issue. Each was scoped and documented. None had been verified.
 
-## Step 3: The Real Work — 12 Open PRs in dalgo-mcp
-
-Here's where it got interesting.
-
-The `dalgo-mcp` repo had 12 open pull requests, all opened on the same day, all by the same author (me, via Claude). This was the output of a session where I'd asked Claude to work through the Linear backlog and generate PRs for each issue. Each PR was neat, scoped, and had a clear test plan.
-
-But had any of them actually been tested? Did they break anything? Did they conflict with each other?
-
-I asked Claude to run the verification locally — fetch all 12 branches from GitHub, check out each one, and run two checks:
-1. Does `from dalgo_mcp.server import app` import cleanly in stdio mode?
+Rather than reading diffs manually, I asked Claude to fetch all 12 branches and run two checks on each:
+1. Does `from dalgo_mcp.server import app` import cleanly?
 2. Do the tests pass?
 
-The script ran each branch in sequence, cleaning up between checkouts, installing dependencies fresh each time. Here's what came back:
-
 ```
-PR #22 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #23 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #24 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #25 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #26 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #27 | PASS | Import: PASS | Tests: SKIP (no tests/)
+PR #22 | PASS | Import: PASS | Tests: SKIP
+PR #23 | PASS | Import: PASS | Tests: SKIP
+PR #24 | PASS | Import: PASS | Tests: SKIP
+PR #25 | PASS | Import: PASS | Tests: SKIP
+PR #26 | PASS | Import: PASS | Tests: SKIP
+PR #27 | PASS | Import: PASS | Tests: SKIP
 PR #28 | PASS | Import: PASS | Tests: 43 passed ✓
-PR #29 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #30 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #31 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #32 | PASS | Import: PASS | Tests: SKIP (no tests/)
-PR #33 | PASS | Import: PASS | Tests: SKIP (no tests/)
+PR #29 | PASS | Import: PASS | Tests: SKIP
+PR #30 | PASS | Import: PASS | Tests: SKIP
+PR #31 | PASS | Import: PASS | Tests: SKIP
+PR #32 | PASS | Import: PASS | Tests: SKIP
+PR #33 | PASS | Import: PASS | Tests: SKIP
 
 Result: 12 / 12 PRs healthy
 ```
 
-**12 for 12.** Every branch imported cleanly. PR #28 — the one that added the test suite — ran 43 tests and passed all of them.
+**12 for 12.** All branches imported cleanly. PR #28 ran 43 tests — all passed.
 
-One thing stood out: only PR #28 had tests. The other 11 PRs would skip the test step simply because the `tests/` directory didn't exist on those branches. The fix is obvious: merge #28 first. Once the tests land on `main`, every subsequent branch will inherit them and the test step will actually run.
+One thing only became visible by looking at all 12 at once: only PR #28 had tests. The other 11 would skip the test step because `tests/` didn't exist on their branches. The fix is obvious — merge #28 first — but it's exactly the kind of dependency that gets missed when you review PRs one at a time.
 
-That's the kind of thing you only notice when you look at all 12 at once.
+### Shipping Automated CI
 
----
-
-## Step 4: Building the Automated Review Pipeline
-
-Running checks manually in a session is useful. But it evaporates the moment the session ends.
-
-I wanted something permanent: a GitHub Actions workflow that would run these same checks on every new PR, automatically, without anyone having to remember.
+Running checks manually evaporates when the session ends. I wanted something permanent: a GitHub Actions workflow that runs on every new PR.
 
 Claude built `.github/workflows/pr-review.yml` with two jobs:
 
-**Job 1 — verify:** Installs the package via `uv`, checks the server imports cleanly in stdio mode (no live backend needed — dummy env vars are enough), then runs `pytest` if a `tests/` directory exists.
+**Job 1 — verify:** Installs via `uv`, checks the server imports cleanly in stdio mode with dummy env vars (no live backend needed), then runs `pytest` if tests exist.
 
-**Job 2 — claude-review:** Uses `anthropics/claude-code-action@beta` to read the PR diff and post inline review comments. The prompt is specific: check for breaking changes to tool APIs, missing `await` on async calls, PII leaks in chart/table data queries, auth token handling, pattern consistency, and test coverage gaps. It finishes with a verdict comment — Approve / Request Changes / Comment — plus a 1-2 sentence assessment.
+**Job 2 — claude-review:** Uses `anthropics/claude-code-action@beta` to read the PR diff and post inline review comments with a specific prompt — check for breaking tool API changes, missing `await`, PII leaks, auth token handling, pattern consistency, and test coverage gaps.
 
 ```yaml
 - name: Review PR with Claude
@@ -114,50 +83,135 @@ Claude built `.github/workflows/pr-review.yml` with two jobs:
       Post inline comments. Finish with a verdict.
 ```
 
-I also created a `CLAUDE.md` in the repo root — a context file that tells the review agent about the codebase architecture, key patterns (`register(app, get_client)`, `format_response()`, `mask_pii_in_rows()`), and the two transport modes. Without this, the agent would guess at patterns and produce noisy false positives.
+A `CLAUDE.md` in the repo root gives the review agent codebase context — architecture, key patterns, PII column names. Without it, the agent guesses and produces noisy false positives.
 
 ---
 
-## What I Couldn't Do (Honestly)
+## Part 2: What It Actually Takes to Run MCP in Production
 
-I ran into one real wall: the GitHub MCP tools in this session were scoped to `dalgo-core` only. I couldn't push the workflow to `dalgo-mcp` from here — not via the git proxy, not via the API.
+This is where the session shifted from project management to architecture. After shipping the CI workflow, I asked: *what's actually missing before this can go to production?*
 
-This is a real limitation of how Claude Code on the web handles repository access. Each session is tied to a specific repo. If you need to work across repos, you need separate sessions — or you push the files manually.
+The answer has five layers.
 
-I ended up generating the workflow files locally, exporting them, and they're ready to be committed manually. A five-minute job. Not a blocker, just a speed bump.
+### Layer 1: Security
+
+The most immediate gaps were data security.
+
+**PII masking is incomplete.** Our warehouse tools already mask sensitive columns (`name`, `email`, `phone`, `aadhaar`). But chart data queries — `dalgo_get_chart_data` — returned rows unmasked. One of the 12 PRs (#22) fixes this. It's the first one to merge.
+
+**Debug mode leaks tokens.** Our `DebugRequestMiddleware` logs full request headers and bodies. In debug mode, `Authorization: Bearer <token>` goes to stdout. `DALGO_DEBUG=false` must be enforced in production, and your log aggregator shouldn't be capturing raw stdout either.
+
+**Credentials in env vars.** In stdio mode, `DALGO_USERNAME` and `DALGO_PASSWORD` live in environment variables. Fine for local dev. For production, these need to come from AWS Secrets Manager or Vault — not a `.env` file on a server.
+
+**Input sanitization.** Tool parameters flow directly into API query strings. Basic length limits and character validation need to be added before exposing the server publicly.
+
+### Layer 2: Reliability
+
+**No retry logic.** The `DalgoClient` has zero retry handling. A transient 500 from the Dalgo API fails immediately. Exponential backoff with 2 retries is the minimum.
+
+**Hardcoded timeout.** `httpx.AsyncClient(timeout=60.0)` — some dbt runs legitimately take longer. This needs to be configurable via `DALGO_REQUEST_TIMEOUT`.
+
+**No graceful shutdown.** Under Kubernetes, a missing `SIGTERM` handler means in-flight requests get killed mid-response. A drain handler is essential before EKS deployment.
+
+**JWT memory leak.** The `_token_clients` dict caches one client per JWT token — and never evicts. Under real load, this is an OOM waiting to happen. PR #23 adds TTL-based eviction using the JWT `exp` claim.
+
+### Layer 3: Observability
+
+Without observability, debugging production issues is blind.
+
+**Structured logging.** `logging.basicConfig()` outputs plain text. Production log aggregators work better with JSON. One formatter change in `server.py` and you get structured logs with timestamps, levels, and tool names in a format that Datadog or CloudWatch can actually query.
+
+**Health endpoint.** PR #31 adds `/health` with uptime, active token clients, and tool count. This is the minimum for a Kubernetes liveness probe.
+
+**Sentry.** The MCP server needs its own DSN and the `httpx` integration so API errors are captured automatically — not just logged to stdout.
+
+**Per-tool call logging.** PR #31 also adds a logging middleware that records tool name, duration, and success/failure on every MCP call. These numbers — which tools are called most, which ones fail most — are what you need when something breaks at 2am.
+
+### Layer 4: The Gateway Layer
+
+This is the part that most MCP implementations skip until it's too late.
+
+Right now, our MCP server is connected directly to the Dalgo API. That works for one org, one AI client, and one engineer. It starts breaking down when:
+
+- Multiple orgs share the same server
+- Different teams need different tool access
+- You want to track which AI client is generating which API cost
+- You need to enforce rate limits per user
+
+The solution is an **MCP gateway** — a control plane that sits between AI clients and MCP servers. Instead of agents connecting directly to tools, all requests pass through a central layer that handles:
+
+- **Tool discovery** — which tools exist, which tools *this client* can see
+- **Access control** — org-level and user-level permission policies
+- **Rate limiting** — per-client request budgets and quotas
+- **Observability** — unified logs across all tool calls, not fragmented per-server
+- **Cost tracking** — which org is generating which API load
+
+Think of it the way API gateways work for microservices. You don't expose internal services directly — you route through a gateway that enforces policy. MCP at scale needs the same pattern.
+
+For Dalgo, this means we eventually want per-org tool visibility (org A shouldn't see org B's pipelines in tool descriptions), per-user rate limits, and a unified audit trail across all MCP interactions. Today we have none of that. It's fine for early access. It's not fine for 20 production NGO orgs.
+
+### Layer 5: Deployment Infrastructure
+
+**Dockerfile.** There isn't one. Before EKS, we need a minimal image:
+
+```dockerfile
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml .
+COPY src/ src/
+RUN uv sync --no-dev
+ENV DALGO_TRANSPORT=streamable-http
+EXPOSE 8080
+CMD ["uv", "run", "dalgo-mcp"]
+```
+
+**CORS.** If the server is called from browser-based MCP clients, CORS needs to be configured explicitly — not inherited from FastMCP defaults.
+
+**Integration tests.** The 43 unit tests mock the HTTP client. They won't catch API contract changes between `dalgo-mcp` and the Django backend. We need at least one integration test per tool category running against staging.
+
+---
+
+## The Merge Order That Matters
+
+When you have 12 PRs all touching the same codebase, merge order is architecture. Here's ours:
+
+| Order | PR | Reason |
+|-------|-----|--------|
+| 1 | #22 — PII masking in chart data | Live security risk |
+| 2 | #23 — JWT TTL eviction | Live memory leak |
+| 3 | #25 — Typed error hierarchy | Foundation for everything above |
+| 4 | #26 — Output truncation | Reliability — pipeline logs fill context windows |
+| 5 | #28 — Unit tests | Tests must land before refactors |
+| 6 | #31 — Health + logging | Observability before any public exposure |
+| 7 | #24, #27, #29, #30 | Features and tooling |
+| 8 | #32 — Centralize params | Safe after tests are in |
+| 9 | #33 — `adapt_context()` | Most invasive refactor — last |
 
 ---
 
 ## What I Actually Learned
 
-**1. Having context is the bottleneck, not doing the work.**
-Most of the time I spend "managing" a project is actually spent gathering context: loading the issue board, remembering which PRs are open, recalling what each branch does. When Claude can do all of that retrieval in seconds, the actual decisions — what to prioritise, what to review carefully, what to skip — take maybe 10% of the usual time.
+**Context is the bottleneck, not execution.** Most of the time I spend "managing" a project is gathering context — loading the issue board, remembering what each PR does. When that retrieval takes seconds instead of minutes, the actual decisions take 10% of the usual time.
 
-**2. Running checks against all branches in parallel is underrated.**
-Nobody does this manually. It's too tedious. But "does this branch import cleanly" is a trivially automatable check that catches a surprising number of issues before they ever become merge conflicts or broken deploys.
+**Run all your branches at once.** Nobody does this manually. But "does this branch import cleanly" catches a surprising number of issues before they become broken deploys. It takes one script and five minutes.
 
-**3. Merge order matters, and it's easy to miss.**
-PR #28 adds the test suite. PR #29–33 don't have tests on their branches — because they were branched from `main` before the tests existed. Once you merge #28, those branches need to be rebased or they'll still skip tests in CI. That's the kind of dependency that gets missed when you review PRs one at a time.
+**The review prompt is the product.** "Review this PR" produces noise. "Check for PII leaks in `dalgo_get_chart_data`, missing `await` on async calls, and changes to the `register()` signature" produces actionable findings. The specificity is the hard work — Claude does the execution.
 
-**4. The review prompt is the product.**
-The Claude code review is only as good as its prompt. "Review this PR" is useless. "Check for PII leaks in `dalgo_get_chart_data`, missing `await` on async calls, and changes to the `register()` signature" is specific enough to be actionable. Writing a precise prompt is actually the hard creative work here — the execution is trivial.
+**CLAUDE.md is load-bearing.** A context file with the codebase's patterns, architecture, and domain-specific column names transforms an AI reviewer from a generic linter into something that actually knows your codebase.
 
-**5. CLAUDE.md is load-bearing.**
-Giving the agent a CLAUDE.md with codebase context — the patterns, the architecture, the PII column names — transforms it from a generic code reviewer into someone who actually knows the codebase. The delta in review quality is significant.
+**MCP governance is infrastructure, not an afterthought.** The jump from "it works" to "it's production-ready" in MCP is mostly about access control, observability, and rate limiting — not the tool implementations themselves. Those concerns belong at an infrastructure layer (a gateway), not scattered across tool modules.
 
 ---
 
 ## What's Next
 
-The workflow is ready. Once it's merged into `dalgo-mcp`, every future PR gets:
-- Server import check (catches broken imports before review)
-- pytest run (43 tests, growing)
-- Claude review with inline comments and a verdict
+The CI workflow is ready to merge. The 12 PRs are verified. The production checklist is clear.
 
-The 12 open PRs all passed local verification. The recommended merge order is: security/fix PRs first (#22, #23, #25, #26), then tests (#28), then features and refactors in dependency order, with the `adapt_context()` refactor (#33) last since it touches every tool module.
+The longer-term work — gateway layer, per-org tool visibility, structured audit trails — is what separates an MCP server that works in a demo from one that 20 NGOs can rely on for their data operations.
 
-That's a sprint's worth of review work, done in an afternoon, documented, and automated going forward.
+That's the work worth doing.
 
 ---
 
-*Dalgo is open source (AGPL-3.0). If you're building data infrastructure for an NGO and want to contribute, the [dalgo-mcp repo](https://github.com/DalgoT4D/dalgo-mcp) is a great place to start.*
+*Dalgo is open source (AGPL-3.0). The MCP server is at [github.com/DalgoT4D/dalgo-mcp](https://github.com/DalgoT4D/dalgo-mcp). If you're building data infrastructure for social-impact organisations and want to contribute, PRs are open.*
