@@ -340,25 +340,3 @@ Two-axis floor (audience minimum-role × View/Edit) + org-default · direct shar
 1. **Settings > Org-defaults controls shipping inert** — confirm with Engineering whether to render them in Spec A or hold the entire Org-defaults section for Spec B to avoid shipping non-functional toggles.
 
 ---
-
-## 18. Implementation Order
-
-```
-1. Role enum collapse + migration (AM/PM→Admin, Analyst→Analyst, Guest→Member)  → backend, independent
-2. Analyst infra-permission downgrade + Data read-only/hidden rendering          → backend + frontend
-3. Sidebar + route gating + No Access page                                       → frontend
-4. Settings consolidation IA + Org-defaults controls (inert)                     → frontend + backend
-5. Ownership: owner column, backfill, owner-only delete, Admin override, transfer → backend + frontend
-6. Settings > Users invite surface + comms rollout                               → backend + frontend
-```
-
-Spec A is independently shippable end-to-end. Resource-level sharing, the share modal, and grant-driven content function arrive with Spec B; until then, content visibility follows §12.
-
----
-
-## 19. Engineering Notes
-
-- Role decoupling is the core idea: do **not** reintroduce function-by-role anywhere in the content layer. The only role-driven capability checks are sidebar visibility, Data-infra access, and Settings gating.
-- Build the permission resolver in Spec A so resource grants slot in later without rework (Spec B extends, doesn't replace).
-- The `owner` column and Admin effective-owner override are the two pieces Spec B depends on most — land them solidly here.
-- Org-defaults storage ships now, consumption later — keep the read path stubbed for Spec B.
