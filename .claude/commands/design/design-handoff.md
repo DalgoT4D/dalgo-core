@@ -11,9 +11,9 @@ Bridge a feature spec into Figma designs, then produce `design.md` so engineerin
 - A feature name: `access-control` (same as feature folder)
 
 **Flags:**
-- `--brainstorm` — 2–3 rough layout variants per screen on an "Explorations" page. No prototype, no `design.md`. Use when direction is still open.
-- `--draft` — One lo-fi wireframe per screen, one feedback round. No prototype wiring. Use when iterating on layout.
-- _(default, no flag)_ — Full-fidelity frames, prototype wired, `design.md` written. Use when design is settled and you're producing the engineering handoff.
+- `--brainstorm` — Produces `layout-directions.md`: 2–3 annotated text layout variants per surface for the designer to pick from. No Figma, no `design.md`. Use when direction is still open.
+- `--draft` — One lo-fi Figma frame per screen, one feedback round. No prototype wiring. Use when iterating on layout.
+- _(default, no flag)_ — Full-fidelity Figma frames, prototype wired, `design.md` written. Use when design is settled and you're producing the engineering handoff.
 
 ---
 
@@ -42,7 +42,7 @@ From the cleaned `$ARGUMENTS`, resolve the spec using these rules in order:
 
 Derive `{feature_name}` and `{version}` (e.g. `v1`, `v2`) from the resolved path.
 
-### 4. Resolve the Figma file key
+### 4. Resolve the Figma file key (skip in brainstorm mode)
 Look for `features/{feature_name}/{version}/design.md`. If it exists, find the line:
 ```
 file_key: {key}
@@ -79,7 +79,7 @@ Parse the spec for every user-facing screen, flow, modal, or component that need
 
 For each surface extract:
 - **Purpose:** what the user accomplishes
-- **Persona:** which Dalgo user type (admin, PM, analyst, viewer)
+- **Persona:** which Dalgo user type (admin, analyst, member)
 - **Key decisions:** things needing a designer's judgment before building
 - **Dependencies:** does this screen reference another surface?
 
@@ -130,7 +130,7 @@ Each scenario becomes a named prototype flow in Figma.
 Look for `features/{feature_name}/{version}/design-brief.md`.
 
 **If it exists and has content below any `Your direction:` line:** Read it, extract designer
-direction per surface, and continue directly to Phase 2.9.
+direction per surface, and continue directly to Phase 2.5.
 
 **If it's missing or blank:** Write the brief file (step 2) and stop.
 
@@ -138,9 +138,10 @@ direction per surface, and continue directly to Phase 2.9.
 Create `features/{feature_name}/{version}/design-brief.md`:
 
 ```markdown
-# Design Brief — {Feature Name} {Version}
+# Design Brief — {Feature Name} ({Version})
 
 **Status:** Awaiting designer input
+**Spec:** {spec path}
 **Generated:** {date}
 
 Fill in your direction below each surface, then re-run:
@@ -153,7 +154,7 @@ Leave a section blank to let me use best judgment for an NGO audience
 
 {for each surface:}
 
-## Surface: {Screen Name}
+## Surface {N}: {Screen Name}
 
 **Who uses it:** {persona}
 **What it does:** {purpose}
@@ -173,20 +174,85 @@ Print:
 ```
 Brief written to features/{feature_name}/{version}/design-brief.md
 
-Open it in your editor, fill in direction for each surface, then re-run:
+Open it, fill in direction for each surface, then re-run:
 /design:design-handoff {spec path}
 ```
 
-**Stop here.** Do not spawn any Figma agents.
+**Stop here.** Do not proceed to layout directions or Figma.
 
 ### 3. Parse a completed brief
 When re-running and the brief has responses, extract direction per surface.
 Where a `Your direction:` field is blank or missing, note that surface as `[NEEDS CLARIFICATION]`
-and generate using best judgment for a non-technical NGO audience.
+and use best judgment for a non-technical NGO audience.
 
 ---
 
-## Phase 2.9: Scout
+## Phase 2.5: Layout Directions
+
+Generate layout directions for every surface. This is a text-only step — no Figma yet.
+
+For each surface, produce **2–3 annotated layout variants** as structured text.
+Each variant should describe:
+- Overall layout (sidebar position, content zones, modal vs full-page)
+- Key UI elements and their placement
+- Copy decisions (labels, headings, CTAs, helper text)
+- How the designer direction (or best judgment) shaped the choice
+- One sentence on the trade-off vs the other variants
+
+Use this format per surface:
+
+```
+## {Screen Name}
+
+Designer direction: {direction from brief, or "[NEEDS CLARIFICATION] — using best judgment"}
+
+### Variant A — {short name}
+Layout: {description}
+Key elements: {list}
+Copy: {headings, CTAs, labels}
+Trade-off: {what this gains vs other variants}
+
+### Variant B — {short name}
+...
+
+### Variant C — {short name} (include only if meaningfully different)
+...
+
+**Recommended:** Variant {X} — {one sentence why, grounded in NGO audience and constitution rules}
+```
+
+Write the full output to `features/{feature_name}/{version}/layout-directions.md`.
+
+---
+
+### Brainstorm mode: stop here
+
+If mode is `--brainstorm`, print:
+
+```
+Layout directions written to features/{feature_name}/{version}/layout-directions.md
+
+Review the variants for each surface, then tell me which to build:
+"go with Variant B for surface 2, Variant A for the rest"
+
+Or run with --draft or no flag to proceed to Figma once you've picked.
+```
+
+**Stop here.** Do not proceed to Figma in brainstorm mode.
+
+---
+
+### Draft / Ship mode: pick variants
+
+If mode is `--draft` or ship (no flag):
+
+Check `layout-directions.md` for any designer pick annotations (e.g. "→ build this" or similar
+freeform notes added after the file was generated). If picks exist, use them. If not, use the
+Recommended variant for each surface and note it.
+
+---
+
+## Phase 2.9: Scout (draft and ship mode only)
 
 Spawn a Scout agent with this prompt:
 
@@ -197,8 +263,7 @@ Figma file key: {file_key}
 
 1. Call get_metadata on the file. Collect all existing frames: their names, node IDs, and x positions.
 2. If the file has no frames, return next_x = 0.
-3. If frames exist, call get_screenshot on each and note which belong to this feature.
-   Return the rightmost x position across all frames + 100px gap as next_x.
+3. If frames exist, return the rightmost x position across all frames + 100px gap as next_x.
 4. Return this exact JSON:
 {
   "file_key": "{file_key}",
@@ -212,23 +277,28 @@ Wait for Scout to complete before spawning frame agents.
 
 ---
 
-## Phase 3: Generate Designs in Figma
+## Phase 3: Generate Designs in Figma (draft and ship mode only)
+
+### Tool choice
+Use the `figma-generate-design` skill to build each frame. **Do not use raw Plugin API
+JavaScript via `use_figma` to construct frames** — that approach is fragile and expensive.
+`use_figma` is reserved for prototype connection wiring only (Phase 3.5).
+
+Load `skill://figma/figma-generate-design/SKILL.md` before spawning frame agents.
 
 ### Mode behaviour
 
-| Mode | Page | Fidelity | Variants | Prototype |
-|------|------|----------|----------|-----------|
-| Brainstorm | "Explorations" | Rough wireframe | 2–3 per surface | No |
-| Draft | "Designs" | Lo-fi wireframe | 1 per surface | No |
-| Ship | "Designs" | Full-fidelity | 1 per surface | Yes |
+| Mode | Page | Fidelity | Prototype |
+|------|------|----------|-----------|
+| Draft | "Designs" | Lo-fi wireframe | No |
+| Ship | "Designs" | Full-fidelity | Yes |
 
 ### Frame naming
-- Ship / Draft: `S{n} · {Screen Name}` (e.g. `S1 · User Management`)
-- Brainstorm variants: `S{n}a · {Screen Name}`, `S{n}b · {Screen Name}`, `S{n}c · {Screen Name}`
+- `S{n} · {Screen Name}` (e.g. `S1 · User Management`)
 - States: `S{n}-{State}` (e.g. `S1-Empty`, `S1-Error`)
 
 ### Frame agent prompt
-Spawn one agent per surface in parallel. Each **must** return this fixed JSON schema — no other format:
+Spawn one agent per surface in parallel. Each **must** return this fixed JSON schema:
 
 ```json
 {
@@ -251,41 +321,38 @@ Feature: {Feature Name}
 Screen: {Screen Name}
 Persona: {persona}
 Purpose: {purpose}
-Mode: {brainstorm | draft | ship}
+Mode: {draft | ship}
 
-Designer direction:
-{direction from design-brief.md, or "[NEEDS CLARIFICATION] — use best judgment for NGO audience"}
+Selected layout variant:
+{variant text from layout-directions.md}
 
 User flow for this screen:
 {flow block from Phase 1.5}
 
-Design standards — read and apply in full:
+Design standards — apply in full:
 {full content of patterns.md}
 
-Constitution — never violate these rules:
+Constitution — never violate these:
 {full content of .claude/constitution.md}
 
 Figma file key: {file_key}
-Page: {page name — "Explorations" for brainstorm, "Designs" for draft/ship}
-Frame name: {frame name per naming convention above}
+Page: "Designs"
+Frame name: {frame name per naming convention}
 Frame size: 1440×900px
 Position: x={scout.next_x + (surface_index × 1540)}, y=0
 
-{brainstorm only: create 2–3 variants at x offsets of 0, 1540, 3080 from your starting position}
-
 Steps:
-1. Load skill://figma/figma-use/SKILL.md before calling use_figma — this is mandatory.
-2. Create the page if it does not exist.
-3. Create the frame at the specified position with the specified name.
-4. After creating, call get_screenshot on the created node.
-5. Record any design decisions made (label choices, layout choices, copy decisions).
-6. Record anything that needs the designer's input as [NEEDS CLARIFICATION].
-7. Return the fixed JSON schema — node_id, frame_name, screenshot_url, decisions[], needs_clarification[].
+1. Load skill://figma/figma-generate-design/SKILL.md before designing.
+2. Create the "Designs" page if it does not exist.
+3. Build the frame using figma-generate-design guidance.
+4. After creating, call get_screenshot on the node.
+5. Record design decisions and any [NEEDS CLARIFICATION] items.
+6. Return the fixed JSON schema.
 ```
 
 ### Collect results
-Wait for all agents. Validate every response matches the fixed schema before proceeding.
-If an agent returns malformed output, re-prompt it once requesting the correct JSON.
+Wait for all agents. Validate every response matches the fixed schema.
+If an agent returns malformed output, re-prompt once requesting the correct JSON.
 
 ---
 
@@ -303,17 +370,20 @@ Connections:
 ```
 
 ### 2. Add connections via use_figma
-Load skill://figma/figma-use/SKILL.md first (mandatory before calling use_figma).
+Load `skill://figma/figma-use/SKILL.md` before calling `use_figma`.
+
+This is the only place `use_figma` is called — for adding prototype connections only,
+not for building frames.
 
 For each connection:
-- Select the trigger element on the source frame
+- Select the trigger element on the source frame by node ID
 - Add interaction: `On click → Navigate to → {target frame node ID}`
 - Overlays / modals: use `Open overlay` instead of Navigate
 - Back / cancel flows: `Navigate to` with the specific target frame node ID
 
 ### 3. Set flow start frames
 For each scenario, mark the first frame as the starting point in Figma's prototype panel,
-labelled with the scenario name (e.g. "Invite a new team member").
+labelled with the scenario name.
 
 ### 4. Record wiring results
 Note any connections that could not be wired for manual follow-up.
@@ -346,7 +416,7 @@ Check the screenshot against every item. Return this exact JSON:
 }
 ```
 
-**If failures:** Send the failure list back to the frame agent that created this frame:
+**If failures:** Send the failure list back to the frame agent:
 ```
 Your frame "{frame_name}" failed design review. Fix these issues and regenerate the frame,
 then return the updated JSON schema.
@@ -355,14 +425,12 @@ Failures:
 {failures list}
 ```
 
-**Retry limit:** 3 rounds per frame. If still failing after round 3, mark the frame:
+**Retry limit:** 3 rounds per frame. If still failing after round 3, mark the frame
 `[REVIEW FAILED — manual fix needed]` and continue.
-
-**If passed:** Frame is final. Record it as passing.
 
 ---
 
-## Phase 3.9: Consistency Spot-Check
+## Phase 3.9: Consistency Spot-Check (draft and ship mode only)
 
 After all frames pass (or exhaust retries), spawn one consistency agent:
 
@@ -373,7 +441,7 @@ Frames: {list of node_ids and frame names}
 
 Check for drift in:
 - Sidebar (width, active state style)
-- Header (height, element positions, org name display)
+- Header (height, element positions)
 - Page padding (should be --spacing-page-x 32px horizontal, --spacing-page-y 28px vertical)
 - Primary CTA button (colour, style)
 - Typography (heading sizes and weights)
@@ -390,52 +458,56 @@ If drift is found, note it for the designer in Phase 5. Do not auto-fix.
 
 ## Phase 5: Designer Sign-off
 
-Present results:
-
+### Brainstorm mode
 ```
-Designs ready on the "{page name}" page.
+Layout directions ready: features/{feature_name}/{version}/layout-directions.md
+
+{N} surfaces, {total} variants
+
+Review and tell me which variants to build, then re-run without --brainstorm.
+```
+
+### Draft / Ship mode
+```
+Designs ready — "Designs" page in Figma.
 
 | Frame | Node ID | Status |
 |-------|---------|--------|
-| S1 · User Management | ... | ✅ Passed |
-| S2 · Invite Modal    | ... | ⚠ [NEEDS CLARIFICATION] — role picker direction not provided |
-| S3 · Role Editor     | ... | 🔴 [REVIEW FAILED] — fix manually |
+| S1 · {Screen Name} | ... | ✅ Passed |
+| S2 · {Screen Name} | ... | ⚠ [NEEDS CLARIFICATION] — {what was assumed} |
+| S3 · {Screen Name} | ... | 🔴 [REVIEW FAILED] — fix manually |
 
 {if consistency issues}
 Consistency issues flagged:
 - S1 and S3: page padding differs
 
-{if [NEEDS CLARIFICATION] items}
-These were generated without your direction — confirm or redirect:
-{list of needs_clarification items per frame, with what was assumed}
-
 Options:
 1. Approve — I'll write design.md and engineering can start
 2. Revise a frame: "redo S2 with inline role picker, not a modal"
-3. Brainstorm alternatives: "brainstorm S3"
+3. Revisit layout directions: "brainstorm S3 again"
 ```
 
 Wait for designer response before writing `design.md`.
 
 ---
 
-## Phase 6: Write design.md
+## Phase 6: Write design.md (draft and ship mode only)
 
-Write `features/{feature_name}/{version}/design.md` as the engineering handoff document:
+Write `features/{feature_name}/{version}/design.md`:
 
 ```markdown
 # {Feature Name} — Design ({Version})
 
 **Status:** Ready for engineering
-**Spec:** ../spec.md
-**Figma:** https://figma.com/file/{file_key}
+**Spec:** {spec path}
+**Figma:** https://www.figma.com/design/{file_key}
 **Last updated:** {date}
 
 ## Screens
 
-| Screen | Frame name | Node ID | Figma link | Status |
-|--------|-----------|---------|-----------|--------|
-| {Screen Name} | S1 · {Screen Name} | {node_id} | [View →](https://figma.com/file/{file_key}?node-id={node_id}) | ✅ Ready |
+| Screen | Frame | Node ID | Figma link | Status |
+|--------|-------|---------|------------|--------|
+| {Screen Name} | S1 · {Screen Name} | {node_id} | [View →](https://www.figma.com/design/{file_key}?node-id={node_id}) | ✅ Ready |
 
 ## User Flows & Prototype
 
@@ -489,13 +561,16 @@ Next: /engineering/plan-feature features/{feature_name}/{version}/spec.md
 
 - [ ] Mode resolved (brainstorm / draft / ship)
 - [ ] Constitution loaded before any agent was spawned
-- [ ] Figma file key resolved (from `design.md` or newly created)
-- [ ] Design brief written or read (session was not blocked)
-- [ ] Scout ran and returned canvas state and `next_x`
-- [ ] All frame agents returned the fixed JSON schema
+- [ ] Figma file key resolved — or skipped for brainstorm mode
+- [ ] Design brief written or read
+- [ ] Layout directions written to `layout-directions.md`
+- [ ] Brainstorm mode stopped after layout-directions.md
+- [ ] Scout ran and returned canvas state and `next_x` (draft/ship only)
+- [ ] Frame agents used `figma-generate-design` skill — not raw use_figma JS
+- [ ] All frame agents returned the fixed JSON schema (draft/ship only)
 - [ ] Evaluator loop ran for every frame (draft and ship modes)
-- [ ] Consistency spot-check ran across all final frames
+- [ ] Consistency spot-check ran across all final frames (draft/ship only)
 - [ ] Designer signed off
-- [ ] `design.md` written with node IDs, decisions, known issues, and `file_key`
+- [ ] `design.md` written with node IDs, decisions, known issues, and `file_key` (draft/ship only)
 - [ ] `spec.md` updated with one-line pointer to `design.md`
 - [ ] Next step printed clearly
