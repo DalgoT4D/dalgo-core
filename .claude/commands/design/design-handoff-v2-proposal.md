@@ -139,6 +139,116 @@ Replace the blocking Phase 2 with the spec-kit pattern:
 
 ---
 
+## Design System Integration
+
+The canonical design system lives in `DalgoT4D/dalgo-design-system` (a separate repo), as two
+CSS files that are the **single source of truth** for all visual decisions:
+
+- **`tokens.css`** — CSS custom properties for color, typography, spacing, radii, shadow, z-index,
+  and transitions. All prefixed `--color-*`, `--font-*`, `--space-*`, `--spacing-*`, `--radius-*`,
+  `--shadow-*`, `--z-*`, `--transition-*`.
+- **`components.css`** — 24 components, all values referencing `var(--*)` — zero hardcoded values.
+
+### What `patterns.md` gets wrong today
+
+`patterns.md` is the current source of design truth inside the command. It has three specific
+contradictions with `tokens.css` and one policy conflict with `components.css`:
+
+| # | patterns.md says | Design system says | Fix |
+|---|------------------|--------------------|-----|
+| 1 | Uses Shadcn token names (`--primary`, `text-muted-foreground`) | Tokens are `--color-brand-primary`, `--color-text-secondary`, etc. | Replace all token references |
+| 2 | "24px page padding" | `--spacing-page-x` (horizontal, 32px); `--spacing-page-y` (vertical, 28px) | Update padding rule to match named tokens |
+| 3 | "Lucide icons at 16px (h-4 w-4) everywhere" | Icon sizes are context-specific per component | Replace blanket rule with per-context guidance |
+| 4 | "Sentence case on buttons" (constitution rule) | `.btn { text-transform: uppercase }` in `components.css` | **Needs a decision** — is casing set in code (uppercase) or copy (sentence case)? |
+
+Item 4 is a conflict between the UI constitution rule and the CSS implementation. The most likely
+intent: `.btn` sets uppercase as a CSS default that the design system overrides per variant;
+`patterns.md` / the constitution should govern copy, not override CSS `text-transform`. Resolution
+needed before rewriting the Figma Skill prompt.
+
+### Missing tokens (gaps in tokens.css)
+
+RAG status colors — used extensively throughout the app — are **not in `tokens.css`**:
+
+- on-track (green)
+- at-risk (amber)
+- off-track (red)
+- stale (grey)
+
+These are referenced in multiple features and need to be added to the design system repo before
+the Figma Skill can be authoritative. Until then, they should be documented in `patterns.md` as
+a pending addition.
+
+### Component families (basis for tiered loading)
+
+`components.css` contains 24 components, grouped into two tiers for context management:
+
+**Tier 1 — always load (layout skeleton, ~5 components)**
+
+Every screen shares these; they go into the Figma Skill's always-available section:
+
+| Component | Role |
+|-----------|------|
+| Reset | CSS baseline |
+| Page Shell | Fixed header + scrollable content pattern |
+| Header | Top bar, org switcher |
+| Sidebar | Left nav rail |
+| Nav Items | Active/hover states |
+
+**Tier 2 — load per frame (component families, ~19 components)**
+
+Frame agents request only what their surface needs. Group by screen archetype:
+
+| Family | Components | Typical surfaces |
+|--------|-----------|-----------------|
+| Data display | Table, Pagination, Action Buttons | List screens, data grids |
+| Input | Forms (label, input, select, tags, frequency, toggle, tabs) | Create/edit flows |
+| Overlay | Modal, Empty State | Dialogs, zero-state screens |
+| Status/card | Badge Pill, Badge/Avatar, Step Indicator, Card | Dashboards, pipeline status |
+| Specialist | Chart Type Icons, Header Org | Analytics screens, multi-org flows |
+
+The frame agent prompt declares which family it needs; the orchestrator loads only those component
+definitions into the agent's context. This keeps each agent's prompt under ~4k tokens for the
+design system portion.
+
+### How patterns.md should change
+
+`patterns.md` should become a **Tailwind/Shadcn mapping document**: it translates design-system
+token names into the framework-specific class names used in `webapp_v2`. It should not restate
+spacing values or hex codes — those live in `tokens.css`. Structure:
+
+```
+# patterns.md (after fix)
+
+Source of truth: DalgoT4D/dalgo-design-system (tokens.css + components.css)
+This file maps design-system tokens → Tailwind / Shadcn class names for webapp_v2.
+
+## Token mapping
+--color-brand-primary    → bg-teal-600 / text-teal-600
+--spacing-page-x         → px-12 (48px) [verify against tokens.css]
+--spacing-page-y         → py-7 (28px) [verify against tokens.css]
+...
+
+## Constitution reference
+Non-negotiables are in .claude/constitution.md — not restated here.
+```
+
+### Figma Skill authoring plan
+
+The Figma Skill is a markdown file that Figma's canvas agent loads automatically. Its content
+should be generated **from** `tokens.css` + `components.css`, not from `patterns.md`:
+
+1. **Tier 1 section** — universal layout tokens (colors, spacing, radii, shadows)
+2. **Tier 2 sections** — one section per component family; each references component CSS rules
+   translated into Figma property names (fills, auto-layout padding, corner radius, etc.)
+3. **Constitution section** — Dalgo's non-negotiable UX rules, imported from `.claude/constitution.md`
+
+Authoring question (still open): is the Skill file authored manually in Figma, or generated by a
+script that reads `tokens.css` → outputs Figma Skill markdown? The script approach is more
+maintainable but requires confirming Figma's native Skills format.
+
+---
+
 ## Agent topology (Anthropic orchestrator-workers + evaluator)
 
 ```
@@ -194,12 +304,21 @@ P0 fixes are independent of the bigger redesign and can ship immediately:
 1. **P0 — make it runnable:** remove the hardcoded Figma file key (look up / create per-feature
    instead), fix MCP tool names, and retire the ghost `~/Dalgo/FIGMA.md` dependency (replace
    with constitution + Skill references).
-2. **P1 — constitution + Figma Skill:** extract the constitution; publish patterns as a Skill;
-   drop pattern-pasting from the agent prompt.
-3. **P1 — `design.md` ownership:** switch Phase 6 to write `design.md`; leave a spec.md pointer.
-4. **P2 — modes + async brief:** add `--brainstorm` / `--draft`; move the brief to a file with
+2. **P0 — fix patterns.md:** correct the three token contradictions (token names, page padding,
+   icon sizes) so that agents reading it today get accurate information. Reframe it as a
+   Tailwind/Shadcn mapping doc — no pixel values, no hex codes, a reference to `tokens.css`
+   as source of truth.
+3. **P1 — add missing RAG tokens to dalgo-design-system:** open a PR to `tokens.css` adding
+   `--color-status-on-track`, `--color-status-at-risk`, `--color-status-off-track`,
+   `--color-status-stale`. Until merged, document interim values in `patterns.md`.
+4. **P1 — constitution:** extract the constitution from `CLAUDE.md` / `patterns.md`; resolve
+   the button-casing conflict before writing it. Point `patterns.md` and `checklist.md` at it.
+5. **P1 — Figma Skill:** author the Skill from `tokens.css` (Tier 1 universal tokens) and
+   `components.css` (Tier 2 component families). Drop pattern-pasting from agent prompts.
+6. **P1 — `design.md` ownership:** switch Phase 6 to write `design.md`; leave a spec.md pointer.
+7. **P2 — modes + async brief:** add `--brainstorm` / `--draft`; move the brief to a file with
    `[NEEDS CLARIFICATION]` tagging.
-5. **P2 — agent topology:** add Scout, the evaluator loop, and the consistency spot-check with
+8. **P2 — agent topology:** add Scout, the evaluator loop, and the consistency spot-check with
    a fixed frame-agent return schema.
 
 ---
@@ -211,9 +330,16 @@ and constitution location chosen; naming and brainstorm-storage recommended). Wh
 before the command rewrite:
 
 1. **Confirm the two recommendations** (naming standard, brainstorm storage) — or override them.
-2. **Skill authoring:** publishing `patterns.md` as a Figma Skill is the one step that depends
-   on Figma's native Skills mechanism. We should confirm the workspace has it enabled and decide
-   whether the Skill is authored in Figma or generated from `patterns.md` in-repo.
-3. **Engineering buy-in on the constitution:** `plan-feature` / `execute-plan` pointing at the
+2. **Button casing conflict:** `components.css` sets `text-transform: uppercase` on `.btn`;
+   the constitution rule says "sentence case on buttons." Needs a decision: does the CSS
+   govern (uppercase always), does copy govern (sentence case, CSS overridden per variant),
+   or is this a design-system bug to fix upstream?
+3. **RAG status tokens:** `on-track` / `at-risk` / `off-track` / `stale` color tokens are
+   missing from `tokens.css`. Need to be added to `DalgoT4D/dalgo-design-system` before the
+   Figma Skill can be authoritative for status screens.
+4. **Skill authoring approach:** should the Figma Skill file be authored manually in Figma, or
+   generated by a script that reads `tokens.css` → outputs Skill markdown? Script is more
+   maintainable. Also need to confirm the Figma workspace has native Skills enabled.
+5. **Engineering buy-in on the constitution:** `plan-feature` / `execute-plan` pointing at the
    same `.claude/constitution.md` is a cross-team change — worth a nod from engineering before
    we wire it in.
