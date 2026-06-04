@@ -6,8 +6,9 @@ Bridge a feature spec into Figma designs, then produce `design.md` so engineerin
 
 **Accepts:**
 - A spec file path: `features/access-control/v1/spec.md`
-- A feature folder: `features/access-control/v1/`
-- A feature name: `access-control` (looks for `features/access-control/v1/spec.md`)
+- A versioned folder: `features/access-control/v1/`
+- A feature folder: `features/access-control/` (selects the highest version with a `spec.md`)
+- A feature name: `access-control` (same as feature folder)
 
 **Flags:**
 - `--brainstorm` — 2–3 rough layout variants per screen on an "Explorations" page. No prototype, no `design.md`. Use when direction is still open.
@@ -30,12 +31,16 @@ Read `.claude/constitution.md` — these rules govern every phase and every agen
 Do not proceed until this file is loaded.
 
 ### 3. Locate the spec
-From the cleaned `$ARGUMENTS`, find the spec:
-- If it ends in `.md`, use it directly
-- If it's a folder, look for `spec.md` inside it
-- If it's a feature name, check `features/{name}/v1/spec.md` then `features/{name}/spec.md`
+From the cleaned `$ARGUMENTS`, resolve the spec using these rules in order:
 
-Derive `{feature_name}` and `{version}` (e.g. `v1`) from the path.
+1. **Ends in `.md`** — use it directly as the spec file.
+2. **Ends in `/v{N}/` or is a versioned folder** — look for `spec.md` inside it.
+3. **Feature folder or feature name** — list all `v{N}/` subdirectories inside
+   `features/{name}/`, sort by version number descending, and use the `spec.md`
+   from the highest version that contains one. If no versioned folder exists,
+   fall back to `features/{name}/spec.md`.
+
+Derive `{feature_name}` and `{version}` (e.g. `v1`, `v2`) from the resolved path.
 
 ### 4. Resolve the Figma file key
 Look for `features/{feature_name}/{version}/design.md`. If it exists, find the line:
