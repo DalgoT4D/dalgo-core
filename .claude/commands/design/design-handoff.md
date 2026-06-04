@@ -2,364 +2,575 @@
 
 ## Input: $ARGUMENTS
 
-Bridge a feature spec into Figma designs with designer input, then update the spec so engineering can start.
+Bridge a feature spec into Figma designs, then produce `design.md` so engineering can start.
 
-Accepts:
-- A spec file path: `features/rbac/v1/spec.md`
-- A feature folder: `features/rbac/v1/`
-- A feature name: `rbac` (looks for `features/rbac/v1/spec.md`)
+**Accepts:**
+- A spec file path: `features/access-control/v1/spec.md`
+- A versioned folder: `features/access-control/v1/`
+- A feature folder: `features/access-control/` (selects the highest version with a `spec.md`)
+- A feature name: `access-control` (same as feature folder)
 
-Flags:
-- `--auto` — skip designer input, generate all surfaces autonomously (for prototyping only)
+**Flags:**
+- `--brainstorm` — Produces `layout-directions.md`: 2–3 annotated text layout variants per surface for the designer to pick from. No Figma, no `design.md`. Use when direction is still open.
+- `--draft` — One lo-fi Figma frame per screen, one feedback round. No prototype wiring. Use when iterating on layout.
+- _(default, no flag)_ — Full-fidelity Figma frames, prototype wired, `design.md` written. Use when design is settled and you're producing the engineering handoff.
+
+---
+
+## Phase 0: Setup
+
+### 1. Parse mode
+- Argument contains `--brainstorm` → **Brainstorm mode**
+- Argument contains `--draft` → **Draft mode**
+- No flag → **Ship mode**
+
+Strip the flag from `$ARGUMENTS` before locating the spec.
+
+### 2. Read the constitution
+Read `.claude/constitution.md` — these rules govern every phase and every agent spawned.
+Do not proceed until this file is loaded.
+
+### 3. Locate the spec
+From the cleaned `$ARGUMENTS`, resolve the spec using these rules in order:
+
+1. **Ends in `.md`** — use it directly as the spec file.
+2. **Ends in `/v{N}/` or is a versioned folder** — look for `spec.md` inside it.
+3. **Feature folder or feature name** — list all `v{N}/` subdirectories inside
+   `features/{name}/`, sort by version number descending, and use the `spec.md`
+   from the highest version that contains one. If no versioned folder exists,
+   fall back to `features/{name}/spec.md`.
+
+Derive `{feature_name}` and `{version}` (e.g. `v1`, `v2`) from the resolved path.
+
+### 4. Resolve the Figma file key (skip in brainstorm mode)
+Look for `features/{feature_name}/{version}/design.md`. If it exists, find the line:
+```
+file_key: {key}
+```
+Use that key.
+
+If `design.md` doesn't exist or has no `file_key`, create a new Figma file:
+- Use `create_new_file` with the name `"{Feature Name} — {Version}"` (e.g. `"Access Control — v1"`)
+- Create `features/{feature_name}/{version}/design.md` with just the file key recorded:
+
+```markdown
+# {Feature Name} — Design ({Version})
+
+**Status:** In progress
+
+## Figma
+
+file_key: {key}
+```
 
 ---
 
 ## Phase 1: Read & Extract
 
 ### 1. Read the spec
-Load the spec file from `$ARGUMENTS`. If a folder is given, look for `spec.md` inside it. If only a feature name is given, check `features/{name}/v1/spec.md` then `features/{name}/spec.md`.
+Load the spec file. Read it in full.
 
 ### 2. Extract UI surfaces
-Parse the spec for every user-facing screen, flow, modal, or component that needs designing. Look for:
+Parse the spec for every user-facing screen, flow, modal, or component that needs designing:
 - Explicit screen names ("User management page", "Invite modal")
-- User stories that imply a UI ("As an admin, I want to assign roles...")
-- State changes that need visual design (empty states, error states, success states)
-- Shared components mentioned (badges, selectors, inline controls)
+- User stories implying a UI ("As an admin, I want to assign roles...")
+- State changes requiring visual design (empty, error, success states)
+- Shared components (badges, selectors, inline controls)
 
-For each surface, extract:
-- **Purpose:** what the user accomplishes on this screen
-- **Persona:** which Dalgo user type interacts with it (admin, PM, field staff)
-- **Key decisions:** things that need a designer's judgment before the screen can be built
+For each surface extract:
+- **Purpose:** what the user accomplishes
+- **Persona:** which Dalgo user type (admin, analyst, member)
+- **Key decisions:** things needing a designer's judgment before building
 - **Dependencies:** does this screen reference another surface?
 
-### 3. Load patterns
-Read `.claude/skills/design-review/patterns.md` and `.claude/skills/design-review/checklist.md` — these are the design standards all generated frames must pass.
+### 3. Load design standards
+Read `.claude/skills/design-review/patterns.md` and `.claude/skills/design-review/checklist.md`
+into the orchestrator context. These are passed to agents in full — do not paste excerpts.
 
 ---
 
-## Phase 1.5: User Flow Extraction
+## Phase 1.5: User Flow Extraction (skip in brainstorm mode)
 
-For each surface extracted above, map the full user journey through that screen. This becomes the basis for prototype connections wired in Figma after frames are created.
+For each surface, map the full user journey. This becomes the basis for prototype connections.
 
 For each surface, produce a flow block:
 
 ```
-**Screen: {Screen Name}**
+Screen: {Screen Name}
+
 Entry points:
 - {How the user arrives — e.g. "clicks 'Invite user' button on User management page"}
 - {Alternative entry — e.g. "redirected here after accepting email invite"}
 
 Happy path:
-1. {Step 1 — e.g. "User sees modal with Name, Email, Role fields"}
-2. {Step 2 — e.g. "User fills in details and clicks 'Send invite'"}
-3. {Step 3 — e.g. "Success toast shown, modal closes, user appears in table"}
+1. {Step 1}
+2. {Step 2}
+3. {Step 3}
 
 Branch points:
-- {Condition → Screen} e.g. "Email already exists → inline field error (stays on modal)"
-- {Condition → Screen} e.g. "Last admin demotion attempt → blocked with error banner"
-- {Condition → Screen} e.g. "Cancel / Esc → dismiss modal, no change"
+- {Condition} → {Screen or state}
+- {Condition} → {Screen or state}
 
 Exit points:
 - Success → {target screen or state}
 - Cancel → {target screen or state}
-- Error → {stays on screen / redirects to X}
+- Error → {stays / redirects to X}
 ```
 
-Group screens into **scenarios** — named end-to-end journeys a user might take:
+Group screens into **scenarios** — named end-to-end journeys:
 - e.g. "Invite a new team member" → Invite modal → Success state → User management table
-- e.g. "Change a user's role" → User table → Role selector → Confirm modal → Updated table
-- e.g. "Remove a user" → User table → Delete confirm → Empty state (if last user)
 
-Each scenario becomes a **named prototype flow** in Figma.
-
-Store the extracted flows and scenarios for use in Phase 3 (Figma agent prompts) and Phase 3.5 (prototype wiring).
+Each scenario becomes a named prototype flow in Figma.
 
 ---
 
-## Phase 2: Design Brief (skip if `--auto`)
+## Phase 2: Async Brief
 
-Present the extracted surfaces to the designer in this format:
+### 1. Check for an existing brief
+Look for `features/{feature_name}/{version}/design-brief.md`.
+
+**If it exists and has content below any `Your direction:` line:** Read it, extract designer
+direction per surface, and continue directly to Phase 2.5.
+
+**If it's missing or blank:** Write the brief file (step 2) and stop.
+
+### 2. Write the brief file
+Create `features/{feature_name}/{version}/design-brief.md`:
+
+```markdown
+# Design Brief — {Feature Name} ({Version})
+
+**Status:** Awaiting designer input
+**Spec:** {spec path}
+**Generated:** {date}
+
+Fill in your direction below each surface, then re-run:
+`/design:design-handoff {spec path}`
+
+Leave a section blank to let me use best judgment for an NGO audience
+(I'll tag those decisions `[NEEDS CLARIFICATION]` in the output).
+
+---
+
+{for each surface:}
+
+## Surface {N}: {Screen Name}
+
+**Who uses it:** {persona}
+**What it does:** {purpose}
+
+**Decisions needed:**
+- {Decision 1}
+- {Decision 2}
+
+**Reference design (if any):**
+
+**Your direction:** <!-- fill in here -->
+
+---
+```
+
+Print:
+```
+Brief written to features/{feature_name}/{version}/design-brief.md
+
+Open it, fill in direction for each surface, then re-run:
+/design:design-handoff {spec path}
+```
+
+**Stop here.** Do not proceed to layout directions or Figma.
+
+### 3. Parse a completed brief
+When re-running and the brief has responses, extract direction per surface.
+Where a `Your direction:` field is blank or missing, note that surface as `[NEEDS CLARIFICATION]`
+and use best judgment for a non-technical NGO audience.
+
+---
+
+## Phase 2.5: Layout Directions
+
+Generate layout directions for every surface. This is a text-only step — no Figma yet.
+
+For each surface, produce **2–3 annotated layout variants** as structured text.
+Each variant should describe:
+- Overall layout (sidebar position, content zones, modal vs full-page)
+- Key UI elements and their placement
+- Copy decisions (labels, headings, CTAs, helper text)
+- How the designer direction (or best judgment) shaped the choice
+- One sentence on the trade-off vs the other variants
+
+Use this format per surface:
 
 ```
-I found {N} screens to design for {Feature Name}.
+## {Screen Name}
 
-Before I generate anything in Figma, I need your direction on a few things:
+Designer direction: {direction from brief, or "[NEEDS CLARIFICATION] — using best judgment"}
 
----
+### Variant A — {short name}
+Layout: {description}
+Key elements: {list}
+Copy: {headings, CTAs, labels}
+Trade-off: {what this gains vs other variants}
 
-**Screen 1: {Screen Name}**
-Who uses it: {persona}
-What it does: {purpose}
-Decisions needed:
-- {Decision 1 — e.g. "Inline role edit or separate modal?"}
-- {Decision 2 — e.g. "What happens when you demote the last admin?"}
-- {Decision 3 — e.g. "Any reference design or existing Dalgo screen to match?"}
-
----
-
-**Screen 2: {Screen Name}**
+### Variant B — {short name}
 ...
 
----
+### Variant C — {short name} (include only if meaningfully different)
+...
 
-Reply with your direction for each screen. You can:
-- Answer the decisions ("Screen 1: inline edit, block last-admin demotion")
-- Skip a screen ("skip Screen 3 — not needed for v1")
-- Add context ("reference the existing Reports share modal for Screen 2")
-- Point to inspiration ("Screen 4 should look like Notion's permission picker")
-
-I won't generate anything until you reply.
+**Recommended:** Variant {X} — {one sentence why, grounded in NGO audience and constitution rules}
 ```
 
-**Wait for designer reply before proceeding.** Do not spawn any Figma agents until the designer has responded.
-
-### Parse designer reply
-Read the reply and map each direction to its surface:
-- Extract copy/label decisions ("use 'Full access' not 'Admin'")
-- Note referenced screens or external inspiration
-- Note skipped surfaces
-- Note any specific layout preferences ("single-step modal", "use the existing empty state pattern")
+Write the full output to `features/{feature_name}/{version}/layout-directions.md`.
 
 ---
 
-## Phase 3: Generate Designs in Figma
+### Brainstorm mode: stop here
 
-### 1. Determine Figma page name
-Use `"{Feature Name} Designs"` as the page name (e.g. "RBAC Designs"). Check if it already exists using `mcp__figma__get_metadata` on file key `v8BYFkebTGQNuiRrCXWssa`.
-
-### 2. Spawn one Figma agent per surface (in parallel)
-For each surface (excluding skipped ones), spawn an agent with this context:
+If mode is `--brainstorm`, print:
 
 ```
-You are a UX designer for Dalgo — an open-source data platform for non-technical NGO program managers.
+Layout directions written to features/{feature_name}/{version}/layout-directions.md
+
+Review the variants for each surface, then tell me which to build:
+"go with Variant B for surface 2, Variant A for the rest"
+
+Or run with --draft or no flag to proceed to Figma once you've picked.
+```
+
+**Stop here.** Do not proceed to Figma in brainstorm mode.
+
+---
+
+### Draft / Ship mode: pick variants
+
+If mode is `--draft` or ship (no flag):
+
+Check `layout-directions.md` for any designer pick annotations (e.g. "→ build this" or similar
+freeform notes added after the file was generated). If picks exist, use them. If not, use the
+Recommended variant for each surface and note it.
+
+---
+
+## Phase 2.9: Scout (draft and ship mode only)
+
+Spawn a Scout agent with this prompt:
+
+```
+You are reading a Figma file to establish baseline context for frame agents.
+
+Figma file key: {file_key}
+
+1. Call get_metadata on the file. Collect all existing frames: their names, node IDs, and x positions.
+2. If the file has no frames, return next_x = 0.
+3. If frames exist, return the rightmost x position across all frames + 100px gap as next_x.
+4. Return this exact JSON:
+{
+  "file_key": "{file_key}",
+  "existing_frames": [{"name": "...", "node_id": "...", "x": 0}],
+  "next_x": 0,
+  "notes": "any relevant observations about canvas state"
+}
+```
+
+Wait for Scout to complete before spawning frame agents.
+
+---
+
+## Phase 3: Generate Designs in Figma (draft and ship mode only)
+
+### Tool choice
+Use the `figma-generate-design` skill to build each frame. **Do not use raw Plugin API
+JavaScript via `use_figma` to construct frames** — that approach is fragile and expensive.
+`use_figma` is reserved for prototype connection wiring only (Phase 3.5).
+
+Load `skill://figma/figma-generate-design/SKILL.md` before spawning frame agents.
+
+### Mode behaviour
+
+| Mode | Page | Fidelity | Prototype |
+|------|------|----------|-----------|
+| Draft | "Designs" | Lo-fi wireframe | No |
+| Ship | "Designs" | Full-fidelity | Yes |
+
+### Frame naming
+- `S{n} · {Screen Name}` (e.g. `S1 · User Management`)
+- States: `S{n}-{State}` (e.g. `S1-Empty`, `S1-Error`)
+
+### Frame agent prompt
+Spawn one agent per surface in parallel. Each **must** return this fixed JSON schema:
+
+```json
+{
+  "node_id": "string",
+  "frame_name": "string",
+  "screenshot_url": "string",
+  "decisions": ["string"],
+  "needs_clarification": ["string"]
+}
+```
+
+Agent prompt template:
+
+```
+You are a UX designer for Dalgo — an open-source data platform for non-technical NGO program
+managers. Users are non-technical, on slow internet and old devices. Simplicity matters more
+than visual richness.
 
 Feature: {Feature Name}
 Screen: {Screen Name}
 Persona: {persona}
 Purpose: {purpose}
+Mode: {draft | ship}
 
-Designer direction:
-{designer's direction for this screen}
+Selected layout variant:
+{variant text from layout-directions.md}
 
 User flow for this screen:
-{paste the flow block from Phase 1.5 for this surface — entry points, happy path, branch points, exit points}
+{flow block from Phase 1.5}
 
-Scenario(s) this screen belongs to:
-{list scenario names from Phase 1.5 that include this screen}
+Design standards — apply in full:
+{full content of patterns.md}
 
-Dalgo Design System:
-- Primary color: #00897B (teal)
-- Font: Anek Latin
-- Icons: Lucide 16px
-- Cards: 1px border, 8px radius, 16px padding
-- Spacing: 4px grid, 24px page padding
-- Primary CTA: ghost variant, teal background (#00897B), white text
-- Secondary: outline button
-- Sentence case on all buttons ("Cancel" not "CANCEL")
-- Status colors: green #16a34a (on track), amber #d97706 (at risk), red #dc2626 (off track)
-- Never expose SQL, schema table names, or code to non-admin users
-- Lock icon + "Contact admin to change" for admin-only fields
+Constitution — never violate these:
+{full content of .claude/constitution.md}
 
-Key patterns to follow:
-{paste relevant excerpts from patterns.md for this surface type}
-
-Figma file: v8BYFkebTGQNuiRrCXWssa
-Page: {page name}
-Frame name: "{Screen Name}"
+Figma file key: {file_key}
+Page: "Designs"
+Frame name: {frame name per naming convention}
 Frame size: 1440×900px
-Position: x={calculated offset}, y=0
+Position: x={scout.next_x + (surface_index × 1540)}, y=0
 
-Instructions:
-1. Invoke the /figma-use skill first — mandatory before calling use_figma
-2. Create the frame on the "{page name}" page (create the page if it doesn't exist)
-3. Name the frame exactly as "{Screen Name}" — this name is used to wire prototype connections in the next phase
-4. After creating, call get_screenshot on the created node and verify it matches the brief
-5. Return the node ID, frame name, and a one-line description of what was built
+Steps:
+1. Load skill://figma/figma-generate-design/SKILL.md before designing.
+2. Create the "Designs" page if it does not exist.
+3. Build the frame using figma-generate-design guidance.
+4. After creating, call get_screenshot on the node.
+5. Record design decisions and any [NEEDS CLARIFICATION] items.
+6. Return the fixed JSON schema.
 ```
 
-Position frames left to right with 100px gaps: x=0, x=1540, x=3080, etc.
-
-### 3. Collect node IDs
-Wait for all agents to complete. Collect the node ID, frame name, and description for each frame.
+### Collect results
+Wait for all agents. Validate every response matches the fixed schema.
+If an agent returns malformed output, re-prompt once requesting the correct JSON.
 
 ---
 
-## Phase 3.5: Wire Prototype Connections
-
-Using the user flows and scenarios from Phase 1.5, add prototype connections between frames in Figma. This turns the static frames into a navigable, clickable prototype.
+## Phase 3.5: Wire Prototype Connections (ship mode only)
 
 ### 1. Build the connection map
-For each scenario, map out every connection:
+Using flows and scenarios from Phase 1.5:
 
 ```
 Scenario: {Scenario Name}
 Connections:
-- From: {Frame Name} | Trigger: {element clicked — e.g. "'Send invite' button"} → To: {Frame Name}
-- From: {Frame Name} | Trigger: {"Cancel" button click} → To: {Frame Name}
-- From: {Frame Name} | Trigger: {error condition} → To: {Frame Name}
+- From: {Frame Name} | Trigger: {element} → To: {Frame Name}
+- From: {Frame Name} | Trigger: Cancel → To: {Frame Name}
+- From: {Frame Name} | Trigger: {error} → To: {Frame Name}
 ```
 
-### 2. Invoke `/figma-use` skill
-Mandatory before calling `use_figma` for prototype wiring.
+### 2. Add connections via use_figma
+Load `skill://figma/figma-use/SKILL.md` before calling `use_figma`.
 
-### 3. Add connections via `use_figma`
-For each connection in the map, use `use_figma` to:
-- Select the trigger element on the source frame (button, link, overlay area)
-- Add a prototype interaction: `On click → Navigate to → {target frame node ID}`
-- For overlays/modals: use `Open overlay` instead of Navigate
-- For back/cancel flows: use `Navigate to` with `Back` or the specific target frame
+This is the only place `use_figma` is called — for adding prototype connections only,
+not for building frames.
 
-Wire all connections in one `use_figma` call per scenario where possible.
+For each connection:
+- Select the trigger element on the source frame by node ID
+- Add interaction: `On click → Navigate to → {target frame node ID}`
+- Overlays / modals: use `Open overlay` instead of Navigate
+- Back / cancel flows: `Navigate to` with the specific target frame node ID
 
-### 4. Set starting frames per scenario
-For each scenario, mark the first frame as the **starting point** of that named flow in Figma:
-- Use `use_figma` to set the flow start frame with the scenario name as the flow label
-- This creates named flows in Figma's prototype panel (e.g. "Invite a new team member")
+### 3. Set flow start frames
+For each scenario, mark the first frame as the starting point in Figma's prototype panel,
+labelled with the scenario name.
 
-### 5. Collect wiring results
-For each scenario, confirm:
-- All connections were added successfully
-- Flow start frame is set
-- Note any connections that could not be wired (e.g. element not found in frame) for manual follow-up
+### 4. Record wiring results
+Note any connections that could not be wired for manual follow-up.
 
 ---
 
-## Phase 4: Design Review
+## Phase 4: Evaluator Loop (skip in brainstorm mode)
 
-For each created frame, run the design review checklist from `.claude/skills/design-review/checklist.md`. Specifically check:
-
-**Content & Copy:**
-- [ ] Sentence case on all buttons
-- [ ] No SQL, schema names, or code visible to non-admin users
-- [ ] No internal acronyms (RAG, blast radius) in UI copy
-- [ ] Placeholder text uses "e.g." not "Choose"
-
-**NGO User Specific:**
-- [ ] Screen purpose clear in 5 seconds
-- [ ] Creation flows are user-task-first (not data-model-first)
-- [ ] Admin-only fields are visually locked (lock icon)
-
-**Blast Radius (if applicable):**
-- [ ] "Used By" count shown if entity has dependents
-- [ ] Edit modal shows amber impact banner if entity is shared
-- [ ] Delete confirmation lists dependents as links when Used By > 0
-
-**Status & KPI (if applicable):**
-- [ ] RAG color is dominant visual signal (not just a text label)
-- [ ] Trend language is unambiguous
-
-Produce a review table:
+For each frame, spawn an evaluator agent:
 
 ```
-| Screen | Node ID | Issues | Status |
-|--------|---------|--------|--------|
-| User management table | 11900:63 | None | ✅ Ready |
-| Invite user modal | 11901:63 | "Admin" label → "Full access" | ⚠ Fix needed |
+You are reviewing a Figma frame against Dalgo's design standards.
+
+Frame: {frame_name} (node_id: {node_id})
+Screenshot: {screenshot_url}
+
+Review checklist:
+{full content of checklist.md}
+
+Constitution (must never be violated):
+{full content of .claude/constitution.md}
+
+Check the screenshot against every item. Return this exact JSON:
+{
+  "frame_name": "string",
+  "passed": true or false,
+  "failures": [
+    {"item": "checklist item text", "issue": "what is wrong", "fix": "specific correction"}
+  ]
+}
 ```
+
+**If failures:** Send the failure list back to the frame agent:
+```
+Your frame "{frame_name}" failed design review. Fix these issues and regenerate the frame,
+then return the updated JSON schema.
+
+Failures:
+{failures list}
+```
+
+**Retry limit:** 3 rounds per frame. If still failing after round 3, mark the frame
+`[REVIEW FAILED — manual fix needed]` and continue.
+
+---
+
+## Phase 3.9: Consistency Spot-Check (draft and ship mode only)
+
+After all frames pass (or exhaust retries), spawn one consistency agent:
+
+```
+Take a screenshot of each frame listed below and compare them for visual consistency.
+
+Frames: {list of node_ids and frame names}
+
+Check for drift in:
+- Sidebar (width, active state style)
+- Header (height, element positions)
+- Page padding (should be --spacing-page-x 32px horizontal, --spacing-page-y 28px vertical)
+- Primary CTA button (colour, style)
+- Typography (heading sizes and weights)
+
+Return:
+{"consistent": true}
+— or —
+{"consistent": false, "issues": [{"frames": ["S1 · ...", "S2 · ..."], "property": "...", "description": "..."}]}
+```
+
+If drift is found, note it for the designer in Phase 5. Do not auto-fix.
 
 ---
 
 ## Phase 5: Designer Sign-off
 
-Present the review results and ask:
-
+### Brainstorm mode
 ```
-Designs are ready on the "{page name}" Figma page.
+Layout directions ready: features/{feature_name}/{version}/layout-directions.md
 
-Review summary:
-{review table}
+{N} surfaces, {total} variants
 
-{if issues exist}
-{N} screen(s) need attention before I update the spec:
-- {Screen}: {issue} → Suggested fix: {fix from patterns.md}
+Review and tell me which variants to build, then re-run without --brainstorm.
+```
+
+### Draft / Ship mode
+```
+Designs ready — "Designs" page in Figma.
+
+| Frame | Node ID | Status |
+|-------|---------|--------|
+| S1 · {Screen Name} | ... | ✅ Passed |
+| S2 · {Screen Name} | ... | ⚠ [NEEDS CLARIFICATION] — {what was assumed} |
+| S3 · {Screen Name} | ... | 🔴 [REVIEW FAILED] — fix manually |
+
+{if consistency issues}
+Consistency issues flagged:
+- S1 and S3: page padding differs
 
 Options:
-1. Fix the issues and regenerate the flagged frames
-2. Accept as-is and note the issues in the spec for engineering to handle
-3. Revise a specific frame ("redo Screen 2 with X change")
+1. Approve — I'll write design.md and engineering can start
+2. Revise a frame: "redo S2 with inline role picker, not a modal"
+3. Revisit layout directions: "brainstorm S3 again"
 ```
 
-Wait for designer response before updating the spec.
+Wait for designer response before writing `design.md`.
 
 ---
 
-## Phase 6: Update the Spec
+## Phase 6: Write design.md (draft and ship mode only)
 
-Append a `## Design` section to the spec file:
+Write `features/{feature_name}/{version}/design.md`:
 
 ```markdown
-## Design
+# {Feature Name} — Design ({Version})
 
-**Status:** {Ready for engineering / Pending fixes}
-**Figma page:** {URL to page}
+**Status:** Ready for engineering
+**Spec:** {spec path}
+**Figma:** https://www.figma.com/design/{file_key}
 **Last updated:** {date}
 
-### Screens
+## Screens
 
-| Screen | Node ID | Figma Link | Status |
-|--------|---------|-----------|--------|
-| {Screen Name} | {node_id} | [View →]({figma_url}) | ✅ Ready |
+| Screen | Frame | Node ID | Figma link | Status |
+|--------|-------|---------|------------|--------|
+| {Screen Name} | S1 · {Screen Name} | {node_id} | [View →](https://www.figma.com/design/{file_key}?node-id={node_id}) | ✅ Ready |
 
-### User Flows & Prototype
+## User Flows & Prototype
 
-| Scenario | Starting Frame | Prototype Link | Connections |
-|----------|---------------|----------------|-------------|
-| {Scenario Name} | {Frame Name} | [Preview →]({figma_prototype_url}) | {N} wired |
+| Scenario | Starting frame | Connections wired |
+|----------|---------------|-------------------|
+| {Scenario Name} | S1 · {Screen Name} | {N} |
 
-### Design Decisions
+## Design Decisions
 
-Decisions made during design brief that engineering must implement:
-- **Role labels:** Use "Full access / Can edit / Can view only" — not "Admin/Editor/Viewer"
-- **Last-admin protection:** Block role change that would remove the last org admin; show inline error
-- {other decisions from designer replies}
+{All decisions[] collected from frame agents, deduped and attributed to screen}
 
-### Known Issues
+## Known Issues
 
-{if any screens were accepted with issues}
-- {Screen}: {issue} — to be resolved in v2
+{Any [REVIEW FAILED] or unresolved [NEEDS CLARIFICATION] items}
 
-### Design Checklist
+## Figma
 
-- [ ] All screens reviewed against patterns.md
-- [ ] NGO user lens applied
-- [ ] Blast radius handled where applicable
-- [ ] Designer has signed off
+file_key: {file_key}
+```
+
+Then add a one-line pointer in `spec.md` if not already present:
+```markdown
+**Design:** [v{N}/design.md](v{N}/design.md)
 ```
 
 ---
 
 ## Phase 7: Signal Readiness
 
-Print:
-
 ```
-Design gate complete. Spec updated at {spec path}.
+Design gate complete.
 
 {N} screens designed → {M} passed review → {K} issues noted
 
-Next: /engineering/plan-feature {spec path}
+design.md: features/{feature_name}/{version}/design.md
+
+Next: /engineering/plan-feature features/{feature_name}/{version}/spec.md
 ```
 
-If there are unresolved issues, print:
-
+If open issues remain:
 ```
-⚠ Design gate has {K} open issue(s). Resolve before engineering starts,
-or run with known issues and track them in the spec.
+⚠ {K} issue(s) need manual attention before engineering starts.
+See design.md → Known Issues.
 
-Next: /engineering/plan-feature {spec path}
+Next: /engineering/plan-feature features/{feature_name}/{version}/spec.md
 ```
 
 ---
 
 ## Quality Checklist
 
-- [ ] Designer was given a brief and responded before any generation started (unless `--auto`)
-- [ ] Every screen has a node ID and was verified with a screenshot
-- [ ] User flows extracted for every surface (entry points, happy path, branches, exits)
-- [ ] Screens grouped into named scenarios
-- [ ] Prototype connections wired for all scenarios
-- [ ] Named flow start frames set per scenario in Figma prototype panel
-- [ ] Design review was run against the updated checklist
-- [ ] Designer signed off (or explicitly accepted issues)
-- [ ] Spec `## Design` section is complete with node IDs, scenario table, decisions, and known issues
+- [ ] Mode resolved (brainstorm / draft / ship)
+- [ ] Constitution loaded before any agent was spawned
+- [ ] Figma file key resolved — or skipped for brainstorm mode
+- [ ] Design brief written or read
+- [ ] Layout directions written to `layout-directions.md`
+- [ ] Brainstorm mode stopped after layout-directions.md
+- [ ] Scout ran and returned canvas state and `next_x` (draft/ship only)
+- [ ] Frame agents used `figma-generate-design` skill — not raw use_figma JS
+- [ ] All frame agents returned the fixed JSON schema (draft/ship only)
+- [ ] Evaluator loop ran for every frame (draft and ship modes)
+- [ ] Consistency spot-check ran across all final frames (draft/ship only)
+- [ ] Designer signed off
+- [ ] `design.md` written with node IDs, decisions, known issues, and `file_key` (draft/ship only)
+- [ ] `spec.md` updated with one-line pointer to `design.md`
 - [ ] Next step printed clearly

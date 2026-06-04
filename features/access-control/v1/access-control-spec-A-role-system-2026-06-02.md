@@ -8,6 +8,7 @@
 **Date:** 2026-06-02
 **Replaces:** The role / sidebar / settings portions of the superseded rebuilt spec (`workdocs/access_control/access-control-v2-spec-rebuilt copy.md`). Do not build to that spec.
 **Pairs with:** Spec B — Resource Sharing (floor, direct shares, inheritance, share modal, groups, alerts, comments). Spec A ships first; Spec B follows.
+**Design:** [v1/design.md](design.md)
 
 ---
 
