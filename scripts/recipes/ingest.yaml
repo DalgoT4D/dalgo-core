@@ -1,0 +1,42 @@
+feature: ingest
+output_dir: ingest
+nuances: |
+  - Three tabs in /ingest: Connections (default), Sources, Your Warehouse.
+  - Tab labels are typically Title Case but may be ALL CAPS — try both.
+  - "+ Add Source" opens a dialog; close with Escape before tab-switching.
+
+flows:
+  - name: connections_tab
+    steps:
+      - navigate: /ingest
+      - snap: connections_list.png
+        label: Ingest — Connections tab
+
+  - name: sources_tab
+    steps:
+      - click:
+          role: tab
+          candidates: ["Sources", "SOURCES"]
+      - wait: 1500
+      - snap: sources_list.png
+        label: Ingest — Sources tab
+
+  - name: sources_add_dialog
+    optional: true
+    steps:
+      - click:
+          role: button
+          candidates: ["+ Add Source", "Add Source", "ADD SOURCE"]
+      - wait: 1000
+      - snap: sources_add.png
+        label: Ingest — Add Source dialog
+      - press: Escape
+
+  - name: warehouse_tab
+    steps:
+      - click:
+          role: tab
+          candidates: ["Your Warehouse", "YOUR WAREHOUSE", "Warehouse"]
+      - wait: 1500
+      - snap: warehouse_form.png
+        label: Ingest — Your Warehouse tab

@@ -164,7 +164,7 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
   - **One Metric entity in the codebase.** The existing inline chart config shape (`column + aggregation + alias`) is `ChartMetric`. `Metric` is the persisted, reusable entity; `ChartMetric` is the inline, per-chart shape. When a chart uses a saved Metric, the resolution path is: `saved_metric_id` → `Metric` DB row → `MetricSchema` → `ChartMetric`.
   - Delete-blocked if consumers exist (Charts with `saved_metric_id` or KPIs with FK).
 - **Change impact:** Column/aggregation change flows live to every consumer on next evaluation. Renames are safe if consumers reference by ID. Deletion is blocked until consumers are removed.
-- **Confidence:** `tribal-knowledge-needed` — entity doesn't exist in code yet; this entry is written from the spec and must be re-confirmed once the feature ships.
+- **Confidence:** `draft` — v1 has shipped (routes `/metrics` exist with Simple + Calculated modes, blast-radius confirmation, delete-blocked behavior). Promote to `verified` after reading `models/metric.py`.
 
 ### KPI *(arriving in v1 of the Metrics & KPIs spec)*
 - **One-line identity:** A Metric wrapped with target + direction + RAG thresholds + trendline; leadership-facing.
@@ -175,12 +175,14 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
   - ReportSnapshot (2-hop via Dashboard — KPI chart data frozen into `frozen_chart_configs` at snapshot time)
   - Alert (`reference` — alerts can fire on RAG transitions; deferred to Alerts spec)
 - **Platform-specific behaviors:**
-  - Target is optional. If omitted, RAG is not shown �� KPI renders as trend only.
+  - Target is optional. If omitted, RAG is not shown — KPI renders as trend only.
   - RAG thresholds are % of target, with red auto-computed.
   - Per-KPI time grain (team feedback) — not a page-level filter.
   - KPI deletion cleans up references from dashboard `components` JSON.
+  - **Detail drawer surfaces an Annotations timeline** — comments and beneficiary quotes added by the team, grouped by period with delta-since-last-period. This is unique to KPI (not present on Chart or Metric) and is a primary leadership-review surface.
+  - Linked Metric, Time Column, and Time Grain are **immutable post-create**. To change any, delete + recreate.
 - **Change impact:** Target change recolors historical RAG — note on backdating. Threshold change affects Alert fire rate. KPI value/target changes appear live on dashboards and live share links, but NOT in already-captured ReportSnapshots (frozen).
-- **Confidence:** `tribal-knowledge-needed` — entity arriving in v1; confirm shape after ship.
+- **Confidence:** `draft` — v1 has shipped (routes `/kpis` exist with two-step form, RAG threshold logic, time-grain selector, annotations drawer). Promote to `verified` after reading `models/kpi.py`.
 
 ### Dashboard
 - **One-line identity:** A user-composed canvas of Charts + text/heading blocks, with filters, optionally published for public viewing.
@@ -352,12 +354,13 @@ Update order for the next team review session:
    - Explore (picker is NOT reused per Pratiksha — confirmed 2026-04-21; confirm any other MetricsSelector integrations)
    - Data Quality check (blocking vs non-blocking?)
    - Alert (paired spec shape)
-   - Metric / KPI (promote to `verified` after v1 ships; Metric has two paths: simple column+agg or expression, no filters, no tags)
 2. Promote `draft` entries — read the actual models:
    - Source (`models/airbyte.py`, `ddpairbyte/`)
    - Warehouse (org config + adapter layer)
    - Transform (`models/dbt_workflow.py`, `ddpdbt/`)
    - Pipeline (`ddpprefect/`, `models/flow_runs.py`)
+   - Metric (`models/metric.py` — confirm Simple vs Calculated, validation path)
+   - KPI (`models/kpi.py` — confirm RAG storage, annotations table, immutability rules)
    - Organization, OrgUser
 3. `verified` entries only need re-check on model changes:
    - Chart, Dashboard, ReportSnapshot, Share link (both modes), Notification

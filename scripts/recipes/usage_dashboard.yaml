@@ -1,0 +1,12 @@
+feature: usage_dashboard
+output_dir: managedata
+nuances: |
+  - Page embeds a Superset iframe; needs longer wait (~4s) before snapping.
+
+flows:
+  - name: dashboard
+    steps:
+      - navigate: /usage-dashboard
+      - wait: 4000
+      - snap: usage_dashboard.png
+        label: Usage Dashboard

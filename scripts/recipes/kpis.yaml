@@ -1,0 +1,38 @@
+feature: kpis
+output_dir: kpis
+nuances: |
+  - KPI card has data-testid="kpi-card-{id}" (dynamic per row) — use prefix match.
+  - Create KPI dialog is two-step; without selecting a metric on step 1
+    you cannot reach step 2 — only step 1 is captured here.
+  - Detail drawer opens from clicking a KPI card; requires at least one KPI on staging.
+
+flows:
+  - name: list
+    steps:
+      - navigate: /kpis
+      - snap: kpis_list.png
+        label: KPIs — card grid
+
+  - name: create_dialog_step1
+    optional: true
+    steps:
+      - click:
+          role: button
+          candidates: ["+ CREATE KPI", "CREATE KPI", "Create KPI", "+ Create KPI"]
+      - wait: 1200
+      - snap: kpis_create_step1.png
+        label: KPIs — create dialog (step 1)
+      - click:
+          css: "[data-slot='dialog-close']"
+          first: true
+      - wait: 600
+
+  - name: detail_drawer
+    optional: true
+    steps:
+      - click:
+          css: "[data-testid^='kpi-card-']"
+          first: true
+      - wait: 1500
+      - snap: kpis_detail_drawer.png
+        label: KPIs — detail drawer

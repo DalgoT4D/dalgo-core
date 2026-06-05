@@ -1,0 +1,25 @@
+feature: dashboards
+output_dir: analysis
+nuances: |
+  - /dashboards/create auto-creates a draft dashboard and opens the builder.
+  - Dashboard builder needs ~4s for the empty canvas to settle.
+
+flows:
+  - name: dashboard_list
+    steps:
+      - navigate: /dashboards
+      - snap: dashboard_list.png
+        label: Dashboards — list
+
+  - name: chart_type_selector
+    steps:
+      - navigate: /charts/new
+      - snap: chart_type_selector.png
+        label: Charts — type selector
+
+  - name: dashboard_builder
+    steps:
+      - navigate: /dashboards/create
+      - wait: 4000
+      - snap: dashboard_builder.png
+        label: Dashboard — builder canvas

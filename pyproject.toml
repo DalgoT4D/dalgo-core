@@ -1,0 +1,10 @@
+[project]
+name = "dalgo-core-scripts"
+version = "0.1.0"
+description = "Utility scripts for the Dalgo docs workflow (screenshots, etc.)"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv",
+    "playwright",
+    "pyyaml",
+]
