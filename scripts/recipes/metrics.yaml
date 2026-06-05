@@ -2,8 +2,10 @@ feature: metrics
 output_dir: metrics
 nuances: |
   - "Create Metric" opens a dialog defaulting to Simple Mode.
-  - The Calculated Mode switcher may be a Tab or a Switch component; unverified.
+  - Simple / Calculated is a tab control inside the dialog.
   - Search bar at top filters by name; not captured.
+  - Datasource picker is a two-step popover (schema, then table); first row
+    suffices for screenshot.
 
 flows:
   - name: list

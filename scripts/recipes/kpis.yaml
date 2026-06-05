@@ -2,9 +2,10 @@ feature: kpis
 output_dir: kpis
 nuances: |
   - KPI card has data-testid="kpi-card-{id}" (dynamic per row) — use prefix match.
-  - Create KPI dialog is two-step; without selecting a metric on step 1
-    you cannot reach step 2 — only step 1 is captured here.
+  - Create KPI dialog is two-step. Step 1 needs a metric + name + target +
+    direction before Continue is enabled; only step 1 is captured here.
   - Detail drawer opens from clicking a KPI card; requires at least one KPI on staging.
+  - Drawer width is 600px and slides in from the right.
 
 flows:
   - name: list
