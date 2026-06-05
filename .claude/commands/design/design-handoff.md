@@ -37,6 +37,45 @@ Read `.claude/skills/design-review/patterns.md` and `.claude/skills/design-revie
 
 ---
 
+## Phase 1.5: User Flow Extraction
+
+For each surface extracted above, map the full user journey through that screen. This becomes the basis for prototype connections wired in Figma after frames are created.
+
+For each surface, produce a flow block:
+
+```
+**Screen: {Screen Name}**
+Entry points:
+- {How the user arrives — e.g. "clicks 'Invite user' button on User management page"}
+- {Alternative entry — e.g. "redirected here after accepting email invite"}
+
+Happy path:
+1. {Step 1 — e.g. "User sees modal with Name, Email, Role fields"}
+2. {Step 2 — e.g. "User fills in details and clicks 'Send invite'"}
+3. {Step 3 — e.g. "Success toast shown, modal closes, user appears in table"}
+
+Branch points:
+- {Condition → Screen} e.g. "Email already exists → inline field error (stays on modal)"
+- {Condition → Screen} e.g. "Last admin demotion attempt → blocked with error banner"
+- {Condition → Screen} e.g. "Cancel / Esc → dismiss modal, no change"
+
+Exit points:
+- Success → {target screen or state}
+- Cancel → {target screen or state}
+- Error → {stays on screen / redirects to X}
+```
+
+Group screens into **scenarios** — named end-to-end journeys a user might take:
+- e.g. "Invite a new team member" → Invite modal → Success state → User management table
+- e.g. "Change a user's role" → User table → Role selector → Confirm modal → Updated table
+- e.g. "Remove a user" → User table → Delete confirm → Empty state (if last user)
+
+Each scenario becomes a **named prototype flow** in Figma.
+
+Store the extracted flows and scenarios for use in Phase 3 (Figma agent prompts) and Phase 3.5 (prototype wiring).
+
+---
+
 ## Phase 2: Design Brief (skip if `--auto`)
 
 Present the extracted surfaces to the designer in this format:
@@ -102,6 +141,12 @@ Purpose: {purpose}
 Designer direction:
 {designer's direction for this screen}
 
+User flow for this screen:
+{paste the flow block from Phase 1.5 for this surface — entry points, happy path, branch points, exit points}
+
+Scenario(s) this screen belongs to:
+{list scenario names from Phase 1.5 that include this screen}
+
 Dalgo Design System:
 - Primary color: #00897B (teal)
 - Font: Anek Latin
@@ -127,14 +172,55 @@ Position: x={calculated offset}, y=0
 Instructions:
 1. Invoke the /figma-use skill first — mandatory before calling use_figma
 2. Create the frame on the "{page name}" page (create the page if it doesn't exist)
-3. After creating, call get_screenshot on the created node and verify it matches the brief
-4. Return the node ID and a one-line description of what was built
+3. Name the frame exactly as "{Screen Name}" — this name is used to wire prototype connections in the next phase
+4. After creating, call get_screenshot on the created node and verify it matches the brief
+5. Return the node ID, frame name, and a one-line description of what was built
 ```
 
 Position frames left to right with 100px gaps: x=0, x=1540, x=3080, etc.
 
 ### 3. Collect node IDs
-Wait for all agents to complete. Collect the node ID and description for each frame.
+Wait for all agents to complete. Collect the node ID, frame name, and description for each frame.
+
+---
+
+## Phase 3.5: Wire Prototype Connections
+
+Using the user flows and scenarios from Phase 1.5, add prototype connections between frames in Figma. This turns the static frames into a navigable, clickable prototype.
+
+### 1. Build the connection map
+For each scenario, map out every connection:
+
+```
+Scenario: {Scenario Name}
+Connections:
+- From: {Frame Name} | Trigger: {element clicked — e.g. "'Send invite' button"} → To: {Frame Name}
+- From: {Frame Name} | Trigger: {"Cancel" button click} → To: {Frame Name}
+- From: {Frame Name} | Trigger: {error condition} → To: {Frame Name}
+```
+
+### 2. Invoke `/figma-use` skill
+Mandatory before calling `use_figma` for prototype wiring.
+
+### 3. Add connections via `use_figma`
+For each connection in the map, use `use_figma` to:
+- Select the trigger element on the source frame (button, link, overlay area)
+- Add a prototype interaction: `On click → Navigate to → {target frame node ID}`
+- For overlays/modals: use `Open overlay` instead of Navigate
+- For back/cancel flows: use `Navigate to` with `Back` or the specific target frame
+
+Wire all connections in one `use_figma` call per scenario where possible.
+
+### 4. Set starting frames per scenario
+For each scenario, mark the first frame as the **starting point** of that named flow in Figma:
+- Use `use_figma` to set the flow start frame with the scenario name as the flow label
+- This creates named flows in Figma's prototype panel (e.g. "Invite a new team member")
+
+### 5. Collect wiring results
+For each scenario, confirm:
+- All connections were added successfully
+- Flow start frame is set
+- Note any connections that could not be wired (e.g. element not found in frame) for manual follow-up
 
 ---
 
@@ -214,6 +300,12 @@ Append a `## Design` section to the spec file:
 |--------|---------|-----------|--------|
 | {Screen Name} | {node_id} | [View →]({figma_url}) | ✅ Ready |
 
+### User Flows & Prototype
+
+| Scenario | Starting Frame | Prototype Link | Connections |
+|----------|---------------|----------------|-------------|
+| {Scenario Name} | {Frame Name} | [Preview →]({figma_prototype_url}) | {N} wired |
+
 ### Design Decisions
 
 Decisions made during design brief that engineering must implement:
@@ -263,7 +355,11 @@ Next: /engineering/plan-feature {spec path}
 
 - [ ] Designer was given a brief and responded before any generation started (unless `--auto`)
 - [ ] Every screen has a node ID and was verified with a screenshot
+- [ ] User flows extracted for every surface (entry points, happy path, branches, exits)
+- [ ] Screens grouped into named scenarios
+- [ ] Prototype connections wired for all scenarios
+- [ ] Named flow start frames set per scenario in Figma prototype panel
 - [ ] Design review was run against the updated checklist
 - [ ] Designer signed off (or explicitly accepted issues)
-- [ ] Spec `## Design` section is complete with node IDs, decisions, and known issues
+- [ ] Spec `## Design` section is complete with node IDs, scenario table, decisions, and known issues
 - [ ] Next step printed clearly
