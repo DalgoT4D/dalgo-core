@@ -32,22 +32,37 @@ Do not skip these. Without them, you will miss downstream surfaces and plan an i
 - Do not silently include or exclude any surface. Do not guess the user's intent.
 - Capture the confirmed decisions — they become section 2 of the plan (see below).
 
+### 4. Load codebase landmarks (mandatory before any Explore agents)
+
+Read the architecture skills' `landmarks.md` files **before** spawning any Explore agents:
+
+- For any backend work touching DDP_backend → read `.claude/skills/backend-architecture/landmarks.md`
+- For any frontend work touching webapp_v2 → read `.claude/skills/frontend-architecture/landmarks.md`
+
+These files are the lookup table for things planners repeatedly need: where the role/permission model lives, the `@has_permission` decorator, content models with line ranges, the sidebar nav contract, the `useUserPermissions` hook, the API client, migration + test templates. **If your question is "where does X live in the codebase?" and the landmark file answers it, do not spawn an Explore agent for that question.**
+
+Then check `features/*/v1/research.md` for any prior research on adjacent features — if a previous plan researched the same surface, reuse rather than re-explore.
+
+### 5. Check `features/*/research.md` for prior adjacent research
+
+If another feature in `features/` has researched a related surface (e.g. you're planning Spec B and Spec A's `research.md` already mapped the auth layer), read that file before exploring. It will frequently answer 50%+ of your codebase questions.
+
 ## Research Process
 
-1. **Codebase Analysis**
-   - Search for similar features/patterns in the codebase
-   - Identify files to reference in the plan
-   - Note existing conventions to follow
-   - Check test patterns for validation approach
+By the time you reach this section you should already have: spec context, blast radius confirmed, landmark files loaded, prior research scanned. Now decide what's still unknown.
+
+1. **Net-new codebase analysis** (Explore agents) — **fallback only**
+   - Spawn an Explore agent only for surface area that landmarks + prior research do NOT cover.
+   - Keep each agent's question narrow: "where is X" or "how does Y work today", not "tell me about the backend."
+   - If you find yourself drafting a sweeping research prompt, you're probably duplicating landmarks work — re-read `landmarks.md` first.
 
 2. **External Research**
-   - Search for similar features/patterns online
    - Library documentation (include specific URLs)
-   - Implementation examples (GitHub/StackOverflow/blogs)
+   - Implementation examples for genuinely novel patterns
    - Best practices and common pitfalls
 
 3. **Clarification**
-   - Ask questions if needed around the feature.
+   - Ask the user questions if blast-radius scope or technical-direction calls remain unresolved.
 
 4. **Multi-service Impact**
    - Since Dalgo has multiple services (DDP_backend, webapp_v2, prefect-proxy), analyze which services need changes.
@@ -56,7 +71,9 @@ Do not skip these. Without them, you will miss downstream surfaces and plan an i
 
 5. **Save Research**
    - Save research findings to `features/{feature-name}/{version}/research.md`
-   - This preserves context for future reference and plan iterations.
+   - **What to include:** net-new findings only — anything specific to this feature that future planners on adjacent features will want.
+   - **What to NOT include:** content already in `landmarks.md` (avoid duplication; the landmark file is authoritative).
+   - If the research surfaces a stale entry in `landmarks.md` (path moved, line range drifted), update `landmarks.md` in the same change — don't let the lookup file rot.
 
 ## Plan Document Structure
 
@@ -138,6 +155,8 @@ Also save research to: `features/{feature-name}/{version}/research.md`
 
 ## Quality Checklist
 - [ ] `README.md` and `docs/domain-map.md` were read before research began
+- [ ] Relevant `landmarks.md` (backend / frontend) was read before any Explore agents were spawned
+- [ ] Prior `features/*/research.md` was scanned for adjacent prior research
 - [ ] Blast Radius section lists every 1-hop and 2-hop consumer from the domain map
 - [ ] Every affected surface has a confirmed status (in-scope / deferred / out-of-scope) — none left as `TBD`
 - [ ] User was asked about any surface the spec did not explicitly address
@@ -147,6 +166,7 @@ Also save research to: `features/{feature-name}/{version}/research.md`
 - [ ] Milestones are independently shippable and ordered
 - [ ] Testing strategy covers unit, integration, and edge cases
 - [ ] References existing codebase patterns
+- [ ] `research.md` contains net-new findings only (no duplication of `landmarks.md`); any stale `landmarks.md` entries discovered were updated
 
 ## Next Step
 After saving the plan, print:
