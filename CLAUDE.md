@@ -124,6 +124,25 @@ Every feature lives in `features/{name}/{version}/`:
 
 ---
 
+## Autonomous Operation
+
+### Git safety — never do these
+- Push to `main` or merge into `main`
+- Force push any branch (`--force`, `--force-with-lease`)
+- Delete remote branches
+
+### Commit policy
+- Commit at the end of every work session
+- Scope commits to the work performed — one logical change per commit
+- Ensure tests pass before committing
+
+### Decision making
+- Proceed autonomously on implementation details when the outcome is clear
+- Ask for clarification only when: requirements conflict, multiple significantly different product behaviors are possible, or the change is destructive/irreversible
+- Surface blockers — do not ask for permission between steps
+
+---
+
 ## Key Constraints
 
 - Users are non-technical NGO staff (program managers, data coordinators, field staff)
