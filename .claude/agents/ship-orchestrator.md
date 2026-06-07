@@ -1,6 +1,6 @@
 ---
 name: ship-orchestrator
-description: "Async orchestrator for the full feature pipeline. Runs in an isolated fresh context — no prior conversation, purely state-driven from pipeline.md. Spawned by /engineering/ship-feature-bg. Same pipeline as the command version but starts clean every time.\n\nUse when: you want the pipeline to run in the background, or you want to compare orchestration quality against the command version.\n\nInput: spec path, e.g. features/report-scheduling/v1/spec.md"
+description: "Async orchestrator for the full feature pipeline. Runs in an isolated fresh context — no prior conversation, purely state-driven from pipeline.md. Spawned by /engineering/ship-feature-bg. Same pipeline as the command version but starts clean every time.\n\nPipeline: plan → implement → validate → docs → PR\n\nInput: spec path, e.g. features/report-scheduling/v1/spec.md"
 model: sonnet
 ---
 
@@ -38,20 +38,16 @@ Mode: agent
 Started: {timestamp}
 Branch: (none yet)
 PR: (none yet)
-Feature type: (unknown)
 
-| Stage         | Status  | Notes |
-|---------------|---------|-------|
-| design        | pending |       |
-| plan          | pending |       |
-| implement     | pending |       |
-| validate      | pending |       |
-| design-review | pending |       |
-| docs          | pending |       |
-| pr            | pending |       |
+| Stage      | Status  | Notes |
+|------------|---------|-------|
+| plan       | pending |       |
+| implement  | pending |       |
+| validate   | pending |       |
+| docs       | pending |       |
+| pr         | pending |       |
 
 Validate attempts: 0
-Design review attempts: 0
 Human interventions: 0
 ```
 
@@ -65,18 +61,6 @@ git branch --list feature/{feature-name}
 git checkout feature/{feature-name}   # or -b to create
 ```
 Update pipeline.md Branch field.
-
-### Design Gate
-Check spec for UI surfaces (without reading the full spec — just check if `design.md`,
-`FIGMA.md`, or a `## Design` section exist in the feature folder):
-- No UI → mark `design` + `design-review` as `skipped`. Set `Feature type: backend-only`.
-- UI + artifacts exist → mark `design` as `complete`. Set `Feature type: UI feature`.
-- UI + no artifacts → increment `Human interventions`, write to pipeline.md, stop:
-  ```
-  PAUSED: Design artifacts missing.
-  Run /design/design-handoff features/{feature-name}/{version}/spec.md
-  Then re-run /engineering/ship-feature-bg features/{feature-name}/{version}/spec.md
-  ```
 
 ### Plan
 Spawn **`planner` sub-agent** with input: `features/{feature-name}/{version}/spec.md`
@@ -96,13 +80,6 @@ Spawn fresh sub-agent with:
 - Task: run validate-spec checks, fix failures, report
 
 Loop up to 3 times on failure. Each retry is a fresh spawn.
-
-### Design Review
-Check `git diff main...HEAD --name-only | grep "^webapp_v2/"`:
-- No frontend files → skip.
-- Frontend files → spawn fresh sub-agent with diff + design artifacts.
-
-Loop up to 3 times on blocking findings.
 
 ### Docs
 Spawn docs sub-agent with spec + plan paths.

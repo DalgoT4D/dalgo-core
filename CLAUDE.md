@@ -51,17 +51,7 @@ PM artifacts live in `prototypes/`, separate from `features/`.
 /product/write-spec features/{name}       → features/{name}/v1/spec.md
 ```
 
-#### 2. Design *(UI features only)*
-
-```
-/design/design-handoff features/{name}/v1/spec.md
-```
-
-Gets designer direction, generates Figma frames, runs design review, writes `design.md`
-+ `FIGMA.md` + `## Design` section back into the spec. Engineering starts after this.
-Skip for backend-only features, or pass `--skip-design` to ship-feature.
-
-#### 3. Ship — two modes
+#### 2. Ship — two modes
 
 **Command mode** (synchronous — runs in your session, you see every step):
 ```
@@ -77,8 +67,7 @@ Both run the same pipeline. Both write to the same `pipeline.md`.
 See `docs/harness-evolution.md → Experiment 0` for the comparison framework.
 
 **Pipeline stages (both modes):**
-design gate → plan (planner agent) → implement (engineer agent) → validate loop
-→ design review → docs → PR
+plan (planner agent) → implement (engineer agent) → validate loop → docs → PR
 
 State tracked in `features/{name}/{version}/pipeline.md` — re-run the same command
 to resume after any interruption.
@@ -128,8 +117,6 @@ Every feature lives in `features/{name}/{version}/`:
 | File | Produced by | Purpose |
 |------|-------------|---------|
 | `spec.md` | `/product/write-spec` | What to build and why |
-| `design.md` | `/design/design-handoff` | UX decisions, terminology, interaction states |
-| `FIGMA.md` | `/design/design-handoff` | Figma frame references, component specs |
 | `research.md` | `planner` agent | Codebase and external findings |
 | `plan.md` | `planner` agent | Implementation plan with milestones |
 | `tasks.md` | `engineer` agent | Milestone task checklist — resume checkpoint |

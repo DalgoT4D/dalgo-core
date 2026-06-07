@@ -2,7 +2,7 @@
 
 ## Input: $ARGUMENTS
 
-Pipeline: **spec → design → plan → implement → validate → design review → docs → PR**
+Pipeline: **spec → plan → implement → validate → docs → PR**
 
 Runs in the **current session** — you see every step as it happens. Pauses for human
 confirmation at blast-radius and any genuine blockers. Supports resume.
@@ -26,7 +26,7 @@ confirmation at blast-radius and any genuine blockers. Supports resume.
 2. If `$ARGUMENTS` is a feature name, look for `features/{name}/v1/spec.md`.
 3. If no spec found: `No spec found. Run /product/write-spec "{name}" first.` Stop.
 4. Extract `{feature-name}` and `{version}` (default: `v1`).
-5. Read the spec **once** to detect UI vs backend-only. Then do not re-read it.
+5. Read the spec **once** to understand scope. Then do not re-read it.
 
 ---
 
@@ -43,20 +43,16 @@ Mode: command
 Started: {timestamp}
 Branch: (none yet)
 PR: (none yet)
-Feature type: (unknown)
 
-| Stage         | Status  | Notes |
-|---------------|---------|-------|
-| design        | pending |       |
-| plan          | pending |       |
-| implement     | pending |       |
-| validate      | pending |       |
-| design-review | pending |       |
-| docs          | pending |       |
-| pr            | pending |       |
+| Stage      | Status  | Notes |
+|------------|---------|-------|
+| plan       | pending |       |
+| implement  | pending |       |
+| validate   | pending |       |
+| docs       | pending |       |
+| pr         | pending |       |
 
 Validate attempts: 0
-Design review attempts: 0
 Human interventions: 0
 ```
 
@@ -76,24 +72,7 @@ Update `Branch` in pipeline.md.
 
 ---
 
-## Step 3: Design Gate
-
-If `design` not `complete` or `skipped`:
-
-- **No UI surfaces in spec** → mark `design` + `design-review` as `skipped`. Set `Feature type: backend-only`.
-- **Has UI + design artifacts exist** (`design.md` / `FIGMA.md` / `## Design` in spec) → mark `design` as `complete`. Set `Feature type: UI feature`.
-- **Has UI + no design artifacts** → stop:
-  ```
-  This feature has UI but no design yet.
-  Run: /design/design-handoff features/{feature-name}/{version}/spec.md
-  Then re-run: /engineering/ship-feature features/{feature-name}/{version}/spec.md
-  Pass --skip-design to bypass (prototypes only).
-  ```
-  Increment `Human interventions` in pipeline.md.
-
----
-
-## Step 4: Plan
+## Step 3: Plan
 
 If `plan` not `complete`:
 
@@ -108,15 +87,14 @@ On blocker → write to pipeline.md, increment `Human interventions`, stop.
 
 ---
 
-## Step 5: Implement
+## Step 4: Implement
 
 If `implement` not `complete`:
 
 Mark `implement` as `in-progress`. Spawn **`engineer` sub-agent**:
 ```
 Input: features/{feature-name}/{version}/plan.md
-Task:  Implement all milestones. Track in tasks.md. Use design.md + FIGMA.md as
-       source of truth for UI labels, states, and components.
+Task:  Implement all milestones. Track in tasks.md.
 ```
 
 On completion → mark `implement` as `complete`.
@@ -124,7 +102,7 @@ On blocker → write to pipeline.md, increment `Human interventions`, stop.
 
 ---
 
-## Step 6: Validate (Loop)
+## Step 5: Validate (Loop)
 
 If `validate` not `complete`:
 
@@ -140,27 +118,7 @@ Task:    Run all checks from /engineering/validate-spec. Fix failures. Report pa
 
 ---
 
-## Step 7: Design Review
-
-If `design-review` not `complete` or `skipped`:
-
-Check: `git diff main...HEAD --name-only | grep "^webapp_v2/"`
-
-No frontend files → mark `design-review` as `skipped`.
-
-Frontend files changed → spawn **fresh design-review sub-agent**:
-```
-Context: changed webapp_v2 diff + design.md + FIGMA.md if they exist
-Task:    Apply design-review skill + NGO user lens. Fix blocking findings. Report outcome.
-```
-
-- No blocking → mark `complete`, write suggestions to pipeline.md.
-- Blocking, attempts < 3 → increment `Design review attempts`, respawn. Repeat.
-- Blocking, attempts = 3 → mark `blocked`, stop.
-
----
-
-## Step 8: Docs
+## Step 6: Docs
 
 If `docs` not `complete`:
 
@@ -174,7 +132,7 @@ Mark `docs` as `complete`.
 
 ---
 
-## Step 9: Open PR
+## Step 7: Open PR
 
 Mark `pr` as `in-progress`.
 
@@ -190,8 +148,6 @@ EOF
 )"
 git push -u origin feature/{feature-name}
 ```
-
-Read pipeline.md for services and design suggestions. Read spec summary section only.
 
 ```bash
 gh pr create \
@@ -214,12 +170,7 @@ gh pr create \
 - [x] validate-spec passed
 - [x] Backend tests pass
 - [x] Frontend lint + format pass
-- [x] Design review passed (or N/A — backend-only)
 - [x] Docs generated
-
-{if design suggestions in pipeline.md}
-## Design Suggestions (non-blocking)
-{list from pipeline.md}
 
 🤖 Shipped by /engineering/ship-feature (command mode)
 EOF
