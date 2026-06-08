@@ -10,48 +10,45 @@ document, working across the full stack without supervision.
 
 ## Startup Sequence
 
-Every session, before writing a single line of code:
+Every session, do these steps in order before writing any code:
 
-1. **Read plan overview only** — Read plan.md sections 1–2 (Overview + Blast Radius) and
-   the Milestones list. Get the shape of the work. Do NOT read every milestone in full yet.
+1. **Read plan overview** — Read plan.md sections 1 (Overview) and 7 (Milestones list only,
+   not the full milestone content). Identify which services are touched (backend / frontend / both).
+
 2. **Check tasks.md** — look for `features/{name}/{version}/tasks.md`.
-   - If it exists: you're resuming. Find the first `[ ]` or `[~]` task. Read only that
-     milestone from plan.md.
-   - If it doesn't exist: create it from the milestone list before doing anything else.
-3. **Load landmarks for services you'll touch** — read these before writing any code.
-   They give you exact file:line locations and replace exploratory searching:
-   - Backend work → read `.claude/skills/backend-architecture/landmarks.md`
-   - Frontend work → read `.claude/skills/frontend-architecture/landmarks.md`
-4. **Load service rules** — load when you reach the first task for that service:
-   - `DDP_backend/.claude/CLAUDE.md` → before your first backend file edit
-   - `webapp_v2/CLAUDE.md` → before your first frontend file edit
-5. **Read design artifacts if UI work is in scope** — `design.md` and `FIGMA.md` if they
-   exist. These are your source of truth for labels, states, and interaction patterns.
-6. **Begin the first incomplete milestone.**
+   - Exists → resuming. Find the first `[ ]` or `[~]` task. Read only that milestone from plan.md.
+   - Missing → create it from the milestone list now, before anything else.
 
-## Architecture Reference Files
+3. **Load landmarks — mandatory, do this now:**
+   - Plan touches backend → **Read `.claude/skills/backend-architecture/landmarks.md`**
+   - Plan touches frontend → **Read `.claude/skills/frontend-architecture/landmarks.md`**
+   - Do not skip. Do not defer. These replace codebase exploration.
 
-Load these **on demand** — only when you need them for the current task:
+4. **Load service rules — mandatory before first edit in that service:**
+   - First backend file edit → **Read `DDP_backend/.claude/CLAUDE.md`**
+   - First frontend file edit → **Read `webapp_v2/CLAUDE.md`**
 
-| Need | File to read |
-|------|-------------|
-| Where does `@has_permission` live? What model stores permissions? | Already in `landmarks.md` — check there first |
-| Creating a new backend module (API + service + schema + model) | `.claude/skills/backend-architecture/templates.md` |
-| Stuck on a backend pattern — need a full walkthrough | `.claude/skills/backend-architecture/examples.md` |
-| Creating a new frontend feature (components, hooks, state) | `.claude/skills/frontend-architecture/patterns.md` |
-| Where does the sidebar live? What's the API client? | Already in `landmarks.md` — check there first |
-| Feature folder structure, test file conventions | `.claude/skills/frontend-architecture/reference.md` |
+5. **Begin the first incomplete milestone.**
 
-**Rule:** check `landmarks.md` before reading any source file. It often gives you the
-exact line number you need, saving a full file read.
+## Architecture Reference Files — Load at the Right Moment
+
+These are NOT loaded at startup. Load them at the specific moment listed:
+
+| Load this file | Exactly when |
+|---|---|
+| `.claude/skills/backend-architecture/templates.md` | **Before creating any new backend file** (new model, schema, API endpoint, service) |
+| `.claude/skills/frontend-architecture/patterns.md` | **Before creating any new frontend component or hook** |
+| `.claude/skills/backend-architecture/examples.md` | **When stuck on a backend pattern** after reading landmarks didn't answer the question |
+| `.claude/skills/frontend-architecture/reference.md` | **When setting up a new feature folder** for the first time |
+
+**Trigger rule:** the moment you decide to `touch` (create or significantly modify) a file in a layer you haven't worked in yet this session → load the reference for that layer first.
 
 ## Context Budget Rules
 
-- Read plan.md **one milestone at a time** — only the milestone you're working on.
-- Read source files **in targeted sections** — use grep/find to locate the relevant
-  function or class, then read that section. Do not Read entire large files.
-- Pull templates/patterns **on demand** — only when creating something new.
-- research.md is a reference — search it for relevant findings, don't re-read top to bottom.
+- Read plan.md **one milestone at a time** — read the full milestone only when you start it.
+- Read source files **in targeted sections** — grep/find the relevant function, read that section.
+- Landmarks replace grep for known locations — if it's in landmarks.md, don't search.
+- research.md — keyword search it, don't re-read top to bottom.
 
 ## Task Tracking
 

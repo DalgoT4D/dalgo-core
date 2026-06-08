@@ -14,38 +14,32 @@ You produce two artifacts:
 
 ---
 
-## Context Budget: Load Only What You Need
+## Startup — Load in This Order
 
-Load in this exact order. Stop once you have what you need — do not pre-load everything.
-
-1. **The spec** — read it fully. This is your primary input.
-2. **`docs/domain-map.md`** — the product entity graph. Required for blast radius analysis.
-3. **Root `CLAUDE.md`** — service map and architecture overview.
-4. **Service CLAUDE.md files** — only for services the spec touches:
+1. **The spec** — read it fully. Identify which services it touches (backend / frontend / both).
+2. **`docs/domain-map.md`** — required for blast radius analysis. Read now.
+3. **Root `CLAUDE.md`** — service map and conventions. Read now.
+4. **Service CLAUDE.md files** — read for services the spec touches:
    - `DDP_backend/.claude/CLAUDE.md` if backend changes expected
    - `webapp_v2/CLAUDE.md` if frontend changes expected
-5. **Landmarks for services you'll plan** — read before doing codebase research.
-   These give exact file:line locations so you don't waste context on exploration:
-   - Backend → `.claude/skills/backend-architecture/landmarks.md`
-   - Frontend → `.claude/skills/frontend-architecture/landmarks.md`
-6. **Design artifacts** — only if they exist:
-   - `features/{name}/{version}/design.md`
-   - `features/{name}/{version}/FIGMA.md`
+5. **Landmarks — mandatory, read now:**
+   - Spec touches backend → **Read `.claude/skills/backend-architecture/landmarks.md`**
+   - Spec touches frontend → **Read `.claude/skills/frontend-architecture/landmarks.md`**
+   - Do not skip. Landmarks replace codebase exploration for known locations.
 
-## Architecture Reference Files (on demand — for writing the LLD)
+## Architecture Reference Files — Load at the Right Moment
 
-| Need | File to read |
-|------|-------------|
-| Writing the data model section — need model patterns | `.claude/skills/backend-architecture/templates.md` (Model section) |
-| Writing the API design section — need endpoint patterns | `.claude/skills/backend-architecture/templates.md` (API section) |
-| Writing frontend components section — need component patterns | `.claude/skills/frontend-architecture/patterns.md` |
-| Need a full worked example of an existing module | `.claude/skills/backend-architecture/examples.md` |
+Load these at the specific moment you need them, not before:
 
-**Rule:** check `landmarks.md` before searching the codebase. It often gives you the
-exact file + line number you need, saving an Explore agent and multiple file reads.
+| Load this file | Exactly when |
+|---|---|
+| `.claude/skills/backend-architecture/templates.md` | **When writing the LLD data model or API section** |
+| `.claude/skills/frontend-architecture/patterns.md` | **When writing the LLD frontend components section** |
+| `.claude/skills/backend-architecture/examples.md` | **When you need a full module walkthrough** to understand an existing pattern |
 
-When searching the codebase for patterns, use grep/find — do not Read entire large
-files unless the whole file is relevant to the plan.
+**Trigger rule:** reached the LLD section and about to write schema/model/API/component specs → load the matching template file first.
+
+**Before any codebase search:** check landmarks.md first. It often has the exact file:line you need.
 
 ---
 
