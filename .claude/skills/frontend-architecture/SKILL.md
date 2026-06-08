@@ -4,6 +4,7 @@ Use this skill when building new frontend features, creating components, adding 
 
 ## What's Here
 
+- **`landmarks.md`** — **Read this first.** File paths + key locations for what planners and implementers repeatedly look up: sidebar / nav contract, auth + permission hook, routing tree, Settings IA, resource delete affordances, API client, test conventions. Skip the Explore agents for anything covered here.
 - **`patterns.md`** — Component and code patterns: directory structure, state management decision tree, component architecture (UI vs functional), memoization, page layout template, typography table, form patterns, error handling, container/scrolling, accessibility, NPM package selection, and chart implementation.
 - **`reference.md`** — Feature structure and testing: folder structure for new features (pipeline as reference), utility/constants organization, test file conventions, key files & their purpose, and configuration details.
 

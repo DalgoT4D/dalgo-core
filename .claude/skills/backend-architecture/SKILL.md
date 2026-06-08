@@ -4,6 +4,7 @@ Use this skill when building new backend features, adding API endpoints, creatin
 
 ## What's Here
 
+- **`landmarks.md`** — **Read this first.** File paths + line ranges for the things planners and implementers repeatedly look up: role/permission models, the `@has_permission` decorator, content model locations, data-infra API modules, invite flow, migration + test templates. Skip the Explore agents for anything covered here.
 - **`templates.md`** — Code templates for every layer: API endpoints, services, schemas, models, and exceptions. Copy and adapt these when creating new modules.
 - **`examples.md`** — Concrete examples: a complete Charts module walkthrough, request-response flow diagrams, JSON response formats, and a migration reference table.
 
