@@ -1,0 +1,944 @@
+From 8c2dd407daa44e1163824c5590a5546890a64f93 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant@projecttech4dev.org>
+Date: Mon, 8 Jun 2026 08:27:04 +0000
+Subject: [PATCH] feat: reduce tool count by collapsing sub-detail tools into
+ parent tools (DALGO-1334)
+
+https://claude.ai/code/session_01P6CeMURELM8emGv3zWdQgx
+---
+ src/dalgo_mcp/tools/charts.py        |  70 +++++++++++----
+ src/dalgo_mcp/tools/connections.py   |  57 +++++++++---
+ src/dalgo_mcp/tools/dashboards.py    |  31 +++++--
+ src/dalgo_mcp/tools/notifications.py |  38 ++++++--
+ src/dalgo_mcp/tools/pipelines.py     | 129 ++++++++++++++++++++-------
+ src/dalgo_mcp/tools/reports.py       |  25 +++++-
+ src/dalgo_mcp/tools/sources.py       |  26 +++++-
+ src/dalgo_mcp/tools/transforms.py    |  84 ++++++++++++++---
+ src/dalgo_mcp/tools/warehouse.py     |  59 +++++++++---
+ 9 files changed, 407 insertions(+), 112 deletions(-)
+
+diff --git a/src/dalgo_mcp/tools/charts.py b/src/dalgo_mcp/tools/charts.py
+index 1f74908..4485403 100644
+--- a/src/dalgo_mcp/tools/charts.py
++++ b/src/dalgo_mcp/tools/charts.py
+@@ -1,3 +1,5 @@
++import json
++
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
+@@ -7,25 +9,63 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_charts() -> str:
+-        """List all charts in the organization."""
++        """List all charts in the organization.
++
++        Use when the user asks what charts exist, or to find a chart_id for viewing, editing, or deleting.
++        Example: "What charts do we have?" or "Is there already a chart showing monthly beneficiary registrations?"
++        Note: Returns chart IDs needed for dalgo_get_chart (which can include data), dalgo_update_chart, and dalgo_delete_chart.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/charts/")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_chart(chart_id: str) -> str:
+-        """Get details of a specific chart.
++    async def dalgo_get_chart(chart_id: str, include_data: bool = False) -> str:
++        """Get configuration details of a specific chart, including its SQL query, type, and dashboard assignment.
++
++        Use when the user wants to inspect or understand a specific chart's setup.
++        Example: "What SQL query does the 'beneficiaries by district' chart use?" or "Which dashboard is this chart on?"
++        Note: Use dalgo_list_charts first to find the chart_id. Set include_data=True to also fetch the chart's query results.
+ 
+         Args:
+             chart_id: The chart ID.
++            include_data: If True, also execute the chart's SQL query and include results as chart_data in response (default False).
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/charts/{chart_id}/")
++
++        if include_data:
++            details_data = None
++            if resp.status_code < 400:
++                try:
++                    details_data = resp.json()
++                except Exception:
++                    details_data = resp.text
++            else:
++                details_data = {"error": resp.text}
++
++            data_resp = await client.get(f"/api/charts/{chart_id}/data/")
++            chart_data = None
++            if data_resp.status_code < 400:
++                try:
++                    chart_data = data_resp.json()
++                except Exception:
++                    chart_data = data_resp.text
++            else:
++                chart_data = {"error": data_resp.text}
++
++            combined = {"details": details_data, "chart_data": chart_data}
++            return json.dumps(combined, indent=2, default=str)
++
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_create_chart(chart_data: dict) -> str:
+-        """Create a new chart.
++        """Create a new chart with a SQL query, chart type, and optional dashboard assignment.
++
++        Use when the user wants to add a new visualization to a dashboard.
++        Example: "Create a bar chart showing monthly beneficiary registrations grouped by district."
++        Note: Use dalgo_get_table_columns to understand available columns before writing the SQL query.
+ 
+         Args:
+             chart_data: Chart configuration dict with title, SQL query, chart type, and dashboard assignment.
+@@ -36,7 +76,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_update_chart(chart_id: str, chart_data: dict) -> str:
+-        """Update an existing chart.
++        """Update an existing chart's title, SQL query, type, or dashboard assignment.
++
++        Use when the user wants to edit a chart — fix a query, change the chart type, or move it to a different dashboard.
++        Example: "Update the beneficiary chart to also group by gender" or "Change this chart from a bar chart to a line chart."
++        Note: Fetch the current config with dalgo_get_chart first so you only change what the user requested.
+ 
+         Args:
+             chart_id: The chart ID.
+@@ -48,7 +92,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_delete_chart(chart_id: str) -> str:
+-        """Delete a chart.
++        """Delete a chart permanently.
++
++        Use only when the user explicitly wants to remove a chart.
++        Example: "Delete the old 'pilot cohort' chart — the program has ended."
++        Note: Confirm with the user before deleting. This is irreversible.
+ 
+         Args:
+             chart_id: The chart ID.
+@@ -57,13 +105,3 @@ def register(app: FastMCP, get_client):
+         resp = await client.delete(f"/api/charts/{chart_id}/")
+         return format_response(resp)
+ 
+-    @app.tool()
+-    async def dalgo_get_chart_data(chart_id: str) -> str:
+-        """Execute a chart's query and return the resulting data.
+-
+-        Args:
+-            chart_id: The chart ID.
+-        """
+-        client: DalgoClient = await get_client()
+-        resp = await client.get(f"/api/charts/{chart_id}/data/")
+-        return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/connections.py b/src/dalgo_mcp/tools/connections.py
+index d86697e..c6aaf0d 100644
+--- a/src/dalgo_mcp/tools/connections.py
++++ b/src/dalgo_mcp/tools/connections.py
+@@ -1,3 +1,5 @@
++import json
++
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
+@@ -7,36 +9,65 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_connections() -> str:
+-        """List all Airbyte connections (source-to-destination syncs) in the organization."""
++        """List all Airbyte connections (source-to-destination syncs) in the organization.
++
++        Use when the user asks what syncs exist, or to find a connection_id for history or pipeline setup.
++        Example: "What connections do we have?" or "Is there a sync set up for our Kobo forms?"
++        Note: Returns connection IDs needed for dalgo_get_connection (which includes sync history), dalgo_get_connection_catalog, and dalgo_create_pipeline.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/airbyte/v1/connections")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_connection(connection_id: str) -> str:
+-        """Get details of a specific Airbyte connection.
++    async def dalgo_get_connection(connection_id: str, include_history: bool = True) -> str:
++        """Get configuration details of a specific Airbyte connection.
++
++        Use when the user wants to inspect a connection's sync mode, selected streams, or schedule.
++        Example: "What streams does our Kobo connection sync?" or "Is the beneficiary sync incremental or full refresh?"
++        Note: Use dalgo_list_connections first to find the connection_id.
+ 
+         Args:
+             connection_id: The Airbyte connection ID.
++            include_history: If True (default), also fetch sync run history and include as sync_history in response.
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}")
+-        return format_response(resp)
+ 
+-    @app.tool()
+-    async def dalgo_get_sync_history(connection_id: str) -> str:
+-        """Get sync run history for an Airbyte connection.
++        if include_history:
++            details_data = None
++            if resp.status_code < 400:
++                try:
++                    details_data = resp.json()
++                except Exception:
++                    details_data = resp.text
++            else:
++                details_data = {"error": resp.text}
++
++            history_resp = await client.get(
++                f"/api/airbyte/v1/connections/{connection_id}/sync/history"
++            )
++            history_data = None
++            if history_resp.status_code < 400:
++                try:
++                    history_data = history_resp.json()
++                except Exception:
++                    history_data = history_resp.text
++            else:
++                history_data = {"error": history_resp.text}
++
++            combined = {"details": details_data, "sync_history": history_data}
++            return json.dumps(combined, indent=2, default=str)
+ 
+-        Args:
+-            connection_id: The Airbyte connection ID.
+-        """
+-        client: DalgoClient = await get_client()
+-        resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}/sync/history")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_get_connection_catalog(connection_id: str) -> str:
+-        """Get the stream catalog for an Airbyte connection (selected streams and sync modes).
++        """Get the stream catalog for an Airbyte connection — which tables/streams are selected and their sync modes.
++
++        Use when the user wants to know what data is being synced, or to verify a specific form/table is included.
++        Example: "Is the health_screening stream included in our Kobo connection?" or "What tables does this sync bring in?"
++        Note: Returns selected streams with their sync mode (full_refresh or incremental) and primary keys.
+ 
+         Args:
+             connection_id: The Airbyte connection ID.
+diff --git a/src/dalgo_mcp/tools/dashboards.py b/src/dalgo_mcp/tools/dashboards.py
+index b3b5185..462fee6 100644
+--- a/src/dalgo_mcp/tools/dashboards.py
++++ b/src/dalgo_mcp/tools/dashboards.py
+@@ -7,14 +7,23 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_dashboards() -> str:
+-        """List all dashboards in the organization."""
++        """List all dashboards in the organization.
++
++        Use when the user asks what dashboards exist, or to find a dashboard_id for further operations.
++        Example: "What dashboards do we have?" or "Is there a beneficiary outreach dashboard?"
++        Note: Returns dashboard IDs needed for dalgo_get_dashboard, dalgo_update_dashboard, and dalgo_delete_dashboard.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/dashboards/")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_get_dashboard(dashboard_id: str) -> str:
+-        """Get details of a specific dashboard including its charts.
++        """Get details of a specific dashboard, including its title, description, and associated charts.
++
++        Use when the user wants to inspect a dashboard's contents or find which charts are in it.
++        Example: "What charts are on the field operations dashboard?" or "Show me the details of dashboard X."
++        Note: Use dalgo_list_dashboards first to find the dashboard_id.
+ 
+         Args:
+             dashboard_id: The dashboard ID.
+@@ -25,7 +34,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_create_dashboard(dashboard_data: dict) -> str:
+-        """Create a new dashboard.
++        """Create a new dashboard with a title and optional description.
++
++        Use when the user wants to set up a new dashboard to group related charts.
++        Example: "Create a dashboard called 'Monthly Health Indicators' for our health program charts."
++        Note: After creating, use dalgo_create_chart to add charts and assign them to this dashboard.
+ 
+         Args:
+             dashboard_data: Dashboard configuration dict with title and optional description.
+@@ -36,7 +49,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_update_dashboard(dashboard_id: str, dashboard_data: dict) -> str:
+-        """Update an existing dashboard.
++        """Update an existing dashboard's title or description.
++
++        Use when the user wants to rename a dashboard or change its description.
++        Example: "Rename the 'Monthly Health' dashboard to 'Health Program KPIs'."
++        Note: Fetch current config with dalgo_get_dashboard first so you only change what the user requested.
+ 
+         Args:
+             dashboard_id: The dashboard ID.
+@@ -48,7 +65,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_delete_dashboard(dashboard_id: str) -> str:
+-        """Delete a dashboard.
++        """Delete a dashboard permanently. Charts on the dashboard are not deleted, only the dashboard container.
++
++        Use only when the user explicitly wants to remove a dashboard.
++        Example: "Delete the old pilot program dashboard — it's no longer needed."
++        Note: Confirm with the user before deleting. Charts associated with the dashboard are NOT deleted automatically.
+ 
+         Args:
+             dashboard_id: The dashboard ID.
+diff --git a/src/dalgo_mcp/tools/notifications.py b/src/dalgo_mcp/tools/notifications.py
+index 79b347b..cf62c3f 100644
+--- a/src/dalgo_mcp/tools/notifications.py
++++ b/src/dalgo_mcp/tools/notifications.py
+@@ -1,3 +1,5 @@
++import json
++
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
+@@ -7,17 +9,35 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_notifications() -> str:
+-        """List recent notifications for the current user."""
+-        client: DalgoClient = await get_client()
+-        resp = await client.get("/api/notifications/v1")
+-        return format_response(resp)
++        """List recent notifications for the current user, including the unread count.
+ 
+-    @app.tool()
+-    async def dalgo_get_unread_count() -> str:
+-        """Get the count of unread notifications."""
++        Use when the user wants to see their notifications or check how many are unread.
++        Example: "Do I have any new notifications?" or "What notifications came in today?"
++        Note: Always returns both the notification list and the total unread count combined.
++        """
+         client: DalgoClient = await get_client()
+-        resp = await client.get("/api/notifications/unread_count")
+-        return format_response(resp)
++        notifications_resp = await client.get("/api/notifications/v1")
++        notifications_data = None
++        if notifications_resp.status_code < 400:
++            try:
++                notifications_data = notifications_resp.json()
++            except Exception:
++                notifications_data = notifications_resp.text
++        else:
++            notifications_data = {"error": notifications_resp.text}
++
++        unread_resp = await client.get("/api/notifications/unread_count")
++        unread_data = None
++        if unread_resp.status_code < 400:
++            try:
++                unread_data = unread_resp.json()
++            except Exception:
++                unread_data = unread_resp.text
++        else:
++            unread_data = {"error": unread_resp.text}
++
++        combined = {"notifications": notifications_data, "unread_count": unread_data}
++        return json.dumps(combined, indent=2, default=str)
+ 
+     @app.tool()
+     async def dalgo_mark_notifications_read(notification_ids: list[str] | None = None) -> str:
+diff --git a/src/dalgo_mcp/tools/pipelines.py b/src/dalgo_mcp/tools/pipelines.py
+index 84e70aa..12fa42e 100644
+--- a/src/dalgo_mcp/tools/pipelines.py
++++ b/src/dalgo_mcp/tools/pipelines.py
+@@ -1,3 +1,5 @@
++import json
++
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
+@@ -7,25 +9,66 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_pipelines() -> str:
+-        """List all orchestration pipelines (Prefect deployments) in the organization."""
++        """List all orchestration pipelines (Prefect deployments) in the organization.
++
++        Use when the user asks about their pipelines, what's scheduled, or wants to find a deployment ID.
++        Example: "What pipelines do we have?" or "Show me all scheduled data syncs."
++        Note: Returns deployment IDs needed for trigger/history/status tools.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/prefect/v1/flows/")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_pipeline(deployment_id: str) -> str:
++    async def dalgo_get_pipeline(deployment_id: str, include_history: bool = True) -> str:
+         """Get details of a specific pipeline by its deployment ID.
+ 
++        Use when the user wants to inspect a single pipeline's configuration, schedule, or status.
++        Example: "Tell me about the beneficiary sync pipeline" or "What cron schedule does this deployment run on?"
++        Note: Requires a deployment_id — use dalgo_list_pipelines first to find it.
++
+         Args:
+             deployment_id: The Prefect deployment ID.
++            include_history: If True (default), also fetch the last 5 run history entries and include as recent_runs.
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/prefect/v1/flows/{deployment_id}")
++
++        if include_history:
++            details_data = None
++            if resp.status_code < 400:
++                try:
++                    details_data = resp.json()
++                except Exception:
++                    details_data = resp.text
++            else:
++                details_data = {"error": resp.text}
++
++            history_resp = await client.get(
++                f"/api/prefect/v1/flows/{deployment_id}/flow_runs/history",
++                params={"limit": 5},
++            )
++            history_data = None
++            if history_resp.status_code < 400:
++                try:
++                    history_data = history_resp.json()
++                except Exception:
++                    history_data = history_resp.text
++            else:
++                history_data = {"error": history_resp.text}
++
++            combined = {"details": details_data, "recent_runs": history_data}
++            return json.dumps(combined, indent=2, default=str)
++
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_create_pipeline(pipeline_data: dict) -> str:
+-        """Create a new orchestration pipeline.
++        """Create a new orchestration pipeline (Prefect deployment) with a schedule and data flow config.
++
++        Use when the user wants to set up automated data syncing on a schedule.
++        Example: "Create a nightly pipeline to sync Kobo submissions and run dbt transforms."
++        Note: Requires a connection_id from dalgo_list_connections. Confirm schedule and settings with the user before creating.
+ 
+         Args:
+             pipeline_data: Pipeline configuration dict with connection_id, cron schedule, and transform settings.
+@@ -36,7 +79,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_update_pipeline(deployment_id: str, pipeline_data: dict) -> str:
+-        """Update an existing pipeline's configuration.
++        """Update an existing pipeline's configuration (e.g. change schedule or included transforms).
++
++        Use when the user wants to change when a pipeline runs or what it does.
++        Example: "Change the beneficiary sync to run every 6 hours instead of nightly."
++        Note: Fetch the current config with dalgo_get_pipeline first so you only change what the user requested.
+ 
+         Args:
+             deployment_id: The Prefect deployment ID.
+@@ -48,7 +95,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_delete_pipeline(deployment_id: str) -> str:
+-        """Delete a pipeline by its deployment ID.
++        """Delete a pipeline by its deployment ID. This is irreversible.
++
++        Use when the user explicitly wants to remove a pipeline permanently.
++        Example: "Delete the old CSV import pipeline — we no longer use it."
++        Note: Confirm with the user before deleting. This cannot be undone.
+ 
+         Args:
+             deployment_id: The Prefect deployment ID.
+@@ -59,7 +110,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_trigger_pipeline_run(deployment_id: str) -> str:
+-        """Trigger an immediate run of a pipeline.
++        """Trigger an immediate (out-of-schedule) run of a pipeline.
++
++        Use when the user wants to run a sync or transform right now, without waiting for the next scheduled run.
++        Example: "Run the beneficiary pipeline now" or "Trigger a manual sync for the Kobo connection."
++        Note: Returns a flow_run_id — use dalgo_get_flow_run_details to monitor progress.
+ 
+         Args:
+             deployment_id: The Prefect deployment ID.
+@@ -69,38 +124,44 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_pipeline_run_history(deployment_id: str, limit: int = 10) -> str:
+-        """Get the run history for a specific pipeline.
++    async def dalgo_get_flow_run_details(flow_run_id: str) -> str:
++        """Get details, current status, and execution logs for a specific Prefect flow run.
+ 
+-        Args:
+-            deployment_id: The Prefect deployment ID.
+-            limit: Maximum number of runs to return (default 10).
+-        """
+-        client: DalgoClient = await get_client()
+-        resp = await client.get(
+-            f"/api/prefect/v1/flows/{deployment_id}/flow_runs/history",
+-            params={"limit": limit},
+-        )
+-        return format_response(resp)
+-
+-    @app.tool()
+-    async def dalgo_get_flow_run(flow_run_id: str) -> str:
+-        """Get details of a specific flow run.
++        Use when the user wants to check if a specific run succeeded, failed, or is still in progress,
++        or when a pipeline failed and the user needs to understand why.
++        Example: "What happened with this morning's pipeline run?" or "Why did the sync fail?"
++        Note: Returns combined details and logs. Look for ERROR or FAILED lines to identify problems.
+ 
+         Args:
+             flow_run_id: The Prefect flow run ID.
+         """
+         client: DalgoClient = await get_client()
+-        resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}")
+-        return format_response(resp)
+-
+-    @app.tool()
+-    async def dalgo_get_flow_run_logs(flow_run_id: str) -> str:
+-        """Get logs for a specific flow run.
+ 
+-        Args:
+-            flow_run_id: The Prefect flow run ID.
+-        """
+-        client: DalgoClient = await get_client()
+-        resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}/logs")
+-        return format_response(resp)
++        details_resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}")
++        details_data = None
++        if details_resp.status_code < 400:
++            try:
++                details_data = details_resp.json()
++            except Exception:
++                details_data = details_resp.text
++        else:
++            details_data = {"error": details_resp.text}
++
++        logs_resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}/logs")
++        logs_data = None
++        if logs_resp.status_code < 400:
++            try:
++                raw_logs = logs_resp.json()
++                # Truncate large log payloads to avoid context overflow
++                if isinstance(raw_logs, list) and len(raw_logs) > 100:
++                    logs_data = raw_logs[:100]
++                    logs_data.append({"truncated": True, "total_entries": len(raw_logs)})
++                else:
++                    logs_data = raw_logs
++            except Exception:
++                logs_data = logs_resp.text
++        else:
++            logs_data = {"error": logs_resp.text}
++
++        combined = {"details": details_data, "logs": logs_data}
++        return json.dumps(combined, indent=2, default=str)
+diff --git a/src/dalgo_mcp/tools/reports.py b/src/dalgo_mcp/tools/reports.py
+index 824a81c..565e6a2 100644
+--- a/src/dalgo_mcp/tools/reports.py
++++ b/src/dalgo_mcp/tools/reports.py
+@@ -7,14 +7,23 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_reports() -> str:
+-        """List all saved reports (data snapshots) in the organization."""
++        """List all saved reports (data snapshots) in the organization.
++
++        Use when the user asks what reports exist, or to find a snapshot_id for viewing or deleting.
++        Example: "What reports have been generated?" or "Is there a quarterly beneficiary summary report?"
++        Note: Returns snapshot IDs needed for dalgo_get_report and dalgo_delete_report.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/reports/")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_get_report(snapshot_id: str) -> str:
+-        """View a specific report's data.
++        """View the data contained in a specific saved report snapshot.
++
++        Use when the user wants to read the results of a previously generated report.
++        Example: "Show me the April beneficiary summary report" or "What did last week's data snapshot capture?"
++        Note: Use dalgo_list_reports first to find the snapshot_id.
+ 
+         Args:
+             snapshot_id: The report snapshot ID.
+@@ -25,7 +34,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_create_report(report_data: dict) -> str:
+-        """Create a new report (data snapshot).
++        """Create a new report that captures a data snapshot on a schedule or on demand.
++
++        Use when the user wants to set up a recurring or one-time data export/summary.
++        Example: "Create a weekly report of new beneficiary registrations for the program manager."
++        Note: Reports are point-in-time snapshots — use dalgo_list_reports later to retrieve generated snapshots.
+ 
+         Args:
+             report_data: Report configuration dict with query and schedule settings.
+@@ -36,7 +49,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_delete_report(snapshot_id: str) -> str:
+-        """Delete a report.
++        """Delete a saved report snapshot permanently.
++
++        Use only when the user explicitly wants to remove a report snapshot.
++        Example: "Delete the old pilot phase report — we've archived the data already."
++        Note: Confirm with the user before deleting. This is irreversible.
+ 
+         Args:
+             snapshot_id: The report snapshot ID.
+diff --git a/src/dalgo_mcp/tools/sources.py b/src/dalgo_mcp/tools/sources.py
+index 890e796..5ce00ca 100644
+--- a/src/dalgo_mcp/tools/sources.py
++++ b/src/dalgo_mcp/tools/sources.py
+@@ -7,14 +7,23 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_sources() -> str:
+-        """List all configured data sources (Airbyte sources) in the organization."""
++        """List all configured data sources (Airbyte sources) in the organization.
++
++        Use when the user asks what data sources are set up, or to find a source_id for other operations.
++        Example: "What data sources do we have?" or "Is there a Kobo Toolbox source configured?"
++        Note: Returns source IDs needed for dalgo_get_source or dalgo_delete_source.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/airbyte/sources")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_get_source(source_id: str) -> str:
+-        """Get details of a specific data source.
++        """Get configuration details of a specific Airbyte data source.
++
++        Use when the user wants to inspect a source's settings, connector type, or connection config.
++        Example: "What are the settings for our Google Sheets source?" or "Which connector type does this source use?"
++        Note: May include credentials — do not display sensitive config values to the user.
+ 
+         Args:
+             source_id: The Airbyte source ID.
+@@ -25,14 +34,23 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_source_definitions() -> str:
+-        """List all available Airbyte source definitions (connector types)."""
++        """List all available Airbyte source connector types (e.g. Google Sheets, Kobo, PostgreSQL).
++
++        Use when the user wants to know which data sources Dalgo can connect to, or to find a definition ID before adding a source.
++        Example: "Can we connect to Salesforce?" or "What connectors are available for NGO data collection tools?"
++        Note: Returns sourceDefinitionId values needed when creating a new source.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/airbyte/source_definitions")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_delete_source(source_id: str) -> str:
+-        """Delete a data source.
++        """Delete a data source permanently. This also breaks any connections using this source.
++
++        Use only when the user explicitly wants to remove a source and understands dependent connections will break.
++        Example: "Remove the old Google Sheets source — we've migrated to Kobo."
++        Note: Confirm with the user before deleting. Check dalgo_list_connections first to identify impacted connections.
+ 
+         Args:
+             source_id: The Airbyte source ID.
+diff --git a/src/dalgo_mcp/tools/transforms.py b/src/dalgo_mcp/tools/transforms.py
+index 19c0c0f..613116e 100644
+--- a/src/dalgo_mcp/tools/transforms.py
++++ b/src/dalgo_mcp/tools/transforms.py
+@@ -7,21 +7,35 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_dbt_workspace() -> str:
+-        """Get the dbt workspace configuration for the organization."""
++        """Get the dbt workspace configuration for the organization (git repo, target schema, etc.).
++
++        Use when the user wants to know how dbt is set up, which git repo is connected, or what the target schema is.
++        Example: "What git repo is our dbt project connected to?" or "Which schema do dbt models output to?"
++        Note: Returns workspace metadata — not the model DAG. Use dalgo_get_transform_graph for model dependencies.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/dbt/dbt_workspace")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_get_git_status() -> str:
+-        """Get the git status of the dbt project repository (modified/untracked files)."""
++        """Get the git status of the dbt project repository — shows modified or untracked files.
++
++        Use when the user wants to see if there are unpublished transform changes, or before publishing.
++        Example: "Are there any unsaved changes to our dbt models?" or "What's been changed since the last publish?"
++        Note: Use dalgo_publish_changes to commit and push any pending changes shown here.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/dbt/git_status/")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_run_dbt(run_params: dict | None = None) -> str:
+-        """Trigger a dbt run via Celery (async task). Optionally pass command and flags.
++        """Trigger a dbt run via Celery to execute transformation models. Runs asynchronously.
++
++        Use when the user wants to re-run dbt models after a data sync or after editing transforms.
++        Example: "Run all dbt models" or "Run only the beneficiary_summary model after the sync completed."
++        Note: This is an async task — it returns a task ID, not results. The pipeline (dalgo_trigger_pipeline_run) usually handles this automatically on a schedule.
+ 
+         Args:
+             run_params: Optional dict with dbt run parameters (e.g. command, select, exclude).
+@@ -32,14 +46,24 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_transform_graph() -> str:
+-        """Get the dbt project DAG (directed acyclic graph) showing model dependencies."""
++        """Get the dbt project DAG showing all models and their dependencies as a graph.
++
++        Use when the user wants to understand how their transforms are structured, or to find node UUIDs.
++        Example: "Show me how our data models are connected" or "Which models depend on the raw Kobo source?"
++        Note: Returns node UUIDs needed for dalgo_get_node_details, dalgo_get_node_columns, and dalgo_create_operation.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/transform/v2/dbt_project/graph/")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_sync_sources() -> str:
+-        """Sync dbt sources from the connected warehouse, updating the dbt project's source definitions."""
++        """Sync dbt source definitions from the warehouse, picking up new tables added by recent Airbyte syncs.
++
++        Use when a new Airbyte connection or stream has been added and the tables aren't yet visible in the transform canvas.
++        Example: "I added a new Kobo form stream but it's not showing in transforms — can you sync sources?"
++        Note: Run this before dalgo_get_sources_models if the user reports missing tables in the transform UI.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.post("/api/transform/dbt_project/sync_sources/")
+         return format_response(resp)
+@@ -48,7 +72,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_sources_models(schema_name: str | None = None) -> str:
+-        """Get all available sources and models with their columns.
++        """Get all available dbt sources and models with their columns — the building blocks for transforms.
++
++        Use when the user wants to know what tables/models are available to build a new transform from.
++        Example: "What sources can I use in my transform?" or "Show me the columns in the raw Kobo source."
++        Note: Returns dbtmodel_uuid values needed for dalgo_add_source_to_canvas to start building a transform chain.
+ 
+         Args:
+             schema_name: Optional schema name to filter results.
+@@ -65,7 +93,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_node_details(node_uuid: str) -> str:
+-        """Get full details of a canvas node including its operation config and input nodes.
++        """Get full configuration of a canvas node — operation type, config, and its input node(s).
++
++        Use when the user wants to inspect an existing transform step before editing or extending it.
++        Example: "What does this filter node do?" or "Show me the join configuration for this node."
++        Note: Use dalgo_get_transform_graph to find node_uuid values for nodes on the canvas.
+ 
+         Args:
+             node_uuid: UUID of the canvas node.
+@@ -78,7 +110,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_node_columns(node_uuid: str) -> str:
+-        """Get column names and data types for a specific canvas node.
++        """Get the output column names and data types for a canvas node after its operation is applied.
++
++        Use before adding the next operation in a chain to know what columns are available downstream.
++        Example: "What columns does the output of this join have?" or "Show me what columns are available after the filter step."
++        Note: Different from dalgo_get_table_columns — this reflects columns as shaped by canvas operations, not raw warehouse tables.
+ 
+         Args:
+             node_uuid: UUID of the canvas node.
+@@ -91,7 +127,12 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_get_data_types() -> str:
+-        """Get the list of warehouse-specific data types (used for cast operations)."""
++        """Get the list of warehouse-supported data types for use in cast operations.
++
++        Use before creating a castdatatypes operation node to know which type names are valid.
++        Example: "What data types can I cast columns to?" or when building a castdatatypes operation.
++        Note: Data types are warehouse-specific (e.g. BigQuery vs PostgreSQL have different type names).
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/transform/dbt_project/data_type/")
+         return format_response(resp)
+@@ -100,9 +141,11 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_acquire_canvas_lock() -> str:
+-        """Acquire a lock on the transform canvas. Required before making any canvas modifications.
++        """Acquire an exclusive lock on the transform canvas before making any modifications.
+ 
+-        Returns lock_token, expires_at, and locked_by.
++        Use at the start of any canvas editing session — required before add, create, edit, or terminate operations.
++        Example: Called automatically before adding a source or creating an operation node.
++        Note: Returns lock_token and expires_at. Always call dalgo_release_canvas_lock when done to unblock other users.
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.post("/api/transform/dbt_project/canvas/lock/")
+@@ -110,14 +153,23 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_release_canvas_lock() -> str:
+-        """Release the lock on the transform canvas after modifications are complete."""
++        """Release the transform canvas lock after finishing canvas modifications.
++
++        Use at the end of any canvas editing session, after all add/create/edit/terminate operations are done.
++        Example: Called after dalgo_terminate_chain or after an error to ensure other users can edit.
++        Note: Always release the lock even if an error occurred mid-edit — failing to do so blocks all canvas modifications.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.delete("/api/transform/dbt_project/canvas/lock/")
+         return format_response(resp)
+ 
+     @app.tool()
+     async def dalgo_add_source_to_canvas(dbtmodel_uuid: str) -> str:
+-        """Add an existing source or model to the canvas as a node.
++        """Add an existing dbt source or model to the transform canvas as the starting node of a chain.
++
++        Use as the first step when building a new transform — places a source table onto the canvas.
++        Example: "Start building a transform from the raw Kobo beneficiary table."
++        Note: Requires the canvas lock (dalgo_acquire_canvas_lock). Use dalgo_get_sources_models to find dbtmodel_uuid.
+ 
+         Args:
+             dbtmodel_uuid: UUID of the dbt source/model to add.
+@@ -136,7 +188,11 @@ def register(app: FastMCP, get_client):
+         source_columns: list[str],
+         other_inputs: list[dict] | None = None,
+     ) -> str:
+-        """Create a new operation node on the canvas (join, filter, rename, aggregate, etc.).
++        """Add a new transformation step (operation node) to the canvas, chained from an existing node.
++
++        Use when building a no-code transform pipeline — each call adds one step (filter, join, rename, etc.).
++        Example: "Add a 'where' filter to keep only rows where status = 'active'" or "Join the beneficiary table with the district lookup."
++        Note: Requires the canvas lock. Use dalgo_get_node_columns on the input node first to know available columns.
+ 
+         Args:
+             input_node_uuid: UUID of the input canvas node.
+diff --git a/src/dalgo_mcp/tools/warehouse.py b/src/dalgo_mcp/tools/warehouse.py
+index f453ba7..1f0ce18 100644
+--- a/src/dalgo_mcp/tools/warehouse.py
++++ b/src/dalgo_mcp/tools/warehouse.py
+@@ -10,7 +10,12 @@ def register(app: FastMCP, get_client):
+ 
+     @app.tool()
+     async def dalgo_list_schemas() -> str:
+-        """List all schemas in the connected data warehouse."""
++        """List all schemas in the connected data warehouse.
++
++        Use when the user wants to explore what data is available or doesn't know which schema to query.
++        Example: "What schemas do we have?" or "Show me the structure of our warehouse."
++        Note: Returns schema names needed as input for dalgo_list_tables.
++        """
+         client: DalgoClient = await get_client()
+         resp = await client.get("/api/warehouse/schemas")
+         return format_response(resp)
+@@ -19,6 +24,10 @@ def register(app: FastMCP, get_client):
+     async def dalgo_list_tables(schema_name: str) -> str:
+         """List all tables in a specific warehouse schema.
+ 
++        Use when the user wants to know what tables exist under a schema, or before querying data.
++        Example: "What tables are in the beneficiaries schema?" or "List tables in raw_kobo."
++        Note: Use dalgo_list_schemas first if you don't know the schema name.
++
+         Args:
+             schema_name: Name of the schema to list tables from.
+         """
+@@ -30,6 +39,10 @@ def register(app: FastMCP, get_client):
+     async def dalgo_get_table_columns(schema: str, table: str) -> str:
+         """Get column names and types for a specific warehouse table.
+ 
++        Use when the user asks about the structure of a table, or before building a chart or transform.
++        Example: "What columns does the beneficiary_registrations table have?" or "Show me the schema for form_responses."
++        Note: Returns column names and data types — use this before dalgo_get_table_data to understand what to query.
++
+         Args:
+             schema: Schema name.
+             table: Table name.
+@@ -39,38 +52,58 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_table_data(schema: str, table: str, limit: int = 10, offset: int = 0) -> str:
++    async def dalgo_get_table_data(
++        schema: str,
++        table: str,
++        limit: int = 10,
++        offset: int = 0,
++        include_count: bool = False,
++    ) -> str:
+         """Fetch rows from a warehouse table. Defaults to 10 rows to avoid context overflow.
+         PII columns (name, email, phone, address, etc.) are automatically masked.
+ 
++        Use when the user wants to preview or inspect actual data in a table.
++        Example: "Show me a few rows from the beneficiary table" or "What does the raw Kobo data look like?"
++        Note: PII fields are auto-masked for privacy. Keep limit low (10–50) unless pagination is needed.
++
+         Args:
+             schema: Schema name.
+             table: Table name.
+             limit: Maximum number of rows to return (default 10).
+             offset: Number of rows to skip (default 0).
++            include_count: If True, also fetch the total row count and include it in the response (default False).
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.get(
+             f"/api/warehouse/table_data/{schema}/{table}",
+             params={"limit": limit, "offset": offset},
+         )
++        rows_data = None
+         if resp.status_code < 400:
+             try:
+                 rows = resp.json()
+                 if isinstance(rows, list):
+-                    return json.dumps(mask_pii_in_rows(rows), indent=2, default=str)
++                    rows_data = mask_pii_in_rows(rows)
+             except Exception:
+                 pass
+-        return format_response(resp)
+ 
+-    @app.tool()
+-    async def dalgo_get_table_row_count(schema: str, table: str) -> str:
+-        """Get the total row count of a warehouse table.
++        if include_count:
++            count_resp = await client.get(f"/api/warehouse/table_count/{schema}/{table}")
++            count_data = None
++            if count_resp.status_code < 400:
++                try:
++                    count_data = count_resp.json()
++                except Exception:
++                    count_data = count_resp.text
++            else:
++                count_data = {"error": count_resp.text}
+ 
+-        Args:
+-            schema: Schema name.
+-            table: Table name.
+-        """
+-        client: DalgoClient = await get_client()
+-        resp = await client.get(f"/api/warehouse/table_count/{schema}/{table}")
++            combined = {
++                "rows": rows_data if rows_data is not None else format_response(resp),
++                "row_count": count_data,
++            }
++            return json.dumps(combined, indent=2, default=str)
++
++        if rows_data is not None:
++            return json.dumps(rows_data, indent=2, default=str)
+         return format_response(resp)
+-- 
+2.43.0
+

@@ -1,0 +1,84 @@
+From 416059e75c8073613f4dad49ff5924364563af32 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant@projecttech4dev.org>
+Date: Mon, 8 Jun 2026 08:21:22 +0000
+Subject: [PATCH] feat: add toolset system with per-org enable/disable config
+ (DALGO-1322)
+
+https://claude.ai/code/session_01P6CeMURELM8emGv3zWdQgx
+---
+ src/dalgo_mcp/config.py | 14 ++++++++++++++
+ src/dalgo_mcp/server.py | 33 ++++++++++++++++++++++-----------
+ 2 files changed, 36 insertions(+), 11 deletions(-)
+
+diff --git a/src/dalgo_mcp/config.py b/src/dalgo_mcp/config.py
+index 8f0cfe2..66ce42d 100644
+--- a/src/dalgo_mcp/config.py
++++ b/src/dalgo_mcp/config.py
+@@ -25,6 +25,20 @@ class Config:
+         # Used as OAuth issuer/resource URL in metadata. Falls back to http://localhost:<port>.
+         self.public_url = os.environ.get("DALGO_PUBLIC_URL", "").rstrip("/")
+         self.debug = os.environ.get("DALGO_DEBUG", "").lower() in ("1", "true", "yes")
++        raw_toolsets = os.environ.get("DALGO_TOOLSETS", "")
++        self.enabled_toolsets: frozenset[str] = (
++            frozenset(t.strip() for t in raw_toolsets.split(",") if t.strip())
++            if raw_toolsets.strip()
++            else frozenset()
++        )
++
++    VALID_TOOLSETS = frozenset({
++        "warehouse", "pipelines", "sources", "connections", "dashboards",
++        "charts", "reports", "transforms", "notifications", "organization", "docs",
++    })
++
++    def is_toolset_enabled(self, name: str) -> bool:
++        return not self.enabled_toolsets or name in self.enabled_toolsets
+ 
+     def validate(self):
+         if self.transport not in ("stdio", "streamable-http"):
+diff --git a/src/dalgo_mcp/server.py b/src/dalgo_mcp/server.py
+index fea4f02..29b26ac 100644
+--- a/src/dalgo_mcp/server.py
++++ b/src/dalgo_mcp/server.py
+@@ -163,17 +163,28 @@ from dalgo_mcp.tools import transforms
+ from dalgo_mcp.tools import notifications
+ from dalgo_mcp.tools import docs
+ 
+-organization.register(app, get_client)
+-warehouse.register(app, get_client)
+-pipelines.register(app, get_client)
+-sources.register(app, get_client)
+-connections.register(app, get_client)
+-dashboards.register(app, get_client)
+-charts.register(app, get_client)
+-reports.register(app, get_client)
+-transforms.register(app, get_client)
+-notifications.register(app, get_client)
+-docs.register(app, get_client)
++if config.is_toolset_enabled("organization"):
++    organization.register(app, get_client)
++if config.is_toolset_enabled("warehouse"):
++    warehouse.register(app, get_client)
++if config.is_toolset_enabled("pipelines"):
++    pipelines.register(app, get_client)
++if config.is_toolset_enabled("sources"):
++    sources.register(app, get_client)
++if config.is_toolset_enabled("connections"):
++    connections.register(app, get_client)
++if config.is_toolset_enabled("dashboards"):
++    dashboards.register(app, get_client)
++if config.is_toolset_enabled("charts"):
++    charts.register(app, get_client)
++if config.is_toolset_enabled("reports"):
++    reports.register(app, get_client)
++if config.is_toolset_enabled("transforms"):
++    transforms.register(app, get_client)
++if config.is_toolset_enabled("notifications"):
++    notifications.register(app, get_client)
++if config.is_toolset_enabled("docs"):
++    docs.register(app, get_client)
+ 
+ 
+ def main():
+-- 
+2.43.0
+

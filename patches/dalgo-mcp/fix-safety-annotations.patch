@@ -1,0 +1,2204 @@
+From 91fc885793dca1b0658f4380f98ed0f25b8ec469 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 15:27:18 +0530
+Subject: [PATCH 1/9] fix: add TTL eviction to JWT token client cache
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+_token_clients dict grew unbounded with no eviction — a memory
+leak under production load. Add _token_expiries companion dict
+and evict expired entries on each get_client_for_token call.
+Closes #10.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/dalgo_mcp/client.py | 32 +++++++++++++++++++++++++++++---
+ 1 file changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/src/dalgo_mcp/client.py b/src/dalgo_mcp/client.py
+index 2799fc4..8a34d44 100644
+--- a/src/dalgo_mcp/client.py
++++ b/src/dalgo_mcp/client.py
+@@ -1,6 +1,9 @@
+ import httpx
+ import json
+ import logging
++import time
++
++import jwt
+ 
+ from dalgo_mcp.config import config
+ 
+@@ -8,6 +11,7 @@ logger = logging.getLogger(__name__)
+ 
+ # Cache of DalgoClient instances keyed by JWT token (for HTTP mode)
+ _token_clients: dict[str, "DalgoClient"] = {}
++_token_expiries: dict[str, float] = {}  # token -> unix timestamp of expiry
+ 
+ 
+ class DalgoClient:
+@@ -137,9 +141,31 @@ class DalgoClient:
+ 
+ async def get_client_for_token(token: str) -> DalgoClient:
+     """Get or create a cached DalgoClient for the given JWT token."""
+-    if token not in _token_clients:
+-        _token_clients[token] = await DalgoClient.from_token(config.api_url, token)
+-    return _token_clients[token]
++    now = time.time()
++
++    # Evict all expired entries on every call to prevent unbounded growth
++    expired = [t for t, exp in _token_expiries.items() if exp < now]
++    for t in expired:
++        _token_clients.pop(t, None)
++        _token_expiries.pop(t, None)
++
++    # Return cached client if still valid
++    if token in _token_clients and _token_expiries.get(token, 0) > now:
++        return _token_clients[token]
++
++    # Create new client
++    client = await DalgoClient.from_token(config.api_url, token)
++
++    # Extract expiry from JWT (no signature verification needed)
++    try:
++        payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
++        exp = float(payload.get("exp", now + 3600))
++    except Exception:
++        exp = now + 3600  # default 1h if decode fails
++
++    _token_clients[token] = client
++    _token_expiries[token] = exp
++    return client
+ 
+ 
+ def format_response(resp: httpx.Response) -> str:
+-- 
+2.43.0
+
+
+From 534aeda7e60c134485e8fd3190eede5503dc65f9 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 15:58:13 +0530
+Subject: [PATCH 2/9] feat: add typed error hierarchy (UserInputError,
+ DalgoAPIClientError, DalgoAPIServerError)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds errors.py with DalgoError base, UserInputError, DalgoAPIClientError
+and DalgoAPIServerError. Adds check_response() helper to client.py.
+Backwards compatible — existing format_response() unchanged. Closes #11.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/dalgo_mcp/__init__.py | 13 ++++++++++++
+ src/dalgo_mcp/client.py   | 20 +++++++++++++++++++
+ src/dalgo_mcp/errors.py   | 42 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 75 insertions(+)
+ create mode 100644 src/dalgo_mcp/errors.py
+
+diff --git a/src/dalgo_mcp/__init__.py b/src/dalgo_mcp/__init__.py
+index e69de29..7943eda 100644
+--- a/src/dalgo_mcp/__init__.py
++++ b/src/dalgo_mcp/__init__.py
+@@ -0,0 +1,13 @@
++from dalgo_mcp.errors import (
++    DalgoError,
++    UserInputError,
++    DalgoAPIClientError,
++    DalgoAPIServerError,
++)
++
++__all__ = [
++    "DalgoError",
++    "UserInputError",
++    "DalgoAPIClientError",
++    "DalgoAPIServerError",
++]
+diff --git a/src/dalgo_mcp/client.py b/src/dalgo_mcp/client.py
+index 2799fc4..f97e8c5 100644
+--- a/src/dalgo_mcp/client.py
++++ b/src/dalgo_mcp/client.py
+@@ -3,6 +3,7 @@ import json
+ import logging
+ 
+ from dalgo_mcp.config import config
++from dalgo_mcp.errors import DalgoAPIClientError, DalgoAPIServerError
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -142,6 +143,25 @@ async def get_client_for_token(token: str) -> DalgoClient:
+     return _token_clients[token]
+ 
+ 
++def check_response(resp: httpx.Response, endpoint: str = "") -> httpx.Response:
++    """Raise a typed DalgoAPIError if the response indicates failure.
++
++    Returns the response unchanged if status < 400.
++    """
++    if resp.status_code < 400:
++        return resp
++
++    try:
++        detail = resp.json()
++    except Exception:
++        detail = resp.text
++
++    if 400 <= resp.status_code < 500:
++        raise DalgoAPIClientError(resp.status_code, detail, endpoint)
++    else:
++        raise DalgoAPIServerError(resp.status_code, detail, endpoint)
++
++
+ def format_response(resp: httpx.Response) -> str:
+     """Format an API response as a string suitable for MCP tool output."""
+     if resp.status_code == 204:
+diff --git a/src/dalgo_mcp/errors.py b/src/dalgo_mcp/errors.py
+new file mode 100644
+index 0000000..745bc8b
+--- /dev/null
++++ b/src/dalgo_mcp/errors.py
+@@ -0,0 +1,42 @@
++"""Typed error hierarchy for dalgo-mcp.
++
++UserInputError      — bad input from the model/user (4xx)
++DalgoAPIClientError — 4xx response from Dalgo API
++DalgoAPIServerError — 5xx response from Dalgo API
++"""
++
++
++class DalgoError(Exception):
++    """Base class for all dalgo-mcp errors."""
++    pass
++
++
++class UserInputError(DalgoError):
++    """The model or user provided invalid input.
++
++    Raise this when a required parameter is missing, has wrong type,
++    or references a resource that doesn't exist.
++
++    The error message should be actionable — tell the model what to fix.
++    """
++    pass
++
++
++class DalgoAPIError(DalgoError):
++    """Base class for HTTP errors from the Dalgo API."""
++
++    def __init__(self, status_code: int, detail, endpoint: str = ""):
++        self.status_code = status_code
++        self.detail = detail
++        self.endpoint = endpoint
++        super().__init__(f"Dalgo API error {status_code} on {endpoint}: {detail}")
++
++
++class DalgoAPIClientError(DalgoAPIError):
++    """4xx response from the Dalgo API — likely a client/input problem."""
++    pass
++
++
++class DalgoAPIServerError(DalgoAPIError):
++    """5xx response from the Dalgo API — server-side failure."""
++    pass
+-- 
+2.43.0
+
+
+From 1ecab400e3741fa2333afb54d3dcecdfe94d7578 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 15:59:07 +0530
+Subject: [PATCH 3/9] feat: add token cost measurement script
+
+Measures context window tokens consumed by all registered tools.
+Helps catch regressions when new tools/descriptions are added.
+Falls back to char/4 estimate if tiktoken not installed. Closes #8.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ scripts/measure_token_cost.py | 82 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 82 insertions(+)
+ create mode 100644 scripts/measure_token_cost.py
+
+diff --git a/scripts/measure_token_cost.py b/scripts/measure_token_cost.py
+new file mode 100644
+index 0000000..06f0938
+--- /dev/null
++++ b/scripts/measure_token_cost.py
+@@ -0,0 +1,82 @@
++#!/usr/bin/env python3
++"""Measure the context window token cost of all registered dalgo-mcp tools.
++
++Run from the repo root:
++    python scripts/measure_token_cost.py
++
++Requires no live Dalgo server — only the tool metadata (names + descriptions)
++is inspected, so dummy environment variables are sufficient.
++"""
++import os
++import sys
++
++# Ensure src/ is on the path when run directly from repo root
++sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
++
++# Supply the minimum env vars needed to instantiate the app without a server
++os.environ.setdefault("DALGO_API_URL", "http://localhost")
++os.environ.setdefault("DALGO_TRANSPORT", "stdio")
++
++
++def main():
++    # Token counter: prefer tiktoken, fall back to rough char/4 estimate
++    try:
++        import tiktoken
++
++        enc = tiktoken.get_encoding("cl100k_base")
++
++        def count_tokens(text: str) -> int:
++            return len(enc.encode(text))
++
++        method = "tiktoken (cl100k_base)"
++    except ImportError:
++        def count_tokens(text: str) -> int:
++            return len(text) // 4
++
++        method = "estimate (chars/4 — install tiktoken for accurate counts)"
++
++    # Import the app — this triggers all tool registrations
++    from dalgo_mcp.server import app  # noqa: E402
++
++    # Extract tools from FastMCP's internal tool manager
++    raw_tools = app._tool_manager._tools  # dict[str, Tool]
++    tools = [(name, tool.description or "") for name, tool in raw_tools.items()]
++
++    if not tools:
++        print("No tools found — something went wrong with tool registration.")
++        sys.exit(1)
++
++    # Count tokens per tool (name + description, as typically sent to the model)
++    tool_tokens = []
++    for name, desc in tools:
++        text = f"{name}: {desc}" if desc else name
++        tokens = count_tokens(text)
++        tool_tokens.append((name, desc, tokens))
++
++    # Sort highest token cost first
++    tool_tokens.sort(key=lambda x: -x[2])
++
++    total = sum(t for _, _, t in tool_tokens)
++    col_width = max(len(name) for name, _, _ in tool_tokens) + 2
++
++    print(f"\nToken cost measurement ({method})")
++    print("=" * (col_width + 12))
++    print(f"{'Tool':<{col_width}} {'Tokens':>8}")
++    print("-" * (col_width + 12))
++
++    cumulative = 0
++    for name, _desc, tokens in tool_tokens:
++        cumulative += tokens
++        print(f"{name:<{col_width}} {tokens:>8,}   (cumulative: {cumulative:,})")
++
++    print("=" * (col_width + 12))
++    print(f"{'TOTAL':<{col_width}} {total:>8,}")
++    print()
++    print(f"Tool count:                    {len(tools)}")
++    print(f"Context usage (128k window):   {total / 128_000 * 100:.1f}%")
++    print(f"Context usage (200k window):   {total / 200_000 * 100:.1f}%")
++    print()
++
++
++if __name__ == "__main__":
++    main()
+-- 
+2.43.0
+
+
+From 18cf32e4f4c513d62e102350c397353250dee45f Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 16:09:48 +0530
+Subject: [PATCH 4/9] feat: enhance health endpoint and add tool call logging
+
+- /health now returns uptime_seconds, active_token_clients, tool_count
+- Adds ToolCallLoggingMiddleware logging tool name and duration_ms
+- ToolCallLoggingMiddleware applied in both debug and normal HTTP modes
+- Adds _start_time at module level for uptime tracking
+Closes #17.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/dalgo_mcp/server.py | 67 +++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 65 insertions(+), 2 deletions(-)
+
+diff --git a/src/dalgo_mcp/server.py b/src/dalgo_mcp/server.py
+index fea4f02..4f03d88 100644
+--- a/src/dalgo_mcp/server.py
++++ b/src/dalgo_mcp/server.py
+@@ -1,5 +1,6 @@
+ import logging
+ import json
++import time
+ 
+ from mcp.server.fastmcp import FastMCP
+ from starlette.middleware.base import BaseHTTPMiddleware
+@@ -11,6 +12,9 @@ from dalgo_mcp.client import DalgoClient, get_client_for_token
+ logging.basicConfig(level=logging.DEBUG if config.debug else logging.INFO)
+ logger = logging.getLogger(__name__)
+ 
++# Module-level start time for uptime tracking
++_start_time = time.time()
++
+ 
+ class DebugRequestMiddleware(BaseHTTPMiddleware):
+     """Logs method, path, headers, and body for every incoming request."""
+@@ -34,6 +38,38 @@ class DebugRequestMiddleware(BaseHTTPMiddleware):
+         return response
+ 
+ 
++class ToolCallLoggingMiddleware(BaseHTTPMiddleware):
++    """Log MCP tool calls with timing and success/failure status."""
++
++    async def dispatch(self, request: Request, call_next):
++        tool_name = None
++
++        if request.method == "POST":
++            try:
++                body_bytes = await request.body()
++                data = json.loads(body_bytes)
++                if data.get("method") == "tools/call":
++                    tool_name = data.get("params", {}).get("name")
++            except Exception:
++                pass
++
++        t0 = time.monotonic()
++        response = await call_next(request)
++        duration_ms = (time.monotonic() - t0) * 1000
++
++        if tool_name:
++            success = response.status_code < 400
++            logger.info(
++                "tool_call tool=%s duration_ms=%.1f success=%s status_code=%d",
++                tool_name,
++                duration_ms,
++                success,
++                response.status_code,
++            )
++
++        return response
++
++
+ def _create_app() -> FastMCP:
+     """Create the FastMCP app with transport-appropriate settings."""
+     if config.transport == "streamable-http":
+@@ -97,8 +133,16 @@ def _create_app() -> FastMCP:
+         @mcp.custom_route("/health", methods=["GET"])
+         async def health(request):
+             from starlette.responses import JSONResponse
+-
+-            return JSONResponse({"status": "ok"})
++            from dalgo_mcp.client import _token_clients
++
++            return JSONResponse(
++                {
++                    "status": "ok",
++                    "uptime_seconds": round(time.time() - _start_time, 1),
++                    "active_token_clients": len(_token_clients),
++                    "tool_count": len(mcp._tool_manager._tools),
++                }
++            )
+ 
+         return mcp
+     else:
+@@ -185,6 +229,7 @@ def main():
+ 
+         async def _run_debug_http():
+             starlette_app = app.streamable_http_app()
++            starlette_app.add_middleware(ToolCallLoggingMiddleware)
+             starlette_app.add_middleware(DebugRequestMiddleware)
+             server = uvicorn.Server(
+                 uvicorn.Config(
+@@ -198,6 +243,24 @@ def main():
+ 
+         logger.info("Starting in DEBUG mode — all requests will be logged")
+         anyio.run(_run_debug_http)
++    elif config.transport == "streamable-http":
++        import anyio
++        import uvicorn
++
++        async def _run_http():
++            starlette_app = app.streamable_http_app()
++            starlette_app.add_middleware(ToolCallLoggingMiddleware)
++            server = uvicorn.Server(
++                uvicorn.Config(
++                    starlette_app,
++                    host=app.settings.host,
++                    port=app.settings.port,
++                    log_level=app.settings.log_level.lower(),
++                )
++            )
++            await server.serve()
++
++        anyio.run(_run_http)
+     else:
+         app.run(transport=config.transport)
+ 
+-- 
+2.43.0
+
+
+From 2a20603734a8def06b4a977bb6be0d95b47bf691 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 16:09:58 +0530
+Subject: [PATCH 5/9] feat: add unit test suite (one file per tool module)
+
+Adds tests/ directory with conftest.py, test_pii.py, test_warehouse.py,
+test_pipelines.py, and test_client.py. Uses AsyncMock for get_client
+injection. 43 tests pass covering PII masking, warehouse tools, pipeline
+tools, and format_response. Closes #7.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ pyproject.toml          |   9 +++
+ tests/__init__.py       |   0
+ tests/conftest.py       |  24 ++++++++
+ tests/test_client.py    |  88 ++++++++++++++++++++++++++++
+ tests/test_pii.py       |  96 ++++++++++++++++++++++++++++++
+ tests/test_pipelines.py | 121 ++++++++++++++++++++++++++++++++++++++
+ tests/test_warehouse.py | 126 ++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 464 insertions(+)
+ create mode 100644 tests/__init__.py
+ create mode 100644 tests/conftest.py
+ create mode 100644 tests/test_client.py
+ create mode 100644 tests/test_pii.py
+ create mode 100644 tests/test_pipelines.py
+ create mode 100644 tests/test_warehouse.py
+
+diff --git a/pyproject.toml b/pyproject.toml
+index e3320e2..0b37e0c 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,3 +17,12 @@ dependencies = [
+ 
+ [project.scripts]
+ dalgo-mcp = "dalgo_mcp.server:main"
++
++[project.optional-dependencies]
++dev = [
++    "pytest>=8.0",
++    "pytest-asyncio>=0.24",
++]
++
++[tool.pytest.ini_options]
++asyncio_mode = "auto"
+diff --git a/tests/__init__.py b/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..8e1c187
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,24 @@
++import pytest
++from unittest.mock import AsyncMock, MagicMock
++import httpx
++
++
++@pytest.fixture
++def mock_client():
++    client = AsyncMock()
++    return client
++
++
++@pytest.fixture
++def get_client(mock_client):
++    async def _get_client():
++        return mock_client
++    return _get_client
++
++
++def make_response(status_code: int, json_data) -> httpx.Response:
++    """Helper to create mock httpx.Response objects."""
++    response = MagicMock(spec=httpx.Response)
++    response.status_code = status_code
++    response.json.return_value = json_data
++    return response
+diff --git a/tests/test_client.py b/tests/test_client.py
+new file mode 100644
+index 0000000..08eddc0
+--- /dev/null
++++ b/tests/test_client.py
+@@ -0,0 +1,88 @@
++"""Unit tests for format_response in dalgo_mcp.client."""
++
++import json
++import pytest
++from unittest.mock import MagicMock
++import httpx
++
++from dalgo_mcp.client import format_response
++from tests.conftest import make_response
++
++
++class TestFormatResponse:
++    def test_200_with_json_returns_formatted_json(self):
++        data = {"pipelines": [{"id": "1", "name": "test"}]}
++        resp = make_response(200, data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed == data
++
++    def test_204_returns_success_message(self):
++        resp = make_response(204, None)
++        # 204 responses have no body — format_response handles this before calling .json()
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed["status"] == "success"
++        assert "message" in parsed
++
++    def test_400_returns_error_with_status_code(self):
++        error_data = {"detail": "Bad request"}
++        resp = make_response(400, error_data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed["error"] is True
++        assert parsed["status_code"] == 400
++        assert parsed["detail"] == error_data
++
++    def test_500_returns_error_with_status_code(self):
++        error_data = {"detail": "Internal server error"}
++        resp = make_response(500, error_data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed["error"] is True
++        assert parsed["status_code"] == 500
++
++    def test_200_with_list_json(self):
++        data = [{"id": "1"}, {"id": "2"}]
++        resp = make_response(200, data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed == data
++
++    def test_201_with_json(self):
++        data = {"id": "new-123", "created": True}
++        resp = make_response(201, data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed == data
++
++    def test_403_returns_error(self):
++        error_data = {"detail": "Forbidden"}
++        resp = make_response(403, error_data)
++
++        result = format_response(resp)
++        parsed = json.loads(result)
++
++        assert parsed["error"] is True
++        assert parsed["status_code"] == 403
++
++    def test_json_parse_failure_falls_back_to_text(self):
++        resp = MagicMock(spec=httpx.Response)
++        resp.status_code = 200
++        resp.json.side_effect = ValueError("Not JSON")
++        resp.text = "plain text response"
++
++        result = format_response(resp)
++        # Should still return something (the text as-is in JSON)
++        assert "plain text response" in result
+diff --git a/tests/test_pii.py b/tests/test_pii.py
+new file mode 100644
+index 0000000..4500899
+--- /dev/null
++++ b/tests/test_pii.py
+@@ -0,0 +1,96 @@
++"""Unit tests for PII detection and masking logic in dalgo_mcp.pii."""
++
++import pytest
++from dalgo_mcp.pii import is_pii_column, mask_pii_in_rows
++
++
++class TestIsPiiColumn:
++    def test_name_is_pii(self):
++        assert is_pii_column("name") is True
++
++    def test_email_is_pii(self):
++        assert is_pii_column("email") is True
++
++    def test_aadhaar_no_is_pii(self):
++        assert is_pii_column("aadhaar_no") is True
++
++    def test_phone_is_pii(self):
++        assert is_pii_column("phone") is True
++
++    def test_revenue_is_not_pii(self):
++        assert is_pii_column("revenue") is False
++
++    def test_amount_is_not_pii(self):
++        assert is_pii_column("amount") is False
++
++    def test_id_is_not_pii(self):
++        assert is_pii_column("id") is False
++
++    def test_created_at_is_not_pii(self):
++        assert is_pii_column("created_at") is False
++
++    def test_address_is_pii(self):
++        assert is_pii_column("address") is True
++
++    def test_mobile_is_pii(self):
++        assert is_pii_column("mobile") is True
++
++    def test_dob_is_pii(self):
++        assert is_pii_column("dob") is True
++
++    def test_first_name_is_pii(self):
++        assert is_pii_column("first_name") is True
++
++    def test_last_name_is_pii(self):
++        assert is_pii_column("last_name") is True
++
++    def test_pan_number_is_pii(self):
++        assert is_pii_column("pan_number") is True
++
++    def test_case_insensitive(self):
++        assert is_pii_column("EMAIL") is True
++        assert is_pii_column("Name") is True
++        assert is_pii_column("PHONE") is True
++
++
++class TestMaskPiiInRows:
++    def test_masks_pii_column(self):
++        rows = [{"name": "Alice", "revenue": 100}]
++        result = mask_pii_in_rows(rows)
++        assert result == [{"name": "***MASKED***", "revenue": 100}]
++
++    def test_empty_list_returns_empty(self):
++        result = mask_pii_in_rows([])
++        assert result == []
++
++    def test_no_pii_columns_returns_unchanged(self):
++        rows = [{"revenue": 100, "count": 5}]
++        result = mask_pii_in_rows(rows)
++        assert result == [{"revenue": 100, "count": 5}]
++
++    def test_masks_multiple_pii_columns(self):
++        rows = [{"name": "Bob", "email": "bob@example.com", "amount": 200}]
++        result = mask_pii_in_rows(rows)
++        assert result[0]["name"] == "***MASKED***"
++        assert result[0]["email"] == "***MASKED***"
++        assert result[0]["amount"] == 200
++
++    def test_masks_across_all_rows(self):
++        rows = [
++            {"name": "Alice", "score": 90},
++            {"name": "Bob", "score": 85},
++        ]
++        result = mask_pii_in_rows(rows)
++        assert result[0]["name"] == "***MASKED***"
++        assert result[1]["name"] == "***MASKED***"
++        assert result[0]["score"] == 90
++        assert result[1]["score"] == 85
++
++    def test_none_value_stays_none(self):
++        rows = [{"name": None, "revenue": 50}]
++        result = mask_pii_in_rows(rows)
++        assert result[0]["name"] is None
++
++    def test_non_list_input_returned_as_is(self):
++        result = mask_pii_in_rows({"name": "Alice"})
++        assert result == {"name": "Alice"}
+diff --git a/tests/test_pipelines.py b/tests/test_pipelines.py
+new file mode 100644
+index 0000000..fc94308
+--- /dev/null
++++ b/tests/test_pipelines.py
+@@ -0,0 +1,121 @@
++"""Unit tests for pipelines tool module."""
++
++import json
++import pytest
++from unittest.mock import AsyncMock
++
++from mcp.server.fastmcp import FastMCP
++from tests.conftest import make_response
++
++
++def register_tools(get_client):
++    """Register pipeline tools and capture the inner functions for direct testing."""
++    from dalgo_mcp.tools import pipelines
++
++    app = FastMCP("test")
++    captured = {}
++    original_tool = app.tool
++
++    def capturing_tool(*args, **kwargs):
++        decorator = original_tool(*args, **kwargs)
++        def wrapper(fn):
++            captured[fn.__name__] = fn
++            return decorator(fn)
++        return wrapper
++
++    app.tool = capturing_tool
++    pipelines.register(app, get_client)
++    return captured
++
++
++@pytest.fixture
++def mock_client():
++    return AsyncMock()
++
++
++@pytest.fixture
++def get_client(mock_client):
++    async def _get_client():
++        return mock_client
++    return _get_client
++
++
++@pytest.fixture
++def tools(get_client):
++    return register_tools(get_client)
++
++
++class TestDalgoListPipelines:
++    @pytest.mark.asyncio
++    async def test_returns_formatted_list(self, tools, mock_client):
++        pipeline_list = [
++            {"id": "abc", "name": "Ingest NGO data"},
++            {"id": "def", "name": "Transform pipeline"},
++        ]
++        mock_client.get.return_value = make_response(200, pipeline_list)
++
++        result = await tools["dalgo_list_pipelines"]()
++        data = json.loads(result)
++
++        assert data == pipeline_list
++        mock_client.get.assert_called_once_with("/api/prefect/v1/flows/")
++
++    @pytest.mark.asyncio
++    async def test_error_response_includes_status_code(self, tools, mock_client):
++        mock_client.get.return_value = make_response(500, {"detail": "Internal error"})
++
++        result = await tools["dalgo_list_pipelines"]()
++        data = json.loads(result)
++
++        assert data["error"] is True
++        assert data["status_code"] == 500
++
++
++class TestDalgoTriggerPipelineRun:
++    @pytest.mark.asyncio
++    async def test_calls_correct_endpoint(self, tools, mock_client):
++        mock_client.post.return_value = make_response(200, {"flow_run_id": "run-123"})
++
++        result = await tools["dalgo_trigger_pipeline_run"](deployment_id="deploy-abc")
++        data = json.loads(result)
++
++        assert data["flow_run_id"] == "run-123"
++        mock_client.post.assert_called_once_with(
++            "/api/prefect/v1/flows/deploy-abc/flow_run/"
++        )
++
++    @pytest.mark.asyncio
++    async def test_error_on_bad_deployment_id(self, tools, mock_client):
++        mock_client.post.return_value = make_response(404, {"detail": "Not found"})
++
++        result = await tools["dalgo_trigger_pipeline_run"](deployment_id="bad-id")
++        data = json.loads(result)
++
++        assert data["error"] is True
++        assert data["status_code"] == 404
++
++
++class TestDalgoGetFlowRunLogs:
++    @pytest.mark.asyncio
++    async def test_returns_logs(self, tools, mock_client):
++        logs = [
++            {"level": "INFO", "message": "Task started"},
++            {"level": "INFO", "message": "Task completed"},
++        ]
++        mock_client.get.return_value = make_response(200, logs)
++
++        result = await tools["dalgo_get_flow_run_logs"](flow_run_id="run-999")
++        data = json.loads(result)
++
++        assert data == logs
++        mock_client.get.assert_called_once_with("/api/prefect/flow_runs/run-999/logs")
++
++    @pytest.mark.asyncio
++    async def test_error_response(self, tools, mock_client):
++        mock_client.get.return_value = make_response(404, {"detail": "Run not found"})
++
++        result = await tools["dalgo_get_flow_run_logs"](flow_run_id="missing-run")
++        data = json.loads(result)
++
++        assert data["error"] is True
++        assert data["status_code"] == 404
+diff --git a/tests/test_warehouse.py b/tests/test_warehouse.py
+new file mode 100644
+index 0000000..c0e2214
+--- /dev/null
++++ b/tests/test_warehouse.py
+@@ -0,0 +1,126 @@
++"""Unit tests for warehouse tool module."""
++
++import json
++import pytest
++from unittest.mock import AsyncMock, MagicMock
++import httpx
++
++from mcp.server.fastmcp import FastMCP
++from tests.conftest import make_response
++
++
++def register_tools(get_client):
++    """Register warehouse tools and capture the inner functions for direct testing."""
++    from dalgo_mcp.tools import warehouse
++
++    app = FastMCP("test")
++    captured = {}
++    original_tool = app.tool
++
++    def capturing_tool(*args, **kwargs):
++        decorator = original_tool(*args, **kwargs)
++        def wrapper(fn):
++            captured[fn.__name__] = fn
++            return decorator(fn)
++        return wrapper
++
++    app.tool = capturing_tool
++    warehouse.register(app, get_client)
++    return captured
++
++
++@pytest.fixture
++def mock_client():
++    return AsyncMock()
++
++
++@pytest.fixture
++def get_client(mock_client):
++    async def _get_client():
++        return mock_client
++    return _get_client
++
++
++@pytest.fixture
++def tools(get_client):
++    return register_tools(get_client)
++
++
++class TestDalgoGetTableData:
++    @pytest.mark.asyncio
++    async def test_masks_pii_column(self, tools, mock_client):
++        rows = [{"name": "Alice", "revenue": 100}]
++        mock_client.get.return_value = make_response(200, rows)
++
++        result = await tools["dalgo_get_table_data"](schema="public", table="donors")
++        data = json.loads(result)
++
++        assert data[0]["name"] == "***MASKED***"
++        assert data[0]["revenue"] == 100
++
++    @pytest.mark.asyncio
++    async def test_no_pii_columns_returned_unchanged(self, tools, mock_client):
++        rows = [{"revenue": 500, "count": 3}]
++        mock_client.get.return_value = make_response(200, rows)
++
++        result = await tools["dalgo_get_table_data"](schema="public", table="summary")
++        data = json.loads(result)
++
++        assert data == rows
++
++    @pytest.mark.asyncio
++    async def test_non_list_response_falls_back_to_format_response(self, tools, mock_client):
++        payload = {"error": "table not found"}
++        mock_client.get.return_value = make_response(404, payload)
++
++        result = await tools["dalgo_get_table_data"](schema="public", table="missing")
++        data = json.loads(result)
++
++        assert data["error"] is True
++        assert data["status_code"] == 404
++
++    @pytest.mark.asyncio
++    async def test_non_list_200_falls_back_to_format_response(self, tools, mock_client):
++        # A 200 response that is not a list (e.g. a dict) should use format_response
++        payload = {"rows": [], "total": 0}
++        mock_client.get.return_value = make_response(200, payload)
++
++        result = await tools["dalgo_get_table_data"](schema="public", table="summary")
++        data = json.loads(result)
++
++        assert data == payload
++
++    @pytest.mark.asyncio
++    async def test_passes_limit_and_offset_params(self, tools, mock_client):
++        mock_client.get.return_value = make_response(200, [])
++
++        await tools["dalgo_get_table_data"](schema="s", table="t", limit=5, offset=20)
++        mock_client.get.assert_called_once_with(
++            "/api/warehouse/table_data/s/t",
++            params={"limit": 5, "offset": 20},
++        )
++
++
++class TestDalgoListSchemas:
++    @pytest.mark.asyncio
++    async def test_returns_formatted_json(self, tools, mock_client):
++        schemas = ["public", "analytics", "raw"]
++        mock_client.get.return_value = make_response(200, schemas)
++
++        result = await tools["dalgo_list_schemas"]()
++        data = json.loads(result)
++
++        assert data == schemas
++        mock_client.get.assert_called_once_with("/api/warehouse/schemas")
++
++
++class TestDalgoGetTableRowCount:
++    @pytest.mark.asyncio
++    async def test_returns_count(self, tools, mock_client):
++        mock_client.get.return_value = make_response(200, {"count": 42})
++
++        result = await tools["dalgo_get_table_row_count"](schema="public", table="donors")
++        data = json.loads(result)
++
++        assert data["count"] == 42
++        mock_client.get.assert_called_once_with("/api/warehouse/table_count/public/donors")
+-- 
+2.43.0
+
+
+From 23127d881448eda596382ea78f6575f878904769 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 16:44:30 +0530
+Subject: [PATCH 6/9] refactor: centralize shared parameter definitions in
+ params.py
+
+Extracts 8 duplicated parameter types (DeploymentId, FlowRunId,
+ChartId, DashboardId, ConnectionId, SourceId, SchemaName, TableName)
+into params.py using Annotated[str, Field(description=...)].
+Updates 6 tool files to use the shared types. Closes #6.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/dalgo_mcp/params.py            | 29 ++++++++++++++++
+ src/dalgo_mcp/tools/charts.py      | 28 +++++-----------
+ src/dalgo_mcp/tools/connections.py | 25 ++++----------
+ src/dalgo_mcp/tools/dashboards.py  | 20 ++++-------
+ src/dalgo_mcp/tools/pipelines.py   | 53 ++++++++----------------------
+ src/dalgo_mcp/tools/sources.py     | 17 +++-------
+ src/dalgo_mcp/tools/warehouse.py   | 27 ++++-----------
+ 7 files changed, 75 insertions(+), 124 deletions(-)
+ create mode 100644 src/dalgo_mcp/params.py
+
+diff --git a/src/dalgo_mcp/params.py b/src/dalgo_mcp/params.py
+new file mode 100644
+index 0000000..3faa749
+--- /dev/null
++++ b/src/dalgo_mcp/params.py
+@@ -0,0 +1,29 @@
++"""Shared parameter definitions for dalgo-mcp tools.
++
++Use these Annotated types as function parameter annotations to get
++consistent descriptions across tools. FastMCP reads the Annotated
++metadata to generate parameter descriptions in the tool schema.
++"""
++from typing import Annotated
++
++from pydantic import Field
++
++# Pipeline parameters
++DeploymentId = Annotated[str, Field(description="The Prefect deployment ID.")]
++FlowRunId = Annotated[str, Field(description="The Prefect flow run ID.")]
++
++# Warehouse parameters
++SchemaName = Annotated[str, Field(description="The warehouse schema name.")]
++TableName = Annotated[str, Field(description="The warehouse table name.")]
++
++# Chart / Dashboard parameters
++ChartId = Annotated[str, Field(description="The chart ID.")]
++DashboardId = Annotated[str, Field(description="The dashboard ID.")]
++
++# Source / Connection parameters
++SourceId = Annotated[str, Field(description="The Airbyte source ID.")]
++ConnectionId = Annotated[str, Field(description="The Airbyte connection ID.")]
++
++# Common pagination
++Limit = Annotated[int, Field(default=10, description="Maximum number of items to return.", ge=1, le=500)]
++Offset = Annotated[int, Field(default=0, description="Number of items to skip for pagination.", ge=0)]
+diff --git a/src/dalgo_mcp/tools/charts.py b/src/dalgo_mcp/tools/charts.py
+index 1f74908..b8efd2d 100644
+--- a/src/dalgo_mcp/tools/charts.py
++++ b/src/dalgo_mcp/tools/charts.py
+@@ -1,6 +1,7 @@
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import ChartId
+ 
+ 
+ def register(app: FastMCP, get_client):
+@@ -13,12 +14,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_chart(chart_id: str) -> str:
+-        """Get details of a specific chart.
+-
+-        Args:
+-            chart_id: The chart ID.
+-        """
++    async def dalgo_get_chart(chart_id: ChartId) -> str:
++        """Get details of a specific chart."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/charts/{chart_id}/")
+         return format_response(resp)
+@@ -35,11 +32,10 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_update_chart(chart_id: str, chart_data: dict) -> str:
++    async def dalgo_update_chart(chart_id: ChartId, chart_data: dict) -> str:
+         """Update an existing chart.
+ 
+         Args:
+-            chart_id: The chart ID.
+             chart_data: Updated chart configuration dict.
+         """
+         client: DalgoClient = await get_client()
+@@ -47,23 +43,15 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_delete_chart(chart_id: str) -> str:
+-        """Delete a chart.
+-
+-        Args:
+-            chart_id: The chart ID.
+-        """
++    async def dalgo_delete_chart(chart_id: ChartId) -> str:
++        """Delete a chart."""
+         client: DalgoClient = await get_client()
+         resp = await client.delete(f"/api/charts/{chart_id}/")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_chart_data(chart_id: str) -> str:
+-        """Execute a chart's query and return the resulting data.
+-
+-        Args:
+-            chart_id: The chart ID.
+-        """
++    async def dalgo_get_chart_data(chart_id: ChartId) -> str:
++        """Execute a chart's query and return the resulting data."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/charts/{chart_id}/data/")
+         return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/connections.py b/src/dalgo_mcp/tools/connections.py
+index d86697e..e7c1263 100644
+--- a/src/dalgo_mcp/tools/connections.py
++++ b/src/dalgo_mcp/tools/connections.py
+@@ -1,6 +1,7 @@
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import ConnectionId
+ 
+ 
+ def register(app: FastMCP, get_client):
+@@ -13,34 +14,22 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_connection(connection_id: str) -> str:
+-        """Get details of a specific Airbyte connection.
+-
+-        Args:
+-            connection_id: The Airbyte connection ID.
+-        """
++    async def dalgo_get_connection(connection_id: ConnectionId) -> str:
++        """Get details of a specific Airbyte connection."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_sync_history(connection_id: str) -> str:
+-        """Get sync run history for an Airbyte connection.
+-
+-        Args:
+-            connection_id: The Airbyte connection ID.
+-        """
++    async def dalgo_get_sync_history(connection_id: ConnectionId) -> str:
++        """Get sync run history for an Airbyte connection."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}/sync/history")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_connection_catalog(connection_id: str) -> str:
+-        """Get the stream catalog for an Airbyte connection (selected streams and sync modes).
+-
+-        Args:
+-            connection_id: The Airbyte connection ID.
+-        """
++    async def dalgo_get_connection_catalog(connection_id: ConnectionId) -> str:
++        """Get the stream catalog for an Airbyte connection (selected streams and sync modes)."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}/catalog")
+         return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/dashboards.py b/src/dalgo_mcp/tools/dashboards.py
+index b3b5185..077f120 100644
+--- a/src/dalgo_mcp/tools/dashboards.py
++++ b/src/dalgo_mcp/tools/dashboards.py
+@@ -1,6 +1,7 @@
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import DashboardId
+ 
+ 
+ def register(app: FastMCP, get_client):
+@@ -13,12 +14,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_dashboard(dashboard_id: str) -> str:
+-        """Get details of a specific dashboard including its charts.
+-
+-        Args:
+-            dashboard_id: The dashboard ID.
+-        """
++    async def dalgo_get_dashboard(dashboard_id: DashboardId) -> str:
++        """Get details of a specific dashboard including its charts."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/dashboards/{dashboard_id}/")
+         return format_response(resp)
+@@ -35,11 +32,10 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_update_dashboard(dashboard_id: str, dashboard_data: dict) -> str:
++    async def dalgo_update_dashboard(dashboard_id: DashboardId, dashboard_data: dict) -> str:
+         """Update an existing dashboard.
+ 
+         Args:
+-            dashboard_id: The dashboard ID.
+             dashboard_data: Updated dashboard configuration dict.
+         """
+         client: DalgoClient = await get_client()
+@@ -47,12 +43,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_delete_dashboard(dashboard_id: str) -> str:
+-        """Delete a dashboard.
+-
+-        Args:
+-            dashboard_id: The dashboard ID.
+-        """
++    async def dalgo_delete_dashboard(dashboard_id: DashboardId) -> str:
++        """Delete a dashboard."""
+         client: DalgoClient = await get_client()
+         resp = await client.delete(f"/api/dashboards/{dashboard_id}/")
+         return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/pipelines.py b/src/dalgo_mcp/tools/pipelines.py
+index 84e70aa..58e693a 100644
+--- a/src/dalgo_mcp/tools/pipelines.py
++++ b/src/dalgo_mcp/tools/pipelines.py
+@@ -1,6 +1,7 @@
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import DeploymentId, FlowRunId, Limit
+ 
+ 
+ def register(app: FastMCP, get_client):
+@@ -13,12 +14,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_pipeline(deployment_id: str) -> str:
+-        """Get details of a specific pipeline by its deployment ID.
+-
+-        Args:
+-            deployment_id: The Prefect deployment ID.
+-        """
++    async def dalgo_get_pipeline(deployment_id: DeploymentId) -> str:
++        """Get details of a specific pipeline by its deployment ID."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/prefect/v1/flows/{deployment_id}")
+         return format_response(resp)
+@@ -35,11 +32,10 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_update_pipeline(deployment_id: str, pipeline_data: dict) -> str:
++    async def dalgo_update_pipeline(deployment_id: DeploymentId, pipeline_data: dict) -> str:
+         """Update an existing pipeline's configuration.
+ 
+         Args:
+-            deployment_id: The Prefect deployment ID.
+             pipeline_data: Updated pipeline configuration dict.
+         """
+         client: DalgoClient = await get_client()
+@@ -47,35 +43,22 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_delete_pipeline(deployment_id: str) -> str:
+-        """Delete a pipeline by its deployment ID.
+-
+-        Args:
+-            deployment_id: The Prefect deployment ID.
+-        """
++    async def dalgo_delete_pipeline(deployment_id: DeploymentId) -> str:
++        """Delete a pipeline by its deployment ID."""
+         client: DalgoClient = await get_client()
+         resp = await client.delete(f"/api/prefect/v1/flows/{deployment_id}")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_trigger_pipeline_run(deployment_id: str) -> str:
+-        """Trigger an immediate run of a pipeline.
+-
+-        Args:
+-            deployment_id: The Prefect deployment ID.
+-        """
++    async def dalgo_trigger_pipeline_run(deployment_id: DeploymentId) -> str:
++        """Trigger an immediate run of a pipeline."""
+         client: DalgoClient = await get_client()
+         resp = await client.post(f"/api/prefect/v1/flows/{deployment_id}/flow_run/")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_pipeline_run_history(deployment_id: str, limit: int = 10) -> str:
+-        """Get the run history for a specific pipeline.
+-
+-        Args:
+-            deployment_id: The Prefect deployment ID.
+-            limit: Maximum number of runs to return (default 10).
+-        """
++    async def dalgo_get_pipeline_run_history(deployment_id: DeploymentId, limit: Limit = 10) -> str:
++        """Get the run history for a specific pipeline."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(
+             f"/api/prefect/v1/flows/{deployment_id}/flow_runs/history",
+@@ -84,23 +67,15 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_flow_run(flow_run_id: str) -> str:
+-        """Get details of a specific flow run.
+-
+-        Args:
+-            flow_run_id: The Prefect flow run ID.
+-        """
++    async def dalgo_get_flow_run(flow_run_id: FlowRunId) -> str:
++        """Get details of a specific flow run."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_flow_run_logs(flow_run_id: str) -> str:
+-        """Get logs for a specific flow run.
+-
+-        Args:
+-            flow_run_id: The Prefect flow run ID.
+-        """
++    async def dalgo_get_flow_run_logs(flow_run_id: FlowRunId) -> str:
++        """Get logs for a specific flow run."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}/logs")
+         return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/sources.py b/src/dalgo_mcp/tools/sources.py
+index 890e796..5937cc0 100644
+--- a/src/dalgo_mcp/tools/sources.py
++++ b/src/dalgo_mcp/tools/sources.py
+@@ -1,6 +1,7 @@
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import SourceId
+ 
+ 
+ def register(app: FastMCP, get_client):
+@@ -13,12 +14,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_source(source_id: str) -> str:
+-        """Get details of a specific data source.
+-
+-        Args:
+-            source_id: The Airbyte source ID.
+-        """
++    async def dalgo_get_source(source_id: SourceId) -> str:
++        """Get details of a specific data source."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/airbyte/sources/{source_id}")
+         return format_response(resp)
+@@ -31,12 +28,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_delete_source(source_id: str) -> str:
+-        """Delete a data source.
+-
+-        Args:
+-            source_id: The Airbyte source ID.
+-        """
++    async def dalgo_delete_source(source_id: SourceId) -> str:
++        """Delete a data source."""
+         client: DalgoClient = await get_client()
+         resp = await client.delete(f"/api/airbyte/sources/{source_id}")
+         return format_response(resp)
+diff --git a/src/dalgo_mcp/tools/warehouse.py b/src/dalgo_mcp/tools/warehouse.py
+index f453ba7..ea7625c 100644
+--- a/src/dalgo_mcp/tools/warehouse.py
++++ b/src/dalgo_mcp/tools/warehouse.py
+@@ -3,6 +3,7 @@ import json
+ from mcp.server.fastmcp import FastMCP
+ 
+ from dalgo_mcp.client import DalgoClient, format_response
++from dalgo_mcp.params import Limit, Offset, SchemaName, TableName
+ from dalgo_mcp.pii import mask_pii_in_rows
+ 
+ 
+@@ -27,27 +28,16 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_table_columns(schema: str, table: str) -> str:
+-        """Get column names and types for a specific warehouse table.
+-
+-        Args:
+-            schema: Schema name.
+-            table: Table name.
+-        """
++    async def dalgo_get_table_columns(schema: SchemaName, table: TableName) -> str:
++        """Get column names and types for a specific warehouse table."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/warehouse/table_columns/{schema}/{table}")
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_table_data(schema: str, table: str, limit: int = 10, offset: int = 0) -> str:
++    async def dalgo_get_table_data(schema: SchemaName, table: TableName, limit: Limit = 10, offset: Offset = 0) -> str:
+         """Fetch rows from a warehouse table. Defaults to 10 rows to avoid context overflow.
+         PII columns (name, email, phone, address, etc.) are automatically masked.
+-
+-        Args:
+-            schema: Schema name.
+-            table: Table name.
+-            limit: Maximum number of rows to return (default 10).
+-            offset: Number of rows to skip (default 0).
+         """
+         client: DalgoClient = await get_client()
+         resp = await client.get(
+@@ -64,13 +54,8 @@ def register(app: FastMCP, get_client):
+         return format_response(resp)
+ 
+     @app.tool()
+-    async def dalgo_get_table_row_count(schema: str, table: str) -> str:
+-        """Get the total row count of a warehouse table.
+-
+-        Args:
+-            schema: Schema name.
+-            table: Table name.
+-        """
++    async def dalgo_get_table_row_count(schema: SchemaName, table: TableName) -> str:
++        """Get the total row count of a warehouse table."""
+         client: DalgoClient = await get_client()
+         resp = await client.get(f"/api/warehouse/table_count/{schema}/{table}")
+         return format_response(resp)
+-- 
+2.43.0
+
+
+From 10c0a4bc8892e8fff448fecd4a5ac7dfe9d83e1d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 28 May 2026 10:36:10 +0000
+Subject: [PATCH 7/9] Merge main into feat/unit-tests, resolve pyproject.toml
+ conflict
+
+Preserved dev dependencies and ruff/pytest tool config from main
+alongside the unit test suite additions from this branch.
+
+https://claude.ai/code/session_011MeXGRNe15ksjbwsDM8ULN
+---
+ pyproject.toml | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/pyproject.toml b/pyproject.toml
+index e3320e2..25572ea 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -15,5 +15,25 @@ dependencies = [
+     "pyjwt>=2.0.0",
+ ]
+ 
++[project.optional-dependencies]
++dev = [
++    "ruff>=0.4.0",
++    "pytest>=8.0",
++    "pytest-asyncio>=0.23.0",
++]
++
+ [project.scripts]
+ dalgo-mcp = "dalgo_mcp.server:main"
++
++[tool.ruff]
++line-length = 120
++target-version = "py310"
++
++[tool.ruff.lint]
++select = ["E", "F", "I", "UP"]
++
++[tool.ruff.lint.per-file-ignores]
++"src/dalgo_mcp/tools/docs.py" = ["E501"]
++
++[tool.pytest.ini_options]
++asyncio_mode = "auto"
+-- 
+2.43.0
+
+
+From 3d8412b7ccd040c1be90e8f7828f3c42ba7426a0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 28 May 2026 17:01:33 +0000
+Subject: [PATCH 8/9] Move custom commands to .claude/commands/ (correct
+ directory)
+
+Claude Code reads slash commands from .claude/commands/, not .claude/skills/.
+Renamed directory so /progress, /mcp-research, /ngo-onboarding work.
+
+https://claude.ai/code/session_011MeXGRNe15ksjbwsDM8ULN
+---
+ .claude/{skills => commands}/mcp-research.md   | 0
+ .claude/{skills => commands}/ngo-onboarding.md | 0
+ .claude/{skills => commands}/progress.md       | 0
+ 3 files changed, 0 insertions(+), 0 deletions(-)
+ rename .claude/{skills => commands}/mcp-research.md (100%)
+ rename .claude/{skills => commands}/ngo-onboarding.md (100%)
+ rename .claude/{skills => commands}/progress.md (100%)
+
+diff --git a/.claude/skills/mcp-research.md b/.claude/commands/mcp-research.md
+similarity index 100%
+rename from .claude/skills/mcp-research.md
+rename to .claude/commands/mcp-research.md
+diff --git a/.claude/skills/ngo-onboarding.md b/.claude/commands/ngo-onboarding.md
+similarity index 100%
+rename from .claude/skills/ngo-onboarding.md
+rename to .claude/commands/ngo-onboarding.md
+diff --git a/.claude/skills/progress.md b/.claude/commands/progress.md
+similarity index 100%
+rename from .claude/skills/progress.md
+rename to .claude/commands/progress.md
+-- 
+2.43.0
+
+
+From 2df5032cbf34a3e00218dc4d88a398ca614f1ce6 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant3030@gmail.com>
+Date: Wed, 27 May 2026 16:09:59 +0530
+Subject: [PATCH 9/9] feat: add safety annotations to all tools
+
+Adds readOnlyHint, destructiveHint, idempotentHint annotations to all
+51 tool definitions so AI clients can reason about safety before calling.
+
+- list/get/search tools: readOnlyHint=True
+- create/trigger tools: destructiveHint=False, idempotentHint=False
+- update tools: destructiveHint=True, idempotentHint=True
+- delete tools: destructiveHint=True, idempotentHint=False
+- run/sync tools: destructiveHint=False, idempotentHint=False
+
+Closes #1.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+---
+ src/dalgo_mcp/tools/charts.py        | 13 ++++++-----
+ src/dalgo_mcp/tools/connections.py   |  9 ++++----
+ src/dalgo_mcp/tools/dashboards.py    | 11 +++++-----
+ src/dalgo_mcp/tools/docs.py          |  7 +++---
+ src/dalgo_mcp/tools/notifications.py |  7 +++---
+ src/dalgo_mcp/tools/organization.py  |  7 +++---
+ src/dalgo_mcp/tools/pipelines.py     | 19 ++++++++--------
+ src/dalgo_mcp/tools/reports.py       |  9 ++++----
+ src/dalgo_mcp/tools/sources.py       |  9 ++++----
+ src/dalgo_mcp/tools/transforms.py    | 33 ++++++++++++++--------------
+ src/dalgo_mcp/tools/warehouse.py     | 11 +++++-----
+ 11 files changed, 73 insertions(+), 62 deletions(-)
+
+diff --git a/src/dalgo_mcp/tools/charts.py b/src/dalgo_mcp/tools/charts.py
+index 3502ef5..38e197e 100644
+--- a/src/dalgo_mcp/tools/charts.py
++++ b/src/dalgo_mcp/tools/charts.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -7,14 +8,14 @@ from dalgo_mcp.params import ChartId
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_charts() -> str:
+         """List all charts in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/charts/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_chart(chart_id: ChartId) -> str:
+         """Get details of a specific chart.
+ 
+@@ -25,7 +26,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/charts/{chart_id}/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_create_chart(chart_data: dict) -> str:
+         """Create a new chart.
+ 
+@@ -36,7 +37,7 @@ def register(app: FastMCP):
+         resp = await client.post("/api/charts/", json=chart_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+     async def dalgo_update_chart(chart_id: ChartId, chart_data: dict) -> str:
+         """Update an existing chart.
+ 
+@@ -47,7 +48,7 @@ def register(app: FastMCP):
+         resp = await client.put(f"/api/charts/{chart_id}/", json=chart_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_delete_chart(chart_id: ChartId) -> str:
+         """Delete a chart.
+ 
+@@ -58,7 +59,7 @@ def register(app: FastMCP):
+         resp = await client.delete(f"/api/charts/{chart_id}/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_chart_data(chart_id: ChartId) -> str:
+         """Execute a chart's query and return the resulting data.
+ 
+diff --git a/src/dalgo_mcp/tools/connections.py b/src/dalgo_mcp/tools/connections.py
+index bcb9fd2..75e2137 100644
+--- a/src/dalgo_mcp/tools/connections.py
++++ b/src/dalgo_mcp/tools/connections.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -7,14 +8,14 @@ from dalgo_mcp.params import ConnectionId
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_connections() -> str:
+         """List all Airbyte connections (source-to-destination syncs) in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/airbyte/v1/connections")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_connection(connection_id: ConnectionId) -> str:
+         """Get details of a specific Airbyte connection.
+ 
+@@ -25,7 +26,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_sync_history(connection_id: ConnectionId) -> str:
+         """Get sync run history for an Airbyte connection.
+ 
+@@ -36,7 +37,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/airbyte/v1/connections/{connection_id}/sync/history")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_connection_catalog(connection_id: ConnectionId) -> str:
+         """Get the stream catalog for an Airbyte connection (selected streams and sync modes).
+ 
+diff --git a/src/dalgo_mcp/tools/dashboards.py b/src/dalgo_mcp/tools/dashboards.py
+index 4aafaeb..e7b2fb5 100644
+--- a/src/dalgo_mcp/tools/dashboards.py
++++ b/src/dalgo_mcp/tools/dashboards.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -7,14 +8,14 @@ from dalgo_mcp.params import DashboardId
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_dashboards() -> str:
+         """List all dashboards in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/dashboards/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_dashboard(dashboard_id: DashboardId) -> str:
+         """Get details of a specific dashboard including its charts.
+ 
+@@ -25,7 +26,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/dashboards/{dashboard_id}/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_create_dashboard(dashboard_data: dict) -> str:
+         """Create a new dashboard.
+ 
+@@ -36,7 +37,7 @@ def register(app: FastMCP):
+         resp = await client.post("/api/dashboards/", json=dashboard_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+     async def dalgo_update_dashboard(dashboard_id: DashboardId, dashboard_data: dict) -> str:
+         """Update an existing dashboard.
+ 
+@@ -47,7 +48,7 @@ def register(app: FastMCP):
+         resp = await client.put(f"/api/dashboards/{dashboard_id}/", json=dashboard_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_delete_dashboard(dashboard_id: DashboardId) -> str:
+         """Delete a dashboard.
+ 
+diff --git a/src/dalgo_mcp/tools/docs.py b/src/dalgo_mcp/tools/docs.py
+index b898183..c7a9fb5 100644
+--- a/src/dalgo_mcp/tools/docs.py
++++ b/src/dalgo_mcp/tools/docs.py
+@@ -12,6 +12,7 @@ import time
+ 
+ import httpx
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ # ---------------------------------------------------------------------------
+ # Hardcoded doc index — built from the dalgo_docs repo
+@@ -498,7 +499,7 @@ def _score_entry(entry: dict, terms: list[str]) -> int:
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_docs() -> str:
+         """List all Dalgo documentation pages grouped by section.
+ 
+@@ -528,7 +529,7 @@ def register(app: FastMCP):
+             indent=2,
+         )
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_search_docs(query: str) -> str:
+         """Search Dalgo documentation by keyword.
+ 
+@@ -579,7 +580,7 @@ def register(app: FastMCP):
+             indent=2,
+         )
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_doc(path: str) -> str:
+         """Fetch and return the full content of a Dalgo documentation page.
+ 
+diff --git a/src/dalgo_mcp/tools/notifications.py b/src/dalgo_mcp/tools/notifications.py
+index 65ebd3e..27f618f 100644
+--- a/src/dalgo_mcp/tools/notifications.py
++++ b/src/dalgo_mcp/tools/notifications.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -6,21 +7,21 @@ from dalgo_mcp.context import adapt_context
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_notifications() -> str:
+         """List recent notifications for the current user."""
+         client = await adapt_context()
+         resp = await client.get("/api/notifications/v1")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_unread_count() -> str:
+         """Get the count of unread notifications."""
+         client = await adapt_context()
+         resp = await client.get("/api/notifications/unread_count")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+     async def dalgo_mark_notifications_read(notification_ids: list[str] | None = None) -> str:
+         """Mark notifications as read.
+ 
+diff --git a/src/dalgo_mcp/tools/organization.py b/src/dalgo_mcp/tools/organization.py
+index 32e0c2b..797e4e0 100644
+--- a/src/dalgo_mcp/tools/organization.py
++++ b/src/dalgo_mcp/tools/organization.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -6,21 +7,21 @@ from dalgo_mcp.context import adapt_context
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_current_user() -> str:
+         """Get the currently authenticated Dalgo user's profile information."""
+         client = await adapt_context()
+         resp = await client.get("/api/currentuserv2")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_org_users() -> str:
+         """List all users in the current Dalgo organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/organizations/users")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_feature_flags() -> str:
+         """Get feature flags enabled for the current Dalgo organization."""
+         client = await adapt_context()
+diff --git a/src/dalgo_mcp/tools/pipelines.py b/src/dalgo_mcp/tools/pipelines.py
+index c1fb932..21cb7da 100644
+--- a/src/dalgo_mcp/tools/pipelines.py
++++ b/src/dalgo_mcp/tools/pipelines.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -7,14 +8,14 @@ from dalgo_mcp.params import DeploymentId, FlowRunId, Limit
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_pipelines() -> str:
+         """List all orchestration pipelines (Prefect deployments) in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/prefect/v1/flows/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_pipeline(deployment_id: DeploymentId) -> str:
+         """Get details of a specific pipeline by its deployment ID.
+ 
+@@ -25,7 +26,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/prefect/v1/flows/{deployment_id}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_create_pipeline(pipeline_data: dict) -> str:
+         """Create a new orchestration pipeline.
+ 
+@@ -36,7 +37,7 @@ def register(app: FastMCP):
+         resp = await client.post("/api/prefect/v1/flows/", json=pipeline_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+     async def dalgo_update_pipeline(deployment_id: DeploymentId, pipeline_data: dict) -> str:
+         """Update an existing pipeline's configuration.
+ 
+@@ -47,7 +48,7 @@ def register(app: FastMCP):
+         resp = await client.put(f"/api/prefect/v1/flows/{deployment_id}", json=pipeline_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_delete_pipeline(deployment_id: DeploymentId) -> str:
+         """Delete a pipeline by its deployment ID.
+ 
+@@ -58,7 +59,7 @@ def register(app: FastMCP):
+         resp = await client.delete(f"/api/prefect/v1/flows/{deployment_id}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_trigger_pipeline_run(deployment_id: DeploymentId) -> str:
+         """Trigger an immediate run of a pipeline.
+ 
+@@ -69,7 +70,7 @@ def register(app: FastMCP):
+         resp = await client.post(f"/api/prefect/v1/flows/{deployment_id}/flow_run/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_pipeline_run_history(deployment_id: DeploymentId, limit: Limit = 10) -> str:
+         """Get the run history for a specific pipeline.
+ 
+@@ -84,7 +85,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_flow_run(flow_run_id: FlowRunId) -> str:
+         """Get details of a specific flow run.
+ 
+@@ -95,7 +96,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/prefect/flow_runs/{flow_run_id}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_flow_run_logs(flow_run_id: FlowRunId) -> str:
+         """Get logs for a specific flow run.
+ 
+diff --git a/src/dalgo_mcp/tools/reports.py b/src/dalgo_mcp/tools/reports.py
+index 7a6cdbe..ce0d23e 100644
+--- a/src/dalgo_mcp/tools/reports.py
++++ b/src/dalgo_mcp/tools/reports.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -6,14 +7,14 @@ from dalgo_mcp.context import adapt_context
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_reports() -> str:
+         """List all saved reports (data snapshots) in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/reports/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_report(snapshot_id: str) -> str:
+         """View a specific report's data.
+ 
+@@ -24,7 +25,7 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/reports/{snapshot_id}/view/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_create_report(report_data: dict) -> str:
+         """Create a new report (data snapshot).
+ 
+@@ -35,7 +36,7 @@ def register(app: FastMCP):
+         resp = await client.post("/api/reports/", json=report_data)
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_delete_report(snapshot_id: str) -> str:
+         """Delete a report.
+ 
+diff --git a/src/dalgo_mcp/tools/sources.py b/src/dalgo_mcp/tools/sources.py
+index 8c213af..a4ef970 100644
+--- a/src/dalgo_mcp/tools/sources.py
++++ b/src/dalgo_mcp/tools/sources.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -7,14 +8,14 @@ from dalgo_mcp.params import SourceId
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_sources() -> str:
+         """List all configured data sources (Airbyte sources) in the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/airbyte/sources")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_source(source_id: SourceId) -> str:
+         """Get details of a specific data source.
+ 
+@@ -25,14 +26,14 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/airbyte/sources/{source_id}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_source_definitions() -> str:
+         """List all available Airbyte source definitions (connector types)."""
+         client = await adapt_context()
+         resp = await client.get("/api/airbyte/source_definitions")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_delete_source(source_id: SourceId) -> str:
+         """Delete a data source.
+ 
+diff --git a/src/dalgo_mcp/tools/transforms.py b/src/dalgo_mcp/tools/transforms.py
+index 8d070e9..4e39fe3 100644
+--- a/src/dalgo_mcp/tools/transforms.py
++++ b/src/dalgo_mcp/tools/transforms.py
+@@ -1,4 +1,5 @@
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -6,21 +7,21 @@ from dalgo_mcp.context import adapt_context
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_dbt_workspace() -> str:
+         """Get the dbt workspace configuration for the organization."""
+         client = await adapt_context()
+         resp = await client.get("/api/dbt/dbt_workspace")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_git_status() -> str:
+         """Get the git status of the dbt project repository (modified/untracked files)."""
+         client = await adapt_context()
+         resp = await client.get("/api/dbt/git_status/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_run_dbt(run_params: dict | None = None) -> str:
+         """Trigger a dbt run via Celery (async task). Optionally pass command and flags.
+ 
+@@ -31,14 +32,14 @@ def register(app: FastMCP):
+         resp = await client.post("/api/dbt/run_dbt_via_celery/", json=run_params or {})
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_transform_graph() -> str:
+         """Get the dbt project DAG (directed acyclic graph) showing model dependencies."""
+         client = await adapt_context()
+         resp = await client.get("/api/transform/v2/dbt_project/graph/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_sync_sources() -> str:
+         """Sync dbt sources from the connected warehouse, updating the dbt project's source definitions."""
+         client = await adapt_context()
+@@ -47,7 +48,7 @@ def register(app: FastMCP):
+ 
+     # ── Read Tools ──────────────────────────────────────────────────────
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_sources_models(schema_name: str | None = None) -> str:
+         """Get all available sources and models with their columns.
+ 
+@@ -64,7 +65,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_node_details(node_uuid: str) -> str:
+         """Get full details of a canvas node including its operation config and input nodes.
+ 
+@@ -77,7 +78,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_node_columns(node_uuid: str) -> str:
+         """Get column names and data types for a specific canvas node.
+ 
+@@ -90,7 +91,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_data_types() -> str:
+         """Get the list of warehouse-specific data types (used for cast operations)."""
+         client = await adapt_context()
+@@ -99,7 +100,7 @@ def register(app: FastMCP):
+ 
+     # ── Write Tools ─────────────────────────────────────────────────────
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_acquire_canvas_lock() -> str:
+         """Acquire a lock on the transform canvas. Required before making any canvas modifications.
+ 
+@@ -109,14 +110,14 @@ def register(app: FastMCP):
+         resp = await client.post("/api/transform/dbt_project/canvas/lock/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False))
+     async def dalgo_release_canvas_lock() -> str:
+         """Release the lock on the transform canvas after modifications are complete."""
+         client = await adapt_context()
+         resp = await client.delete("/api/transform/dbt_project/canvas/lock/")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_add_source_to_canvas(dbtmodel_uuid: str) -> str:
+         """Add an existing source or model to the canvas as a node.
+ 
+@@ -129,7 +130,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_create_operation(
+         input_node_uuid: str,
+         op_type: str,
+@@ -164,7 +165,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+     async def dalgo_edit_operation(
+         node_uuid: str,
+         op_type: str,
+@@ -198,7 +199,7 @@ def register(app: FastMCP):
+         )
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_terminate_chain(
+         node_uuid: str,
+         name: str,
+@@ -226,7 +227,7 @@ def register(app: FastMCP):
+ 
+     # ── Execute Tool ────────────────────────────────────────────────────
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=False))
+     async def dalgo_publish_changes(commit_message: str) -> str:
+         """Commit and push dbt project changes to git.
+ 
+diff --git a/src/dalgo_mcp/tools/warehouse.py b/src/dalgo_mcp/tools/warehouse.py
+index db08b48..f55ba18 100644
+--- a/src/dalgo_mcp/tools/warehouse.py
++++ b/src/dalgo_mcp/tools/warehouse.py
+@@ -1,6 +1,7 @@
+ import json
+ 
+ from mcp.server.fastmcp import FastMCP
++from mcp.types import ToolAnnotations
+ 
+ from dalgo_mcp.client import format_response
+ from dalgo_mcp.context import adapt_context
+@@ -10,14 +11,14 @@ from dalgo_mcp.pii import mask_pii_in_rows
+ 
+ def register(app: FastMCP):
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_schemas() -> str:
+         """List all schemas in the connected data warehouse."""
+         client = await adapt_context()
+         resp = await client.get("/api/warehouse/schemas")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_list_tables(schema_name: str) -> str:
+         """List all tables in a specific warehouse schema.
+ 
+@@ -28,14 +29,14 @@ def register(app: FastMCP):
+         resp = await client.get(f"/api/warehouse/tables/{schema_name}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_table_columns(schema: SchemaName, table: TableName) -> str:
+         """Get column names and types for a specific warehouse table."""
+         client = await adapt_context()
+         resp = await client.get(f"/api/warehouse/table_columns/{schema}/{table}")
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_table_data(schema: SchemaName, table: TableName, limit: Limit = 10, offset: Offset = 0) -> str:
+         """Fetch rows from a warehouse table. Defaults to 10 rows to avoid context overflow.
+         PII columns (name, email, phone, address, etc.) are automatically masked.
+@@ -54,7 +55,7 @@ def register(app: FastMCP):
+                 pass
+         return format_response(resp)
+ 
+-    @app.tool()
++    @app.tool(annotations=ToolAnnotations(readOnlyHint=True))
+     async def dalgo_get_table_row_count(schema: SchemaName, table: TableName) -> str:
+         """Get the total row count of a warehouse table."""
+         client = await adapt_context()
+-- 
+2.43.0
+

@@ -1,0 +1,250 @@
+From 61f2b20a2258a956940482e1b82bf1afbb84d7e5 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant@projecttech4dev.org>
+Date: Mon, 8 Jun 2026 09:41:15 +0000
+Subject: [PATCH 1/2] feat: add Docker support for streamable-http server
+
+---
+ .dockerignore      |  9 +++++++++
+ Dockerfile         | 18 ++++++++++++++++++
+ README.md          | 28 ++++++++++++++++++++++++++++
+ docker-compose.yml | 23 +++++++++++++++++++++++
+ 4 files changed, 78 insertions(+)
+ create mode 100644 .dockerignore
+ create mode 100644 Dockerfile
+ create mode 100644 docker-compose.yml
+
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..4970d68
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,9 @@
++.venv
++.git
++.env
++__pycache__
++*.pyc
++*.pyo
++.pytest_cache
++tests/
++.claude-plugin/
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..057bba7
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,18 @@
++FROM python:3.12-slim
++
++COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
++
++WORKDIR /app
++
++COPY pyproject.toml uv.lock ./
++COPY src/ ./src/
++
++RUN uv sync --frozen --no-dev
++
++ENV DALGO_TRANSPORT=streamable-http
++ENV DALGO_HOST=0.0.0.0
++ENV DALGO_PORT=8080
++
++EXPOSE 8080
++
++CMD ["uv", "run", "dalgo-mcp"]
+diff --git a/README.md b/README.md
+index df26216..f112038 100644
+--- a/README.md
++++ b/README.md
+@@ -90,6 +90,31 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+ claude mcp add --transport stdio dalgo -- uv run --directory /path/to/dalgo-mcp dalgo-mcp
+ ```
+ 
++### Docker (streamable-http)
++
++The fastest way to run a self-hosted Dalgo MCP server:
++
++```bash
++cp .env.example .env
++# Edit .env — set DALGO_API_URL and optionally DALGO_PUBLIC_URL
++docker compose up -d
++```
++
++The server starts on port `8080` by default. Override with `DALGO_PORT=9090 docker compose up`.
++
++To limit which tool groups are loaded (reduces context window usage):
++
++```bash
++DALGO_TOOLSETS=warehouse,pipelines,transforms docker compose up
++```
++
++Build and run manually without Compose:
++
++```bash
++docker build -t dalgo-mcp .
++docker run -p 8080:8080 --env-file .env dalgo-mcp
++```
++
+ ### streamable-http mode (Anthropic API)
+ 
+ This mode lets any user connect via a URL and their Dalgo JWT token — no local setup required.
+@@ -146,6 +171,9 @@ In HTTP mode, the server verifies JWT structure and expiry (the Dalgo backend va
+ | `DALGO_TRANSPORT` | No | `stdio` | `stdio` or `streamable-http` |
+ | `DALGO_HOST` | No | `0.0.0.0` | HTTP server bind address |
+ | `DALGO_PORT` | No | `8080` | HTTP server port |
++| `DALGO_PUBLIC_URL` | No | | Public URL when behind a reverse proxy (used as OAuth issuer) |
++| `DALGO_TOOLSETS` | No | all | Comma-separated list of toolsets to load (e.g. `warehouse,pipelines`) |
++| `DALGO_DEBUG` | No | `false` | Enable debug request logging |
+ 
+ ## Project Structure
+ 
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..b9fca41
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,23 @@
++services:
++  dalgo-mcp:
++    build: .
++    ports:
++      - "${DALGO_PORT:-8080}:${DALGO_PORT:-8080}"
++    environment:
++      DALGO_API_URL: ${DALGO_API_URL}
++      DALGO_TRANSPORT: streamable-http
++      DALGO_HOST: 0.0.0.0
++      DALGO_PORT: ${DALGO_PORT:-8080}
++      DALGO_PUBLIC_URL: ${DALGO_PUBLIC_URL:-}
++      DALGO_DEBUG: ${DALGO_DEBUG:-false}
++      DALGO_TOOLSETS: ${DALGO_TOOLSETS:-}
++    env_file:
++      - path: .env
++        required: false
++    restart: unless-stopped
++    healthcheck:
++      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${DALGO_PORT:-8080}/health')"]
++      interval: 30s
++      timeout: 5s
++      retries: 3
++      start_period: 10s
+-- 
+2.43.0
+
+
+From b3bd1c50d370eac3489f31e2c4ef01db6e635070 Mon Sep 17 00:00:00 2001
+From: Siddhant Singh <ssiddhant@projecttech4dev.org>
+Date: Mon, 8 Jun 2026 09:50:48 +0000
+Subject: [PATCH 2/2] fix: change default port from 8080 to 8089
+
+---
+ .env.example       |  2 +-
+ Dockerfile         |  4 ++--
+ README.md          | 10 +++++-----
+ docker-compose.yml |  6 +++---
+ 4 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index 46a3d42..8d5ad37 100644
+--- a/.env.example
++++ b/.env.example
+@@ -7,4 +7,4 @@ DALGO_ORG_SLUG=your-org-slug
+ DALGO_TRANSPORT=stdio
+ # Host and port for streamable-http transport (ignored in stdio mode)
+ DALGO_HOST=0.0.0.0
+-DALGO_PORT=8080
++DALGO_PORT=8089
+diff --git a/Dockerfile b/Dockerfile
+index 057bba7..a845579 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -11,8 +11,8 @@ RUN uv sync --frozen --no-dev
+ 
+ ENV DALGO_TRANSPORT=streamable-http
+ ENV DALGO_HOST=0.0.0.0
+-ENV DALGO_PORT=8080
++ENV DALGO_PORT=8089
+ 
+-EXPOSE 8080
++EXPOSE 8089
+ 
+ CMD ["uv", "run", "dalgo-mcp"]
+diff --git a/README.md b/README.md
+index f112038..56733d7 100644
+--- a/README.md
++++ b/README.md
+@@ -100,7 +100,7 @@ cp .env.example .env
+ docker compose up -d
+ ```
+ 
+-The server starts on port `8080` by default. Override with `DALGO_PORT=9090 docker compose up`.
++The server starts on port `8089` by default. Override with `DALGO_PORT=9090 docker compose up`.
+ 
+ To limit which tool groups are loaded (reduces context window usage):
+ 
+@@ -112,7 +112,7 @@ Build and run manually without Compose:
+ 
+ ```bash
+ docker build -t dalgo-mcp .
+-docker run -p 8080:8080 --env-file .env dalgo-mcp
++docker run -p 8089:8089 --env-file .env dalgo-mcp
+ ```
+ 
+ ### streamable-http mode (Anthropic API)
+@@ -123,7 +123,7 @@ This mode lets any user connect via a URL and their Dalgo JWT token — no local
+ DALGO_TRANSPORT=streamable-http \
+ DALGO_API_URL=https://your-dalgo-instance.com \
+ DALGO_HOST=0.0.0.0 \
+-DALGO_PORT=8080 \
++DALGO_PORT=8089 \
+ uv run dalgo-mcp
+ ```
+ 
+@@ -140,7 +140,7 @@ response = client.messages.create(
+     mcp_servers=[
+         {
+             "type": "url",
+-            "url": "http://your-server:8080/mcp/",
++            "url": "http://your-server:8089/mcp/",
+             "name": "dalgo",
+             "authorization_token": "<dalgo-jwt-token>",
+         }
+@@ -170,7 +170,7 @@ In HTTP mode, the server verifies JWT structure and expiry (the Dalgo backend va
+ | `DALGO_ORG_SLUG` | stdio only | | Dalgo organization slug |
+ | `DALGO_TRANSPORT` | No | `stdio` | `stdio` or `streamable-http` |
+ | `DALGO_HOST` | No | `0.0.0.0` | HTTP server bind address |
+-| `DALGO_PORT` | No | `8080` | HTTP server port |
++| `DALGO_PORT` | No | `8089` | HTTP server port |
+ | `DALGO_PUBLIC_URL` | No | | Public URL when behind a reverse proxy (used as OAuth issuer) |
+ | `DALGO_TOOLSETS` | No | all | Comma-separated list of toolsets to load (e.g. `warehouse,pipelines`) |
+ | `DALGO_DEBUG` | No | `false` | Enable debug request logging |
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b9fca41..13ba2d1 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -2,12 +2,12 @@ services:
+   dalgo-mcp:
+     build: .
+     ports:
+-      - "${DALGO_PORT:-8080}:${DALGO_PORT:-8080}"
++      - "${DALGO_PORT:-8089}:${DALGO_PORT:-8089}"
+     environment:
+       DALGO_API_URL: ${DALGO_API_URL}
+       DALGO_TRANSPORT: streamable-http
+       DALGO_HOST: 0.0.0.0
+-      DALGO_PORT: ${DALGO_PORT:-8080}
++      DALGO_PORT: ${DALGO_PORT:-8089}
+       DALGO_PUBLIC_URL: ${DALGO_PUBLIC_URL:-}
+       DALGO_DEBUG: ${DALGO_DEBUG:-false}
+       DALGO_TOOLSETS: ${DALGO_TOOLSETS:-}
+@@ -16,7 +16,7 @@ services:
+         required: false
+     restart: unless-stopped
+     healthcheck:
+-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${DALGO_PORT:-8080}/health')"]
++      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${DALGO_PORT:-8089}/health')"]
+       interval: 30s
+       timeout: 5s
+       retries: 3
+-- 
+2.43.0
+
