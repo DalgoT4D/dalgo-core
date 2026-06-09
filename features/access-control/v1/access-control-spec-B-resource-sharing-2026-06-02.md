@@ -491,3 +491,4 @@ A chart (floor Analysts+) is added to Dashboard A (Field Staff) — warning, acc
 - **Settings > Org defaults** render in Spec A (inert there); Spec B consumes `default_visibility_floor` + `allow_public_sharing`.
 - **Invitation role-tier rules** are defined in Spec A §9 (anyone invites as Member; only Admin elevates); Spec B's share modal enforces them.
 - **Sharing capability = Edit on resource** (Spec A policy); Spec B makes it functional in the share modal and guardrails.
+.
