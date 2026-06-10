@@ -1,0 +1,24 @@
+feature: pipeline_overview
+output_dir: managedata
+nuances: |
+  - Logs panel opens by clicking a recharts bar on the chart.
+  - Bar selectors vary by chart version; we try three.
+  - Bar click uses force=true because the SVG layer may be hover-covered.
+
+flows:
+  - name: cards
+    steps:
+      - navigate: /pipeline
+      - snap: pipeline_overview.png
+        label: Pipeline Overview — cards
+
+  - name: expanded_logs
+    optional: true
+    steps:
+      - click:
+          css: ".recharts-bar-rectangle, [data-testid='pipeline-run-bar'], .recharts-rectangle"
+          first: true
+          force: true
+      - wait: 1500
+      - snap: pipeline_overview_logs.png
+        label: Pipeline Overview — expanded logs

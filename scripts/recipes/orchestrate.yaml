@@ -1,0 +1,9 @@
+feature: orchestrate
+output_dir: orchestrate
+
+flows:
+  - name: pipeline_list
+    steps:
+      - navigate: /orchestrate
+      - snap: pipeline_list.png
+        label: Orchestrate — pipeline list

@@ -2,6 +2,14 @@
 # Symlinks to sibling repos (local only)
 DDP_backend
 webapp_v2
+dalgo_docs
+
+# secrets
+.env
+
+# uv-managed Python env (uv.lock is committed; .venv is local)
+.venv/
+__pycache__/
 
 # mac stuff
 .DS_Store

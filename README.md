@@ -206,32 +206,37 @@ Validates the implementation against the spec. Checks that all spec requirements
 /engineering/validate-spec
 ```
 
-#### `/product/generate-docs`
-Generate or update a Docusaurus documentation page for a Dalgo feature.
+#### Documentation (skill, no slash command)
 
-**Mode A — Feature name:**
-```
-/product/generate-docs "orchestrate"
-/product/generate-docs "data quality"
-```
+Triggered by natural-language prompts like:
 
-**Mode B — PR or commit range:**
 ```
-/product/generate-docs "#142"
-/product/generate-docs "abc123..def456"
+generate docs for orchestrate
+update docs for #142
+write a docs page for data quality
+refresh docs for the abc123..def456 changes
 ```
 
-**Output:** Markdown page in `dalgo_docs/docs/` at the correct location per the IA, screenshots in `dalgo_docs/static/img/{feature}/`, and updated `dalgo_docs/sidebars.js` if it's a new page.
+Claude auto-loads the `documentation` skill in `.claude/skills/documentation/`. The skill walks you through research → placement (derived from `webapp_v2/app/` + `dalgo_docs/sidebars.js`) → writing → sidebar update → domain-map update.
 
-The skill reads `.claude/skills/docs-generation/SKILL.md` for the feature-to-route mapping and sidebar structure, and `style-guide.md` for writing conventions.
+**Output:** Markdown page in `dalgo_docs/docs/` at the correct location, screenshots in `dalgo_docs/static/img/{feature}/`, and updated `dalgo_docs/sidebars.js` if it's a new page.
+
+The skill is broken into `workflow.md`, `sidebar.md`, `repo-structure.md`, and `style-*.md` files — each under 100 lines.
 
 ---
 
-### Screenshot Script
+### Screenshot Engine
 
-Captures all documentation screenshots from the staging environment in one run. Output goes directly into `dalgo_docs/static/img/`.
+Single script (`scripts/screenshot.py`) that runs YAML recipes from `scripts/recipes/`. Each recipe describes the user flows for one feature as a list of `flows` × `steps` (navigate, click, wait, snap, press). One recipe per top-level feature.
 
-**Setup — create `dalgo_docs/.env`:**
+**Setup — first time:**
+```bash
+cd dalgo-core
+uv sync                              # creates .venv/, installs deps from uv.lock
+uv run playwright install chromium   # one-time browser download
+```
+
+**Create `dalgo-core/.env`** (gitignored, auto-loaded via `python-dotenv`):
 ```
 E2E_ADMIN_EMAIL=your@email.com
 E2E_ADMIN_PASSWORD=yourpassword
@@ -241,24 +246,18 @@ E2E_BASE_URL=https://staging-app.dalgo.org
 **Run:**
 ```bash
 cd dalgo-core
+uv run python scripts/screenshot.py              # run all recipes (bulk refresh)
+uv run python scripts/screenshot.py kpis         # one feature
+uv run python scripts/screenshot.py kpis metrics # several
+uv run python scripts/screenshot.py --list       # show available recipes
 
-# Using .env file
-export $(cat ../dalgo_docs/.env | xargs) && python3 scripts/screenshot_docs_all.py
-
-# Or inline
-E2E_ADMIN_EMAIL=your@email.com \
-E2E_ADMIN_PASSWORD=yourpassword \
-E2E_BASE_URL=https://staging-app.dalgo.org \
-python3 scripts/screenshot_docs_all.py
+# Inline base URL override (skips .env's E2E_BASE_URL):
+E2E_BASE_URL=http://localhost:3001 uv run python scripts/screenshot.py
 ```
 
-**What it captures:** pipeline overview, pipeline logs, user management, usage dashboard, ingest (connections, sources, warehouse form), dashboards, orchestrate, reports (list, create, detail, share, comment).
+**Failure semantics:** required flows abort their recipe (exit code 2); optional flows print a warning and skip. The script logs `✓` / `⚠` / `✗` per step so you can spot drift.
 
-**Requirements:**
-```bash
-pip install playwright python-dotenv
-playwright install chromium
-```
+**Adding a new feature:** drop a `scripts/recipes/{feature}.yaml` file. The engine auto-discovers it. See `scripts/recipes/kpis.yaml` or `ingest.yaml` for patterns.
 
 **Staging environment:**
 
@@ -287,7 +286,7 @@ Agents are specialized personas that Claude invokes automatically when the conte
 |-------|-------------|
 | **design-review** | Combined UX expert + NGO user evaluation of UI components or screenshots. |
 | **tal-lens** | Tal Raviv's technology philosophy — demystify, build first, anti-hype, clarity over cleverness. |
-| **docs-generation** | Feature-to-route mapping, sidebar structure, file locations, and writing conventions for Dalgo docs. Loaded automatically by `/product/generate-docs`. |
+| **documentation** | Workflow + IA + style guide for Dalgo's user-facing Docusaurus docs. Triggered by prompts like "generate/update docs for X" or "write a doc page for Y". |
 
 ---
 
@@ -327,14 +326,14 @@ Agents are specialized personas that Claude invokes automatically when the conte
 ### Writing or Updating Docs
 
 ```bash
-# Generate a doc page for a feature
-/product/generate-docs "reports"
+# Generate a doc page for a feature (triggers the `documentation` skill)
+"generate docs for reports"
 
 # After a PR lands, update affected docs
-/product/generate-docs "#142"
+"update docs for #142"
 
 # Capture all screenshots from staging in one run
-export $(cat ../dalgo_docs/.env | xargs) && python3 scripts/screenshot_docs_all.py
+uv run python scripts/screenshot.py
 
 # Preview the docs site locally
 cd ../dalgo_docs && npm start

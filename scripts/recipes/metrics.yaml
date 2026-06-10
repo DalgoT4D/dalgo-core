@@ -1,0 +1,36 @@
+feature: metrics
+output_dir: metrics
+nuances: |
+  - "Create Metric" opens a dialog defaulting to Simple Mode.
+  - Simple / Calculated is a tab control inside the dialog.
+  - Search bar at top filters by name; not captured.
+  - Datasource picker is a two-step popover (schema, then table); first row
+    suffices for screenshot.
+
+flows:
+  - name: list
+    steps:
+      - navigate: /metrics
+      - snap: metrics_list.png
+        label: Metrics — list
+
+  - name: create_simple_dialog
+    optional: true
+    steps:
+      - click:
+          role: button
+          candidates: ["Create Metric", "CREATE METRIC", "+ Create Metric"]
+      - wait: 1200
+      - snap: metrics_create_simple.png
+        label: Metrics — Simple Mode dialog
+
+  - name: create_calculated_dialog
+    optional: true
+    steps:
+      - click:
+          role: tab
+          candidates: ["Calculated", "Calculated Mode", "CALCULATED"]
+      - wait: 800
+      - snap: metrics_create_calculated.png
+        label: Metrics — Calculated Mode dialog
+      - press: Escape

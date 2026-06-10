@@ -1,0 +1,22 @@
+feature: user_management
+output_dir: managedata
+nuances: |
+  - Invite User opens a modal dialog. Button label may be casing-variant.
+
+flows:
+  - name: users_table
+    steps:
+      - navigate: /settings/user-management
+      - snap: user_management.png
+        label: User Management — users table
+
+  - name: invite_dialog
+    optional: true
+    steps:
+      - click:
+          role: button
+          candidates: ["Invite User", "INVITE USER"]
+      - wait: 1000
+      - snap: user_management_invite.png
+        label: User Management — invite dialog
+      - press: Escape

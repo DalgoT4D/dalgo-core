@@ -1,0 +1,53 @@
+feature: reports
+output_dir: reports
+nuances: |
+  - "+ CREATE REPORT" opens a dialog; Escape closes.
+  - Share menu opens via a per-row icon with data-testid="report-share-btn".
+  - Comment popover opens by clicking a comment icon on the report detail page.
+  - All interactive flows assume at least one report row exists on staging.
+
+flows:
+  - name: list
+    steps:
+      - navigate: /reports
+      - snap: reports_list.png
+        label: Reports — list
+
+  - name: create_dialog
+    optional: true
+    steps:
+      - click:
+          role: button
+          candidates: ["+ CREATE REPORT", "CREATE REPORT", "Create Report"]
+      - wait: 1000
+      - snap: reports_create.png
+        label: Reports — create dialog
+      - press: Escape
+
+  - name: share_menu
+    optional: true
+    steps:
+      - click:
+          css: "[data-testid='report-share-btn']"
+          first: true
+      - wait: 800
+      - snap: reports_share.png
+        label: Reports — share menu
+      - press: Escape
+
+  - name: detail_and_comment
+    optional: true
+    steps:
+      - click:
+          css: "table tbody tr"
+          first: true
+      - wait: 2000
+      - snap: reports_detail.png
+        label: Reports — detail view
+      - click:
+          css: "[data-testid*='comment'], [aria-label*='comment']"
+          first: true
+      - wait: 800
+      - snap: reports_comment.png
+        label: Reports — comment popover
+      - press: Escape
