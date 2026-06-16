@@ -4,6 +4,28 @@
 
 Generate a complete planning document for feature implementation with thorough research. This is a **Draft v1** — meant to be reviewed and refined by the engineering team through conversation.
 
+## Writing Style — load this FIRST, before any research or output
+
+Before reading the spec or doing any research, invoke the `plain-writing` skill. It controls how you write everything from this point on: the `plan.md`, the `research.md`, your replies in chat, and any questions you ask the user.
+
+```
+Skill(skill="plain-writing")
+```
+
+The rules in short (the skill has the full version with examples):
+- Simple language, short sentences, active voice.
+- Every rule, decision, or behavior gets a **named example** (use Priya, Sarah, "Field Performance Dashboard", not `User A`).
+- Prefer 3-row tables and 6-line ASCII flows over paragraphs.
+- Define acronyms on first use (HLD, LLD, RBAC, RLS, PII, FK, IA).
+- No mystery references — gloss every `§X` or "see Spec A" in half a line.
+- Questions to the user are simple too — each option needs a one-line plain-words example.
+
+Use the mini-block template throughout the plan:
+
+> **The rule:** {one short sentence}
+> **Example:** {one or two sentences, named people, concrete outcome}
+> **Why it matters:** {one short sentence}
+
 ## Pre-Check: Establish Context
 
 Before starting research, in this order:
