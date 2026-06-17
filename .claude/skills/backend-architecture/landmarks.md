@@ -17,7 +17,7 @@
 | `RolePermission` model (join) | `ddpui/models/role_based_access.py:28-38` |
 | `OrgUser.new_role` FK | `ddpui/models/org_user.py:74` (FK Role, `on_delete=SET_NULL`) |
 | Role seed JSON | `seed/001_roles.json` (5 roles incl. `super-admin`) |
-| Permission seed JSON | `seed/002_permissions.json` (~74 slugs) |
+| Permission seed JSON | `seed/002_permissions.json` (85 slugs as of 2026-06-17) |
 | RolePermission seed JSON | `seed/003_role_permissions.json` |
 | `@has_permission([...])` decorator | `ddpui/auth.py:30-51` — raises `HttpError(403, "not allowed")` |
 | JWT auth middleware | `ddpui/auth.py:176-188` (`CustomJwtAuthMiddleware.authenticate`) — populates `request.permissions` (set) and `request.orguser` |
@@ -42,8 +42,21 @@ Notes:
 - `is_org_default` Boolean on Dashboard at lines 105-108; unique-per-org constraint at lines 150-156.
 - Dashboard has `is_public` + `public_share_token`; ReportSnapshot has its own `public_share_token`. Two independent share tokens — never collapse them.
 - Chart `extra_config` is a JSON blob (loose schema). `computation_type` is deprecated.
+- **No `owner` field exists** — only `created_by` / `last_modified_by`. (Access-control v2 adds `owner`.)
 
-*Verified: 2026-06-05.*
+### Delete handlers + current ownership check
+
+| Resource | DELETE route (api) | Service fn | Ownership check today |
+|---|---|---|---|
+| Dashboard | `api/dashboard_native_api.py:142-157` (`can_delete_dashboards`) | `services/dashboard_service.py:396` | `created_by != orguser` → blocked (line 422); **no Admin override** |
+| Chart | `api/charts_api.py:1190-1203` (`can_delete_charts`) | `services/chart_service.py:225` | `created_by != orguser` → blocked (line 243) |
+| ReportSnapshot | `api/report_api.py:193-207` (`can_delete_dashboards`) | `core/reports/report_service.py:735` | `created_by != orguser` → blocked (line 753) |
+| Metric | `api/metric_api.py:204-217` (`can_delete_metrics`) | `core/metric/metric_service.py:279` | **none** (only ref-count check) |
+| KPI | `api/kpi_api.py:135-148` (`can_delete_kpis`) | `core/kpi/kpi_service.py:310` | **none** (only usage check) |
+
+Role slug inside an endpoint: `request.orguser.new_role.slug` (e.g. `api/user_org_api.py:119`).
+
+*Verified: 2026-06-17.*
 
 ---
 
