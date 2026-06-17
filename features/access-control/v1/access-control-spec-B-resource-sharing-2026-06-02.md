@@ -1,11 +1,11 @@
 # Dalgo Access Control — Spec B: Resource Sharing
 
-**Status:** Draft for review (Design feedback pending before circulation)
+**Status:** Draft for review — Design feedback (PR #30) incorporated
 **Owner:** Product
 **Engineering:** Engineering (model + delivery)
 **Design:** Design (share modal + resource-page UI — primary input gate for this spec)
 **Reviewers:** Engineering, Leadership
-**Date:** 2026-06-02
+**Date:** 2026-06-17
 **Depends on:** Spec A — Role System. Spec A ships first; Spec B builds on its role tiers, ownership primitive, and Settings IA.
 **Replaces:** The sharing / visibility / inheritance portions of the superseded rebuilt spec (`workdocs/access_control/access-control-v2-spec-rebuilt copy.md`). Do not build to that spec.
 
@@ -103,13 +103,13 @@ The Admin sets the org-wide default that new resources inherit at creation (Sett
 | Axis | Options | Factory default |
 |---|---|---|
 | Audience | Private / Admins only / Analysts+ / All users | **All users** |
-| Permission | View / Edit (N/A when audience = Private) | **Edit** |
+| Permission | View / Edit (N/A when audience = Private) | **View** |
 
-The UI can surface common combinations as one-click shortcuts: "Everything private" (Private), "Viewable to all" (All users / View), "Editable to all" (All users / Edit — factory default), "Internal only" (Analysts+ / View).
+The UI can surface common combinations as one-click shortcuts: "Everything private" (Private), "Viewable to all" (All users / View — factory default), "Editable to all" (All users / Edit), "Internal only" (Analysts+ / View).
 
 The default only sets the *starting* floor for new resources. Owners override per resource via the same two dropdowns at any time. Changing the org-default does not retroactively change existing resources.
 
-> **Design/Leadership note:** the factory default ("All users, Edit") is maximally open — any user, including a Member, can edit any new resource until an owner narrows it. Because the default is now a full picker, an org wanting a safer posture can ship-configure it to "Analysts+ / View" in a single setting. The factory value still follows the "start open, let orgs lock down" philosophy; §19 shows where owners must narrow it (PII, salary).
+> **Design/Leadership note:** the factory default is **"All users / View"** — every authenticated user can *see* new resources, but editing and re-sharing require an explicit grant (the owner, or a direct Edit share). This keeps the consumer experience open (nothing is hidden by accident) while preventing the "invited funder can edit, re-share, or publish" problem an Edit default created. An org can still set a stricter default ("Analysts+ / View") or a more open one ("All users / Edit") in a single setting. §19 shows where owners must go further still and set a resource to **Private** (PII, salary).
 
 ### 5.3 Direct shares (additive)
 
@@ -118,6 +118,7 @@ On top of the floor, the owner — or anyone with an Edit grant — can add spec
 - Direct shares **stack additively**. Effective access = floor ∪ all direct grants, at the most permissive level any path confers.
 - Removing a direct share subtracts **only that grant**. The floor and all other direct grants remain. (E.g., removing the Funders group from a chart doesn't affect the Field Staff group's grant or the floor.)
 - A direct share can only raise access, never lower it below the floor. To restrict below the floor, the owner lowers the floor audience.
+- **Narrowing the floor does not remove direct shares.** Because access is additive, lowering the floor (e.g., to Private) drops only the floor-granted audience — existing direct shares persist, and those people keep access. To truly lock a resource down, the direct shares must be removed too. So any floor change that *narrows* access prompts a **warn + offer**: *"This resource has N direct shares (e.g., External Contractor, Funders group) that will keep access even after this change. Remove them as well?"* Nothing is silently revoked, and nothing is silently retained — the owner decides.
 
 ### 5.4 Effective access resolution
 
@@ -215,9 +216,12 @@ The chart's floor audience is never bumped by this flow — only its direct shar
 
 Fires when an editor broadens a dashboard's audience (floor or direct share) to include principals that some inner charts aren't shared with.
 
-> *"7 of the 10 charts in this dashboard aren't shared with Funders group. Extend all 7?"*
+> *"3 of the 10 charts in this dashboard aren't shared with Funders group and will be exposed if you continue:*
+> *• Beneficiary detail • Staff salary by role • Donor pipeline*
+> *Extend all 3 to Funders?"*
 
-- **Yes** → the new audience is bulk-added to every gap-chart's direct share list. The dashboard share proceeds.
+- The warning **lists the affected charts by name** (not just a count), so the editor sees exactly what data they're about to expose before deciding.
+- **Yes** → the new audience is bulk-added to every listed chart's direct share list. The dashboard share proceeds.
 - **Cancel** → the dashboard share is aborted.
 
 **Bulk-or-cancel only. No per-chart picker.** To exclude a specific chart, the editor removes it from the dashboard first, then re-shares.
@@ -299,8 +303,8 @@ Share "Field Performance Dashboard"
 Resource links get shared informally — pasted into chat, email, a deck. When an **authenticated** user opens a resource link they don't have access to, instead of a dead end they see a **request-access** screen:
 
 - They can **request View or Edit**, with an optional note.
-- The request routes to the resource **owner and anyone with Edit on it** (all of whom can already share) plus **Admins** — as a notification and an entry in a **Requests** area of the share modal / Manage shares view.
-- An approver picks the level to grant (can downgrade an Edit request to View) → a **direct share** is created and the requester notified. Decline notifies the requester.
+- The request routes to the resource **owner only** — as a notification and an entry in a **Requests** area of the share modal / Manage shares view. (Single approver by design: routing to every editor caused conflicts — two editors approving differently, or one granting View while another grants Edit. Admins retain governance access and can grant manually via Manage shares, but are not part of request routing.)
+- The owner picks the level to grant (can downgrade an Edit request to View) → a **direct share** is created and the requester notified. Decline notifies the requester.
 - Granting resource access **never changes the requester's platform role** — it only adds a resource grant (role changes remain Admin-only, Spec A §9).
 - **Public-link viewers are out of scope** (anonymous). If public sharing is off and a non-user opens a link, they're prompted to sign in or be invited.
 - Pending access requests expire on the same **30-day** platform constant (§10.4).
@@ -311,7 +315,7 @@ Resource links get shared informally — pasted into chat, email, a deck. When a
 
 - **Same guardrails per resource** — bulk-sharing dashboards that contain gap-charts surfaces the broadening warning (aggregated across the selection where possible), bulk-or-cancel.
 - **Re-share gating still holds per resource** — a bulk action applies only to resources the actor has Edit on; the rest are skipped with a clear count (*"Shared 8 of 10 — 2 skipped: you don't have Edit on those"*).
-- Multi-select also supports **bulk floor change** and **bulk public-link toggle**, under the same Edit gating.
+- Multi-select also supports **bulk floor change** and **bulk public-link toggle**, under the same Edit gating. A bulk floor change that *narrows* access triggers the same warn-and-offer-to-remove-direct-shares prompt as a single resource (§5.3), aggregated across the selection (e.g., *"4 dashboards have direct shares that will keep access. Remove them too?"*).
 
 ---
 
@@ -322,6 +326,7 @@ Resource links get shared informally — pasted into chat, email, a deck. When a
 - **The Alert resource has its own floor + direct shares** (same two-axis model) governing who can view/edit the alert *configuration*.
 - **Recipient list** uses the same direct-share primitive (users + groups). Recipients get notifications with trigger context.
 - **Recipient status grants no resource access.** Receiving an alert does not grant access to the KPI or metric it watches (references ≠ shares, §7.3).
+- **Alert notifications link to the trigger source.** A recipient who lacks access and clicks the link lands on the **request-access** screen (§10.5) — they can request access there. The notification never grants access by itself.
 
 ---
 
@@ -338,11 +343,11 @@ Resource links get shared informally — pasted into chat, email, a deck. When a
 
 - **Share modal** (§10.1) — paste + group + invite + per-resource permission + floor controls + public-link toggle; pending state; invite-role picker gated per Spec A.
 - **Resource list pages** (Dashboards, Charts, Reports, Alerts) — floor/audience badge; 🔒 for Private-floor; direct-share count on hover; "Shared with you" section for Members; resource-level **filter on the chart list** to manage share sprawl (per feedback log); **multi-select checkboxes + bulk Share / floor / public-link actions** with a per-resource Edit-gated skipped-count summary (§10.6).
-- **Request-access screen** — shown when an authenticated user opens a resource they lack access to; request View/Edit with a note; routes to owner / Edit-holders / Admin (§10.5).
+- **Request-access screen** — shown when an authenticated user opens a resource they lack access to; request View/Edit with a note; routes to the **owner** (§10.5).
 - **Requests area** (in Manage shares / share modal) — pending access requests with approve (pick the level) / decline.
-- **Resource editor / settings** — two-axis floor selector (audience + permission); direct-shares panel (add/remove users & groups at View/Edit); public-link toggle; "Manage shares" view showing the full grant list and the path each principal has access by.
+- **Resource editor / settings** — two-axis floor selector (audience + permission); direct-shares panel (add/remove users & groups at View/Edit); public-link toggle; "Manage shares" view showing the full grant list and the path each principal has access by. Narrowing the floor prompts a warn-and-offer to remove existing direct shares (§5.3).
 - **Embed-time warning modal** (§8.1) — fires on embed; Yes extends chart's share list, Cancel aborts.
-- **Dashboard-broadening warning modal** (§8.2) — bulk-extend-or-cancel only.
+- **Dashboard-broadening warning modal** (§8.2) — lists the affected charts by name; bulk-extend-or-cancel only.
 - **Groups** (Settings) — list with member count + resources shared with; create/rename/delete/membership; name-collision warning. Scoped per role (Spec A).
 - **Alerts** — config page with floor + recipient list.
 - **Reports** — comments panel for View+; moderation for Edit.
@@ -354,11 +359,11 @@ Resource links get shared informally — pasted into chat, email, a deck. When a
 | Today | After Spec B |
 |---|---|
 | Dashboards/Reports have current sharing | Existing shares migrate 1:1 into the new floor + direct-share model. |
-| Charts have no sharing | Charts get floor = the org-default (factory: All users / Edit, unless Admin changed it pre-migration); empty direct-share list. Preserves today's "everyone can see charts" behavior. |
+| Charts have no sharing | Charts get floor = the org-default (factory: All users / View, unless Admin changed it pre-migration); empty direct-share list. Preserves today's "everyone can see charts" behavior. |
 | Interim Member "sees all content" (Spec A window) | **Narrows** to floor ∪ direct grants. Members now see only what the floor admits + what's shared with them. This narrowing is expected; communicate before launch (Spec A §12). |
 | Dashboards already shared with Members (consumers) | **One-time auto-extend:** for every existing dashboard share to a consumer, auto-add that consumer to each inner chart's direct share list, so no chart appears as a locked tile post-launch. |
 | Public links | Existing public links preserved; gated going forward by the org "allow public sharing" toggle (default on). |
-| Org default floor | Set to factory default ("All users, Edit") unless the Admin chose otherwise; existing resources keep their migrated floors. |
+| Org default floor | Set to factory default ("All users / View") unless the Admin chose otherwise; existing resources keep their migrated floors. |
 
 The one-time auto-extend is the migration's critical step — without it, Members who could previously see a dashboard would hit locked tiles when chart-level audiences come into force.
 
@@ -381,7 +386,7 @@ The one-time auto-extend is the migration's critical step — without it, Member
 | Alerts | Alert carries floor + direct shares + recipient list (reuse `ResourceShare` with a recipient flag). |
 | Comments | `ReportComment` (report_id, author, body, created_at); read/add for View+, moderate for Edit. |
 | Pending invites | `ResourceShare`/group rows with `status=pending` + email; activate on accept; **30-day expiry job** (platform constant). |
-| Access requests | `AccessRequest` (resource, requester, requested_permission, note, status, decided_by, decided_at); notify owner + Edit-holders + Admins; on approve insert a `ResourceShare`; 30-day expiry. |
+| Access requests | `AccessRequest` (resource, requester, requested_permission, note, status, decided_by, decided_at); notify the resource **owner**; on approve insert a `ResourceShare`; 30-day expiry. |
 | Bulk share | Batch endpoint applying shares / floor / public-link to a set of resource IDs; per-resource Edit check; returns applied/skipped counts; reuses the guardrail services per resource. |
 | Migration | 1:1 share migration; chart floor backfill to org-default; one-time auto-extend for existing consumer-shared dashboards. |
 | Redis cache | Invalidate on grant/floor/group/public-link change. |
@@ -419,7 +424,7 @@ The one-time auto-extend is the migration's critical step — without it, Member
 | Active orgs using resource-level sharing | 0% | 50% within 3 months |
 | Active orgs using groups | 0% | 30% within 3 months |
 | Time to share a dashboard with 30 people | Manual / per-user | <60 seconds |
-| Bulk-extend acceptances vs. cancels on broadening warning | n/a | Track — the clearest signal of whether the factory-open default floor is right |
+| Bulk-extend acceptances vs. cancels on broadening warning | n/a | Track — a signal of how often inner-chart audiences lag dashboard audiences |
 
 ---
 
@@ -427,12 +432,12 @@ The one-time auto-extend is the migration's critical step — without it, Member
 
 ### 17.1 Open questions
 
-1. **Factory-open floor ("All users, Edit").** Confirm with Leadership this is the right default given it lets any Member edit new resources until narrowed. Worked examples (§19) argue it's safe for the trusted-editor reality but needs owner discipline on sensitive resources.
+1. **Factory default floor.** *Resolved (PR #30):* factory default is **"All users / View"** — new resources are visible to all but editable only via grant. (Changed from "All users / Edit" so invited externals can't edit, re-share, or publish by default.) Owners still set sensitive resources to **Private** (§19).
 2. **Chart-share-list sprawl.** Charts accumulate direct shares as dashboards are shared with new groups. The plan: a "Manage shares" tab per chart + an org-level audit view ("who can see this chart, via what path"). Confirm scope for V1.
 3. **Bulk-broaden default button.** When the warning fires for N charts, is the default action "Extend all N" or "Cancel"? Recommend Cancel-as-default to make broadening deliberate.
-4. **Floor permission = Edit interaction with re-sharing.** If floor permission is Edit and audience is All users, every user can re-share. Confirm this is intended at the open default, or cap re-sharing to Analyst+ even when floor grants Edit.
+4. **Floor permission = Edit interaction with re-sharing.** Now that the default is View, this only bites when an org opts into an Edit floor: everyone covered by that floor could re-share. Confirm that's acceptable for opted-in orgs, or cap re-sharing to Analyst+ even when the floor grants Edit.
 5. **Design review** on the share modal and resource-page UI is the gating dependency before circulation.
-6. **Access-request approvers** — spec'd as owner + any Edit-holder + Admin (Edit already implies the ability to share). Confirm, or restrict approval to owner + Admin only.
+6. **Access-request approvers** — *Resolved (PR #30):* requests route to the **owner only** (avoids multi-approver conflict). Admins can still grant via governance override; they're not in the request routing.
 7. **Bulk-broadening UX** — when a multi-select bulk share spans many dashboards with gap-charts, confirm whether warnings aggregate into one prompt or step per resource.
 
 ### 17.2 V1 limitations (honest caveats)
@@ -471,7 +476,7 @@ Steps 1–5 are the core viewer flow and must land together for the Member exper
 These double as the concrete scenarios to walk leadership/architecture through when defending the floor + guardrails model.
 
 **A. Beneficiary PII chart for field staff (default-open is *not* enough — owner must narrow).**
-An M&E Officer creates a beneficiary-detail chart. Under the factory default it starts at "All users, Edit" — wrong for PII. She sets its **floor to Private**. It disappears from every other editor's picker. She creates a "Field Operations" dashboard shared with the Field Staff group and drags the chart in. Embed-time warning fires: *"This chart isn't visible to Field Staff (15 people). Add them to the chart's share list?"* → Yes. Chart floor stays Private; Field Staff added as a direct View share. Field staff see it inside the dashboard; funders, who aren't on that dashboard or the chart's share list, have no path. **This is the canonical case for the embed warning preventing accidental leakage.**
+An M&E Officer creates a beneficiary-detail chart. Under the factory default it starts at "All users / View" — still wrong for PII, since every user in the org can see it. She sets its **floor to Private**. It disappears from every other editor's picker. She creates a "Field Operations" dashboard shared with the Field Staff group and drags the chart in. Embed-time warning fires: *"This chart isn't visible to Field Staff (15 people). Add them to the chart's share list?"* → Yes. Chart floor stays Private; Field Staff added as a direct View share. Field staff see it inside the dashboard; funders, who aren't on that dashboard or the chart's share list, have no path. **This is the canonical case for the embed warning preventing accidental leakage.**
 
 **B. Salary chart for leadership only (broadening warning blocks the leak).**
 The officer marks a salary-by-role chart's **floor Private**, adds it to "Leadership Overview" (Leadership group) — embed warning, accept → Leadership added. Weeks later she tries to drop the same chart onto "Org Overview" (audience: All users). Embed warning fires: *"This chart isn't visible to All users. Add All users to the chart's share list?"* → **Cancel.** The salary chart stays restricted to Leadership. **This is the case to show when leadership questions whether default-open is dangerous — the guardrail is the safety net.**
@@ -491,4 +496,76 @@ A chart (floor Analysts+) is added to Dashboard A (Field Staff) — warning, acc
 - **Settings > Org defaults** render in Spec A (inert there); Spec B consumes `default_visibility_floor` + `allow_public_sharing`.
 - **Invitation role-tier rules** are defined in Spec A §9 (anyone invites as Member; only Admin elevates); Spec B's share modal enforces them.
 - **Sharing capability = Edit on resource** (Spec A policy); Spec B makes it functional in the share modal and guardrails.
-.
+
+---
+
+## 21. User Stories
+
+Format: *As a [role], I want [goal] so that [reason].* Acceptance notes point to the governing section.
+
+### Sharing & onboarding
+
+1. **Share one dashboard with multiple groups at once.**
+   *As an Analyst, I want to share a dashboard with the Field Staff and Funders groups in a single action so that I don't repeat the flow per group.*
+   - Both groups added in one share-modal action (§10.1); each gets the chosen permission.
+   - If inner charts aren't shared with one of the groups, the broadening warning lists the affected charts by name before I confirm (§8.2).
+
+2. **Invite external people who aren't on Dalgo yet.**
+   *As an Analyst, I want to paste funder emails and have them invited as Members and added to the Funders group so that onboarding and sharing happen together.*
+   - Unmatched emails are invited as Members, added to the group, share applied on accept; shown as pending until then (§10.2, §10.4).
+
+3. **Bulk-share several dashboards with one group.**
+   *As an Analyst, I want to select multiple dashboards and share them all with the Leadership group at once so that quarterly setup is fast.*
+   - Bulk action applies to resources I have Edit on; the rest are skipped with a clear count, e.g. "Shared 8 of 10 — 2 skipped: you don't have Edit" (§10.6).
+
+### Reducing / locking down access
+
+4. **Lock down a sensitive chart.**
+   *As an M&E Officer, I want to set a beneficiary-PII chart to Private so that only I (and Admins) can see it, even though the org default is open.*
+   - Setting floor to Private removes the all-users audience; the chart disappears from other editors' pickers (§5.1, §8.3).
+
+5. **Reduce a dashboard's audience after over-sharing.**
+   *As an owner, I want to narrow a dashboard I previously shared widely so that it's no longer visible to everyone — and I want to be sure no leftover direct shares keep people in.*
+   - Narrowing the floor prompts a warn-and-offer listing the direct shares that would otherwise persist (e.g., External Contractor), so I can remove them in the same step (§5.3).
+
+6. **Remove one group without affecting others.**
+   *As an owner, I want to remove the Funders group from a chart so that funders lose access while Field Staff keep theirs.*
+   - Removing a direct share subtracts only that grant; the floor and other shares remain (§5.3).
+
+7. **Bulk-lock several dashboards.**
+   *As an Analyst, I want to set four dashboards to Private at once so that a batch of sensitive reports is contained.*
+   - Bulk floor-narrowing triggers the aggregated warn-and-offer to remove existing direct shares across the selection (§10.6).
+
+### Requesting & granting access
+
+8. **Request access to a link I can't open.**
+   *As a Member, I want to request access when I open a shared link I'm not on so that I'm not stuck at a dead end.*
+   - Request-access screen lets me ask for View/Edit with a note; it routes to the owner (§10.5).
+
+9. **Approve an access request without conflicts.**
+   *As an owner, I want to be the single approver of access requests to my resource so that two editors don't approve the same request differently.*
+   - Requests route to the owner only; the owner picks the grant level; Admins can still grant via governance override (§10.5).
+
+### Inheritance, alerts, public links
+
+10. **Embed a chart and understand the exposure.**
+    *As an Analyst, I want to add a chart to a broader dashboard and be told exactly which charts will be newly exposed so that I don't leak data by accident.*
+    - Embed-time / broadening warnings name the affected charts; closing the gap requires Edit on the chart (§8.1–§8.3).
+
+11. **Receive an alert without gaining hidden access.**
+    *As a Member on an alert recipient list, I want a useful notification, and if I click through to a resource I can't see, I want a clear way to request access.*
+    - Recipient status grants no resource access; clicking the link routes me to request-access (§11, §10.5).
+
+12. **Publish a clean dashboard externally.**
+    *As an owner, I want to turn on a public view-only link for a non-sensitive dashboard so that anyone with the link can view it.*
+    - Public-link toggle is available only if the Admin global allows it, and only to the owner or an Edit-holder; links are view-only, no comments (§5.5).
+
+### Governance
+
+13. **See who can access a resource and why.**
+    *As an owner, I want a "Manage shares" view that lists every principal and the path they have access by so that I can audit and clean up.*
+    - Manage-shares view shows floor + each direct share and its source (§13).
+
+14. **Set the org's default posture.**
+    *As an Admin, I want to set the org-wide default floor so that new resources start at the visibility my org expects.*
+    - Org default uses the same two-axis picker; factory default is All users / View; changes don't retroactively alter existing resources (§5.2).
