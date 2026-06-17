@@ -360,5 +360,7 @@ Spec A is independently shippable end-to-end. Resource-level sharing, the share 
 
 - Role decoupling is the core idea: do **not** reintroduce function-by-role anywhere in the content layer. The only role-driven capability checks are sidebar visibility, Data-infra access, and Settings gating.
 - Build the permission resolver in Spec A so resource grants slot in later without rework (Spec B extends, doesn't replace).
+
+.
 - The `owner` column and Admin effective-owner override are the two pieces Spec B depends on most — land them solidly here.
 - Org-defaults storage ships now, consumption later — keep the read path stubbed for Spec B.
