@@ -105,18 +105,16 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 - **Consumes:** Source (`compose`), Transform (`compose`), Data Quality check (`compose`).
 - **Consumed by:**
   - Notification (`trigger` — success/failure events create notifications)
-  - Alert (`trigger` — pipeline-failure alerts)
-- **Platform-specific behaviors:** Pipelines run via the `prefect-proxy` service, not directly from Django. "Last updated" timestamps on downstream Charts/Metrics/Reports are all anchored to the last successful Pipeline run.
-- **Change impact:** Schedule changes affect every downstream "last updated" timestamp and Report/Scheduled-email timing. Pipeline failure makes all downstream data stale until next success — silently, unless an Alert fires.
+- **Platform-specific behaviors:** Pipelines run via the `prefect-proxy` service, not directly from Django. "Last updated" timestamps on downstream Charts/Metrics/Reports are all anchored to the last successful Pipeline run. **Pipeline failures do not trigger Alerts in v1** — the Alert entity is cron-scheduled and queries the warehouse, not pipeline events. Pipeline-health monitoring is a separate concern.
+- **Change impact:** Schedule changes affect every downstream "last updated" timestamp and Report/Scheduled-email timing. Pipeline failure makes all downstream data stale until next success — silently, with no Alert path.
 - **Confidence:** `draft`
 
 ### Data Quality check
 - **One-line identity:** An assertion on warehouse data (not-null, unique, freshness, row count) that runs as a Pipeline step.
-- **What it is (detail):** Managed through `data-quality/` route. Checks pass/fail during Pipeline execution; results drive Alerts.
+- **What it is (detail):** Managed through `data-quality/` route. Checks pass/fail during Pipeline execution.
 - **Consumes:** Warehouse table / column (`query-from`).
 - **Consumed by:**
   - Pipeline (`compose`)
-  - Alert (`trigger` on failure)
 - **Platform-specific behaviors:** Unknown whether a failing check blocks downstream Pipeline steps or only logs. Need to confirm with team.
 - **Change impact:** A removed check can silently allow data regressions to propagate into Reports. A flipped-to-failing check may cascade into pipeline failures if blocking.
 - **Confidence:** `tribal-knowledge-needed` (blocking vs non-blocking behavior is unclear to me)
@@ -239,16 +237,36 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
   - Warehouse schema changes: since data is live-queried, underlying schema renames break historical Report views even though the snapshot config is frozen.
 - **Confidence:** `verified` (read `models/report.py`)
 
-### Alert *(paired Alerts spec — parallel work)*
-- **One-line identity:** A triggered notification fired when a Metric/KPI crosses a threshold, or a Pipeline / Data Quality check fails.
-- **What it is (detail):** Defined in the parallel Alerts spec. Thresholds, firing conditions, and subscribers live on the Alert.
-- **Consumes:** Metric (`reference`), KPI (`reference`), Pipeline (`trigger` on failure), Data Quality check (`trigger` on failure).
+### Alert
+- **One-line identity:** A saved rule that runs on a cron schedule, queries the warehouse, and notifies recipients by email and/or Slack when its condition is met.
+- **What it is (detail):**
+  - Three types in a single `alert` table, discriminated by `alert_type`:
+    - **metric_threshold** — FK to Metric, fires when value crosses an operator/threshold
+    - **kpi_rag** — FK to KPI, fires when the KPI lands in selected RAG state(s)
+    - **standalone** — ad-hoc schema/table/column/aggregation (+ optional filters) stored in `standalone_config` JSON, fires on operator/threshold
+  - Scheduled by a UTC cron stored in `schedule_cron` (frontend converts user's local frequency/time to cron at submit).
+  - Delivery is configured per-alert: `delivery_channels` (`["email"]` and/or `["slack"]`), `slack_webhook_url` (encrypted-at-rest), `recipients` JSON (mix of `orguser_id` and free-form `email`). One alert posts to exactly one Slack webhook.
+  - `message_template` is a single Mustache string rendered for both channels.
+  - `AlertLog` is immutable per-evaluation history: frozen alert snapshot, SQL executed, value, fired flag, rendered message, per-delivery status. Populated even on non-fires so users can preview what *would* have been sent.
+- **Consumes:** Metric (`reference`), KPI (`reference`), Warehouse (`query-from` — standalone alerts query schema/table directly).
 - **Consumed by:**
-  - Notification (`trigger` — alert firing creates Notification records)
-  - External channels — if Slack / email integrations are added (future)
-- **Platform-specific behaviors:** Paired spec is active parallel work; behavior details pending Alerts team confirmation.
-- **Change impact:** Metric formula change can flip historical "was alerting" state. Threshold change without history migration creates inconsistent history.
-- **Confidence:** `tribal-knowledge-needed` — paired spec in progress; confirm shape with Alerts feature owner.
+  - Email recipients (terminal — direct SMTP send, not via Notification model)
+  - Slack channels (terminal — direct webhook POST)
+  - AlertLog (`snapshot-of` — every evaluation freezes the alert config)
+- **Platform-specific behaviors:**
+  - **Cron-scheduled, not pipeline-triggered** — the shipped implementation evaluates on a per-alert schedule. The original spec proposed pipeline-completion triggering; that approach was not built.
+  - **Slack is webhook-based, not OAuth** — there is no `OrgSlackConfig` entity. Each alert holds its own webhook URL, so two alerts pointing to the same channel store the URL twice.
+  - **No Notification model involvement** — alerts deliver directly to email/Slack. The `Notification` entity in this map is *not* in the delivery path.
+  - Alert source FKs use `on_delete=CASCADE` — deleting a Metric or KPI silently deletes its alerts and their AlertLog rows.
+  - `alert_type` and the alert's source (KPI / Metric / dataset) are immutable post-create; the edit wizard locks both.
+  - Permissions are scaffolded via `ALERT_PERMISSIONS` (view / create / edit / delete) and gate UI affordances; backend enforcement lives in role-based middleware.
+- **Change impact:**
+  - Metric formula change cascades to threshold and standalone alerts on next evaluation — historical AlertLog rows keep their frozen `alert_snapshot`.
+  - KPI target / RAG threshold change can flip future kpi_rag fire state without altering the alert itself.
+  - Cron change re-anchors all future evaluations; no backfill of missed ticks.
+  - Webhook URL rotation requires editing the alert (the masked URL is preserved if untouched).
+  - Deleting an Alert cascades to its AlertLog rows — full delivery history is lost.
+- **Confidence:** `verified` (read `DDP_backend/ddpui/models/alert.py` 2026-06-16; cross-checked frontend wizard, table, and log modal).
 
 ### Share link *(a mode of Dashboard or ReportSnapshot, not a standalone entity)*
 - **One-line identity:** A public URL + access token that lets external viewers access a Dashboard (live) or a ReportSnapshot (frozen layout, live data under date filter).
@@ -271,7 +289,7 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
   - Model `Notification` has `author`, `message`, `email_subject`, `scheduled_time`, `sent_time`, `urgent` flag.
   - Delivery fan-out handled by `NotificationRecipient` (FK to OrgUser + read_status + task_id).
   - **Decoupled from Alert** — no FK; Alerts or other systems *create* Notifications but there is no persistent link.
-- **Consumes:** Alert (`trigger`), Pipeline (`trigger` on run outcome), Data Quality check (`trigger`), system events.
+- **Consumes:** Pipeline (`trigger` on run outcome), system events. (Alert delivers directly to email/Slack and does not create Notification records.)
 - **Consumed by:** OrgUser (terminal — in-app feed or email delivery).
 - **Platform-specific behaviors:**
   - Notifications are the **delivery layer only** — they don't retain a link back to the thing that fired them.
@@ -353,7 +371,6 @@ Update order for the next team review session:
 1. Promote `tribal-knowledge-needed` entries — these are blockers for correct planning:
    - Explore (picker is NOT reused per Pratiksha — confirmed 2026-04-21; confirm any other MetricsSelector integrations)
    - Data Quality check (blocking vs non-blocking?)
-   - Alert (paired spec shape)
 2. Promote `draft` entries — read the actual models:
    - Source (`models/airbyte.py`, `ddpairbyte/`)
    - Warehouse (org config + adapter layer)
