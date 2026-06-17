@@ -2,7 +2,12 @@
 
 ## Input: $ARGUMENTS
 
-Write a new feature spec from an idea, or scope a versioned iteration from an existing spec.
+Write a feature spec. `$ARGUMENTS` is one of:
+- An inline feature description (e.g. `"scheduled report emails"`)
+- A file path to notes/requirements to read as input
+- A path to an existing feature folder or spec (e.g. `features/metrics_kpis` or `features/metrics_kpis/spec.md`)
+
+There is **one flow**. The command auto-detects what to do from the input (see Step 1). You do not pick a mode.
 
 ## What a spec IS — and is NOT
 
@@ -10,8 +15,10 @@ A spec is a **Product Requirements Document (PRD)**. It captures the **what** an
 
 **Belongs in a spec:**
 - The user problem and who has it
-- User flows / user stories / acceptance criteria
+- User flows, user stories, and acceptance criteria
+- The UI surface the feature touches
 - Scope: what's in, what's out, and why
+- Dependencies on other features
 - Success metrics (user/business outcomes)
 
 **A spec does NOT have an "Open Questions" section.** Open product questions must be **grilled with the user and resolved** before the spec is saved. The spec is the answer, not the question list. If a question can't be answered yet, either (a) explicitly defer that capability to a later version and add it to "What's deferred," or (b) state the chosen default in the spec and move on. Never leave ambiguity for engineering to resolve.
@@ -27,88 +34,44 @@ A spec is a **Product Requirements Document (PRD)**. It captures the **what** an
 
 If you catch yourself writing `Alert` model fields, FK relationships, "Celery beat job," or "FastAPI endpoint" — stop. That's plan content. The spec describes user-visible behavior; engineering decides the implementation.
 
-The only acceptable engineering-adjacent content in a spec is a **Dependencies** line that names *other features* a version depends on (e.g. "Requires: Metric primitive from features/metrics_kpis/v1"). Not technologies.
+The only acceptable engineering-adjacent content in a spec is the **Dependencies** section, which names *other features* a version depends on (e.g. "Requires: Metric primitive from features/metrics_kpis/v1"). Not technologies.
 
 ## Process
 
-### Step 1: Parse Input & Determine Mode
+### Step 1: Parse input & determine output target
 
-**Mode A — New Spec** (default):
-- `$ARGUMENTS` is an inline feature description (e.g. `"scheduled report emails"`)
-- Or `$ARGUMENTS` is a file path to notes/requirements to read as input
-- Creates `features/{feature-name}/spec.md`
+Resolve `$ARGUMENTS` to decide where the spec goes. This is automatic — branch only on whether a source spec already exists:
 
-**Mode B — Scope a Version**:
-- `$ARGUMENTS` points to an existing feature folder (e.g. `features/metrics_kpis`)
-- Or `$ARGUMENTS` points to an existing spec (e.g. `features/metrics_kpis/spec.md`)
-- Creates `features/{feature-name}/v{N}/spec.md`
+1. Check whether `$ARGUMENTS` matches an existing `features/` folder or an existing `spec.md`.
+2. **If no existing spec is found** → this is a **new feature**. You will write the full-vision spec at `features/{feature-name}/spec.md`. Use snake_case for the feature name; create the directory if needed.
+3. **If an existing spec is found** → you are **scoping the next version**. Read the original `features/{feature-name}/spec.md` (and any existing `v1/`, `v2/` … specs) to see what's already been scoped, then write the next sequential version at `features/{feature-name}/v{N}/spec.md`.
 
-To determine mode: check if `$ARGUMENTS` matches an existing `features/` folder or spec. If yes, Mode B. Otherwise, Mode A.
+Before writing in either case, search `features/` for related work and tell the user if something similar already exists — ask whether to update it or create new.
 
----
+### Step 2: Write the spec
 
-## Mode A: New Spec (full vision)
-
-### Check for Existing Work
-Search `features/` for an existing folder with a similar feature name.
-- If a related spec exists, inform the user and ask whether to update or create new.
-
-### Write the Spec
 Use the senior-product-manager agent approach:
 
-1. **Understand the idea** — Parse the input, identify the core problem being solved.
-2. **Research context** — Search the codebase for related features, check existing features.
-3. **Pressure-test from user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
-4. **Grill open questions with the user until resolved.** As you draft, list every product question that's unclear (default behavior, edge cases, UX of disputed flows, what's in vs out, ambiguous wording in the input). Ask them, in batches via `AskUserQuestion` where useful. Do NOT save the spec until every open question is either answered, explicitly deferred to a later version with rationale, or has an explicitly chosen default written into the spec. The final spec contains no "Open Questions" section.
-5. **Structure the spec** with these sections (product-only — no engineering content):
-   - Problem Statement — What problem, for whom?
-   - Target Users — Which Dalgo persona(s)?
-   - Success Metrics — User/business outcomes to measure.
-   - User Stories / User Flows — As a [role], I want [thing], so that [outcome]. With acceptance criteria written as user-visible behavior.
-   - Scope — What's IN for MVP, what's OUT for later, and why.
-   - Handoff Checklist — Is the product surface clear enough for engineering to plan against?
+1. **Understand the idea** — Parse the input, identify the core problem being solved. If scoping a version, identify the smallest subset that delivers end-to-end value; for v2+, pull from the prior versions' deferred items or remaining items in the original spec.
+2. **Research context** — Search the codebase and `features/` for related features and prior versions.
+3. **Pressure-test from the user perspective** — Apply comprehension, confidence, workflow, trust, and independence tests for NGO users.
+4. **Grill open questions with the user until resolved.** As you draft, list every product question that's unclear (default behavior, edge cases, UX of disputed flows, what's in vs out, ambiguous wording in the input). Ask them in batches via `AskUserQuestion` where useful. Do NOT save the spec until every open question is either answered, explicitly deferred to a later version with rationale, or has an explicitly chosen default written into the spec. The final spec contains no "Open Questions" section.
 
-### Save
-Save to: `features/{feature-name}/spec.md`
+### Step 3: Structure the spec
 
-This is the **PM's original spec** — the full vision. Use snake_case feature name. Create the directory if needed.
+Write these sections (product-only — no engineering content). The same structure applies whether this is a new full-vision spec or a scoped version; a scoped version simply narrows each section to what's in this iteration and records what's deferred.
 
-### Print Next Step
-```
-Spec saved to: features/{feature-name}/spec.md
+- **Problem Statement** — What problem, for whom?
+- **Target Users** — Which Dalgo persona(s)?
+- **Success Metrics** — User/business outcomes to measure.
+- **User Flows** — The end-to-end paths through the product, written independently of persona. Each flow: entry point → steps → exit, including the key alternate and error paths. Describe the flow itself, not who is walking it.
+- **User Stories** — Persona-based, derived from the personas in Target Users. `As a [persona], I want [capability], so that [outcome].` Group stories by persona. Each story carries acceptance criteria written as user-visible behavior (not implementation).
+- **UI Surface** — The screens, pages, modals, components, and entry points the feature introduces or changes; where it lives in the product (routes / navigation); and the key states each surface has (empty, loading, error, populated). Describe what's visible, not how it's built.
+- **Scope** — What's IN for this iteration, what's OUT for later, and why.
+- **Dependencies** — Other features or versions this depends on, and what it enables. Names features, never technologies (e.g. "Requires: Metric primitive from features/metrics_kpis/v1"; "Enables: alert digest in v2").
+- **Handoff Checklist** — Is the product surface clear enough for engineering to plan against?
 
-Next steps:
-1. Review with the team
-2. Scope a v1: /product/write-spec features/{feature-name}
-3. Then plan: /engineering/plan-feature features/{feature-name}/v1/spec.md
-```
-
----
-
-## Mode B: Scope a Version
-
-### Read the Original Spec
-- Read `features/{feature-name}/spec.md` (the PM's full vision)
-
-### Determine Version Number
-- Check which versions already exist (`v1/`, `v2/`, etc.)
-- If previous versions exist, read their `spec.md` files to understand what's already been scoped
-- New version = next sequential number
-
-### Scope the Iteration
-From the original spec, identify what to include in this version:
-
-1. **If this is v1**: Pick the smallest subset that delivers end-to-end value. Focus on the core user story. Defer nice-to-haves.
-2. **If this is v2+**: Pull from the "Out of Scope" items of previous versions, or from remaining items in the original spec not yet covered.
-
-For each version, consider:
-- What's the smallest shippable slice?
-- Does it deliver standalone value to users?
-- Are there dependencies on previous versions?
-- What's the logical ordering?
-
-### Write the Versioned Spec
-Create `features/{feature-name}/v{N}/spec.md` with:
+For a scoped version, lead with a short header and a scope block:
 
 ```markdown
 # {Feature Name} — v{N}
@@ -125,39 +88,40 @@ Create `features/{feature-name}/v{N}/spec.md` with:
 
 ### What's deferred to later versions
 - [Deferred item] — [reason for deferral]
-
-## User Stories / User Flows (scoped)
-
-### Story 1: [Title]
-**As a** [role], **I want** [capability], **so that** [outcome].
-
-**Acceptance Criteria** (written as user-visible behavior, not implementation):
-- [ ] [Criterion 1]
-- [ ] [Criterion 2]
-
-## Dependencies
-- Requires: [other features or versions this depends on — not technologies]
-- Enables: [what future versions this unblocks]
 ```
 
-**No Open Questions section.** Before saving, grill the user on every unclear product decision (channel multi-select rules, default behavior on edge cases, what each picker shows, what's in vs deferred). Resolve each one — either an explicit answer baked into the spec, or an explicit deferral added to "What's deferred to later versions" with rationale.
+### Step 4: Save
 
-### Print Next Step
+- New feature → `features/{feature-name}/spec.md` (the PM's original full vision).
+- Scoped version → `features/{feature-name}/v{N}/spec.md`.
+
+If the original spec already contains engineering content (data models, technical scope sections), do NOT carry it forward — strip it. Engineering content belongs in `plan.md`.
+
+### Step 5: Print next step
+
+For a new spec:
+```
+Spec saved to: features/{feature-name}/spec.md
+
+Next steps:
+1. Review with the team
+2. Scope a v1: /product/write-spec features/{feature-name}
+3. Then plan: /engineering/plan-feature features/{feature-name}/v1/spec.md
+```
+
+For a scoped version:
 ```
 Scoped version saved to: features/{feature-name}/v{N}/spec.md
 
 Next: /engineering/plan-feature features/{feature-name}/v{N}/spec.md
 ```
 
----
-
 ## Guidelines
 - **A spec describes user-visible behavior, not implementation.** No data models, API endpoints, libraries, services, or code architecture. If it could change based on engineering choices without changing what the user sees, it doesn't belong in the spec.
-- Be specific, not generic. Name real user roles, real workflows, real data.
-- Scope ruthlessly for MVP. Move nice-to-haves to "Out of Scope" explicitly.
+- Keep User Flows persona-agnostic and User Stories persona-driven — the flows are the paths, the stories are who needs them and why.
+- Be specific, not generic. Name real user roles, real workflows, real data, real screens.
+- Scope ruthlessly for MVP. Move nice-to-haves to "Out of Scope" / "What's deferred" explicitly, with reasons.
 - Think in user workflows, not isolated features.
-- Each version should be independently shippable — users get value even if v2 never happens.
+- Each version should be independently shippable — users get value even if the next version never happens.
 - Don't over-scope v1. Ship a thin slice fast rather than a thick slice late.
-- Explicitly list what's deferred and why — makes scoping v2 easier.
 - If the original spec is small enough for one iteration, v1/spec.md can be a near-copy with tightened acceptance criteria.
-- If the original spec already contains engineering content (data models, technical scope sections), do NOT carry it forward into the versioned spec. Strip it. Engineering content belongs in `plan.md`, not `spec.md`.
