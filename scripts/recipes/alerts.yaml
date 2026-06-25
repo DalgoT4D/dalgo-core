@@ -1,0 +1,122 @@
+feature: alerts
+output_dir: alerts
+nuances: |
+  - /alerts requires the Alerts feature flag and an OrgUser with the
+    "Create Alerts" permission for the CREATE ALERT button to render.
+  - The CREATE ALERT button (data-testid="create-alert-btn") now opens a
+    "Select alert type" dialog (CreateAlertTypeModal). The dialog has three
+    radio rows with testids create-{kpi|metric|standalone}-alert, plus
+    alert-type-cancel and alert-type-next on the footer buttons.
+  - The wizard does NOT open on radio click — the user picks a row and then
+    clicks NEXT (alert-type-next). The default-selected row is KPI; for the
+    other two types the recipe clicks the row label before clicking NEXT.
+  - "Use a KPI" / "Use a metric" rows render disabled when the org has zero
+    KPIs / metrics, with an inline "+ Create KPI"/"+ Create metric" button
+    (testids create-{kpi|metric}-alert-create) that routes to the create page.
+  - Each "create" flow re-navigates to /alerts so flows are independent —
+    an early failure does not poison later screenshots.
+  - The wizard auto-opens on step 1 (Define). Step 2 (Notify) and step 3 (Test)
+    need required fields populated, so they are not captured by this recipe.
+  - Entry-point flows assume at least one KPI / Metric exists on the source
+    page; they are optional and skip silently if the page is empty.
+
+flows:
+  - name: list
+    steps:
+      - navigate: /alerts
+      - snap: alerts_list.png
+        label: Alerts — list page
+
+  - name: create_type_modal
+    optional: true
+    steps:
+      - navigate: /alerts
+      - click:
+          css: "[data-testid='create-alert-btn']"
+      - wait: 700
+      - snap: alerts_create_type_modal.png
+        label: Alerts — Select alert type dialog
+      - press: Escape
+      - wait: 400
+
+  - name: kpi_alert_define
+    optional: true
+    steps:
+      - navigate: /alerts
+      - click:
+          css: "[data-testid='create-alert-btn']"
+      - wait: 500
+      - click:
+          css: "[data-testid='create-kpi-alert']"
+      - wait: 200
+      - click:
+          css: "[data-testid='alert-type-next']"
+      - wait: 1200
+      - snap: alerts_create_kpi_define.png
+        label: Alerts — Create KPI alert, Define step
+      - press: Escape
+      - wait: 500
+
+  - name: metric_alert_define
+    optional: true
+    steps:
+      - navigate: /alerts
+      - click:
+          css: "[data-testid='create-alert-btn']"
+      - wait: 500
+      - click:
+          css: "[data-testid='create-metric-alert']"
+      - wait: 200
+      - click:
+          css: "[data-testid='alert-type-next']"
+      - wait: 1200
+      - snap: alerts_create_metric_define.png
+        label: Alerts — Create Metric alert, Define step
+      - press: Escape
+      - wait: 500
+
+  - name: custom_alert_define
+    optional: true
+    steps:
+      - navigate: /alerts
+      - click:
+          css: "[data-testid='create-alert-btn']"
+      - wait: 500
+      - click:
+          css: "[data-testid='create-standalone-alert']"
+      - wait: 200
+      - click:
+          css: "[data-testid='alert-type-next']"
+      - wait: 1200
+      - snap: alerts_create_custom_define.png
+        label: Alerts — Create Custom alert, Define step
+      - press: Escape
+      - wait: 500
+
+  - name: kpi_entry_point
+    optional: true
+    steps:
+      - navigate: /kpis
+      - wait: 1200
+      - click:
+          css: "[data-testid^='kpi-card-'] button[aria-haspopup='menu']"
+          first: true
+      - wait: 700
+      - snap: alerts_kpi_entry_point.png
+        label: Alerts — Create alert from a KPI card menu
+      - press: Escape
+      - wait: 400
+
+  - name: metric_entry_point
+    optional: true
+    steps:
+      - navigate: /metrics
+      - wait: 1200
+      - click:
+          css: "table button[aria-haspopup='menu']"
+          first: true
+      - wait: 700
+      - snap: alerts_metric_entry_point.png
+        label: Alerts — Create alert from a Metric row menu
+      - press: Escape
+      - wait: 400
