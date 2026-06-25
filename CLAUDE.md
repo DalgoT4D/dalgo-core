@@ -6,12 +6,18 @@ workflows with automated data ingestion (Airbyte), transformation (dbt), orchest
 
 ## Repositories
 
-| Repo | Tech | CLAUDE.md |
-|------|------|-----------|
-| `DDP_backend/` | Django + Django Ninja | `DDP_backend/.claude/CLAUDE.md` |
-| `webapp_v2/` | Next.js 15, React 19, Shadcn UI | `webapp_v2/CLAUDE.md` |
-| `prefect-proxy/` | FastAPI | — |
-| `dalgo-ai-gen/` | AI/ML services | — |
+This repo (`dalgo-core`) is the **orchestration/harness repo** — docs, specs, skills,
+commands, and agents. It contains **no application code**. The code repos are
+**siblings of `dalgo-core`**, one level up, not nested inside it.
+
+| Repo | Location (relative to `dalgo-core`) | Tech | CLAUDE.md |
+|------|-------------------------------------|------|-----------|
+| `DDP_backend` | `../DDP_backend` | Django + Django Ninja | `../DDP_backend/.claude/CLAUDE.md` |
+| `webapp_v2` | `../webapp_v2` | Next.js 15, React 19, Shadcn UI | `../webapp_v2/CLAUDE.md` |
+| `prefect-proxy` | `../prefect-proxy` | FastAPI | — |
+
+To work on backend or frontend code, `cd` into the sibling repo and follow its own
+CLAUDE.md for run/test/lint commands and conventions.
 
 ## Knowledge Base
 
@@ -20,12 +26,7 @@ Deep reference lives in `docs/` — always accessible without loading a skill:
 | File | Contents |
 |------|----------|
 | `docs/domain-map.md` | Product entity graph — source of truth for blast radius analysis |
-| `docs/DESIGN.md` | Design principles and the "why" behind major decisions |
-| `docs/SECURITY.md` | Auth patterns, org-scoping, PII, multi-tenancy rules |
-| `docs/RELIABILITY.md` | What must never fail, degradation strategies |
-| `docs/FRONTEND.md` | Component patterns, state management, layout conventions |
 | `docs/harness-evolution.md` | Iterative plan for improving the engineering harness |
-| `docs/quality-tracker.md` | Code quality grades per domain |
 
 ---
 
@@ -59,37 +60,28 @@ PM artifacts live in `prototypes/`, separate from `features/`.
 
 Gets designer direction, generates Figma frames, runs design review, writes `design.md`
 + `FIGMA.md` + `## Design` section back into the spec. Engineering starts after this.
-Skip for backend-only features, or pass `--skip-design` to ship-feature.
+Skip for backend-only features.
 
-#### 3. Ship — two modes
-
-**Command mode** (synchronous — runs in your session, you see every step):
-```
-/engineering/ship-feature features/{name}/v1/spec.md
-```
-
-**Agent mode** (async — spawns in a fresh isolated context, runs in background):
-```
-/engineering/ship-feature-bg features/{name}/v1/spec.md
-```
-
-Both run the same pipeline. Both write to the same `pipeline.md`.
-See `docs/harness-evolution.md → Experiment 0` for the comparison framework.
-
-**Pipeline stages (both modes):**
-design gate → plan (planner agent) → implement (engineer agent) → validate loop
-→ design review → docs → PR
-
-State tracked in `features/{name}/{version}/pipeline.md` — re-run the same command
-to resume after any interruption.
-
----
-
-### Manual steps (when you want control over individual stages)
+#### 3. Plan
 
 ```
 /engineering/plan-feature  features/{name}/v1/spec.md   → plan.md + research.md
+```
+
+#### 4. Build
+
+```
 /engineering/execute-plan  features/{name}/v1/plan.md   → implements the code
+```
+
+Execution follows the **executing-feature-plans** skill: branch first, then build the
+feature in one session with red-green-refactor (one test at a time), reading each repo's
+CLAUDE.md before working in it. Progress is tracked in
+`features/{name}/{version}/tasks.md`; re-run to resume after an interruption.
+
+### Other commands
+
+```
 /engineering/validate-spec features/{name}/v1/spec.md   → validates implementation
 /engineering/review-pr     <PR# or URL>                 → structured code review
 /engineering/debug-issue   <Sentry URL or description>  → diagnose production bugs
@@ -101,9 +93,6 @@ to resume after any interruption.
 
 | Agent | What it does | Spawned by | Model |
 |-------|-------------|------------|-------|
-| `planner` | Produces plan.md + research.md from a spec | ship-feature / ship-feature-bg | Sonnet |
-| `engineer` | Implements all plan milestones, tracks in tasks.md | ship-feature / ship-feature-bg | Opus |
-| `ship-orchestrator` | Async pipeline orchestrator (agent mode) | ship-feature-bg | Sonnet |
 | `debugger` | Diagnoses bugs from Sentry URL, stack trace, or description | direct | Opus |
 | `senior-product-manager` | Feature strategy, specs, prioritization | direct | Sonnet |
 | `ux-design-expert` | UI/UX decisions, design system | direct | Sonnet |
@@ -116,8 +105,7 @@ to resume after any interruption.
 - **design-review** — UX + NGO user lens on any UI component or screen
 - **backend-architecture** — patterns and templates for Django/Ninja layer architecture
 - **frontend-architecture** — patterns for Next.js components, hooks, and state
-- **docs-generation** — generate or update Docusaurus documentation
-- **tal-lens** — technology decisions: demystify hype, expose how things actually work
+- **documentation** — generate, update, or review Dalgo user-facing docs
 
 ---
 
@@ -130,10 +118,9 @@ Every feature lives in `features/{name}/{version}/`:
 | `spec.md` | `/product/write-spec` | What to build and why |
 | `design.md` | `/design/design-handoff` | UX decisions, terminology, interaction states |
 | `FIGMA.md` | `/design/design-handoff` | Figma frame references, component specs |
-| `research.md` | `planner` agent | Codebase and external findings |
-| `plan.md` | `planner` agent | Implementation plan with milestones |
-| `tasks.md` | `engineer` agent | Milestone task checklist — resume checkpoint |
-| `pipeline.md` | `ship-feature` / `ship-feature-bg` | Stage state — the orchestrator's only state |
+| `research.md` | `/engineering/plan-feature` | Codebase and external findings |
+| `plan.md` | `/engineering/plan-feature` | Implementation plan with milestones |
+| `tasks.md` | `/engineering/execute-plan` | Milestone task checklist — resume checkpoint |
 
 ---
 

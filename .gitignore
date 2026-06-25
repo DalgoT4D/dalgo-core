@@ -6,6 +6,8 @@ dalgo_docs
 
 # secrets
 .env
+# local-only test credentials read by the executing-feature-plans skill (Playwright MCP)
+.claude/test-credentials.local.json
 
 # uv-managed Python env (uv.lock is committed; .venv is local)
 .venv/
