@@ -65,7 +65,15 @@ Skip for backend-only features.
 #### 3. Plan
 
 ```
-/engineering/plan-feature  features/{name}/v1/spec.md   → plan.md + research.md
+/product/write-spec "feature idea"          → features/{name}/spec.md
+/product/write-spec features/{name}         → features/{name}/v1/spec.md (scope a version)
+/engineering/plan-feature features/{name}/v1/spec.md → features/{name}/v1/plan.md
+/engineering/plan-enhancement features/{name}/v1/spec.md  → features/{name}/v1.1/plan.md (minor bump)
+/engineering/plan-enhancement "paragraph describing the enhancement" → asks which feature, then plans a v{N}.{M+1}
+/engineering/execute-plan features/{name}/v1/plan.md → implements the code
+/engineering/validate-spec features/{name}/v1/spec.md → validate implementation against spec
+/engineering/review-pr <PR#>                → structured code review
+/engineering/debug-issue <Sentry URL>       → diagnose production bugs
 ```
 
 #### 4. Build
