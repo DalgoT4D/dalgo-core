@@ -28,6 +28,18 @@ If the file is not present, create one. If it exists, use it to figure out where
    - Follow existing codebase patterns and conventions
    - Work through milestones in order
 
+   **Use red-green-refactor — one test at a time (tracer-bullet style):**
+   For each thin vertical slice of behavior (one endpoint returning one shape
+   of data, one service method handling one case, one component rendering one
+   state):
+     1. Write a SINGLE failing test for the smallest slice
+     2. Run it and confirm it fails (RED)
+     3. Write the minimum code to make it pass (GREEN)
+     4. Refactor if needed, keeping the test green
+     5. Repeat for the next slice
+   Write one test at a time — do not batch multiple tests upfront.
+   This applies to both backend and frontend code.
+
 4. **Validate**
    - Make sure all services where code was changed are up & running
    - Run each validation command

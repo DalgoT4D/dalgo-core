@@ -2,10 +2,22 @@
   "permissions": {
     "allow": [
       "Read",
-      "Bash(ls *)"
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "Bash(ls *)",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "additionalDirectories": [
+      "../DDP_backend",
+      "../webapp_v2",
+      "../.dalgo-worktrees"
     ],
     "deny": [
       "Read(**/.env*)",
+      "Edit(**/.env*)",
+      "Write(**/.env*)",
       "Bash(cat .env*)",
       "Bash(cat **/.env*)",
       "Bash(grep *.env*)",
