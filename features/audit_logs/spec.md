@@ -58,7 +58,7 @@ Every significant create / update / delete / lifecycle action across these areas
 
 ### 5.2 What's captured per event
 
-Each audit entry records: who performed it (actor email), which organization, what kind of resource and which specific one, what action was taken, what changed (old value → new value, where applicable), whether it succeeded or failed, and when it happened.
+Each audit entry records: who performed it (actor email), which organization, what kind of resource and which specific one, what action was taken, what changed (old value → new value, where applicable), and when it happened. Only successful actions are logged, so there is no separate success/failure status on the entry itself.
 
 ### 5.3 Data isolation
 

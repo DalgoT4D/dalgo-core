@@ -95,11 +95,6 @@ class AuditLogAction(models.TextChoices):
     LOGOUT = "logout", "Logout"
 
 
-class AuditLogStatus(models.TextChoices):
-    SUCCESS = "success", "Success"
-    FAILURE = "failure", "Failure"
-
-
 class AuditLog(models.Model):
     id = models.BigAutoField(primary_key=True)
 
@@ -125,11 +120,6 @@ class AuditLog(models.Model):
     # {"field_name": {"old": <value>, "new": <value>}, ...}
     # Never contains secrets — enforced by compute_changes()'s exclude list.
     changes = models.JSONField(default=dict, blank=True)
-
-    status = models.CharField(
-        max_length=20, choices=AuditLogStatus.choices, default=AuditLogStatus.SUCCESS
-    )
-    error_message = models.TextField(blank=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)
 
@@ -162,11 +152,10 @@ Query parameters:
 | `resource_id` | str, optional | exact match |
 | `start_date` | date, optional | inclusive |
 | `end_date` | date, optional | inclusive |
-| `status` | str, optional | `success` \| `failure` |
 | `page` | int, default 1 | |
 | `limit` | int, default 50, max 200 | |
 
-Response: paginated list of `AuditLogSchema` (id, timestamp, orguser_email, resource_type, resource_id, resource_name, action, changes, status).
+Response: paginated list of `AuditLogSchema` (id, timestamp, orguser_email, resource_type, resource_id, resource_name, action, changes).
 
 Permission: gated by `@has_permission(["can_view_audit_logs"])` — new permission slug to be seeded in `seed/permissions.json`. Which roles get this permission is decided as seed data (see spec.md §7), not hardcoded in the endpoint — a one-line change either way.
 
@@ -186,8 +175,6 @@ def create_audit_log(
     action: str,
     resource_name: str = "",
     changes: dict | None = None,
-    status: str = AuditLogStatus.SUCCESS,
-    error_message: str = "",
 ) -> AuditLog | None:
     """
     Creates one immutable audit log entry. Never raises — a failure to write
@@ -241,7 +228,7 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
 ## 5. Security Review
 
 - **Authentication & Authorization:** the new `GET /api/audit-logs/` endpoint is protected by `@has_permission(["can_view_audit_logs"])`, consistent with every other endpoint in the codebase. Role-to-permission mapping is seed data — see spec.md §7 for which roles get this permission.
-- **Input validation:** query parameters on the list endpoint are validated via a Pydantic/Ninja schema (enum-constrained `resource_type`, `action`, `status`; `limit` capped at 200) before hitting the ORM.
+- **Input validation:** query parameters on the list endpoint are validated via a Pydantic/Ninja schema (enum-constrained `resource_type`, `action`; `limit` capped at 200) before hitting the ORM.
 - **Data access control:** every query is scoped to `request.orguser.org` server-side — never trusts a client-supplied org filter. No multi-tenant leak path exists because there is no client-controllable "which org" parameter.
 - **Sensitive data:** this is the highest-risk part of the feature. `compute_changes()` requires an explicit `exclude_fields` list for any resource that can carry secrets — passwords, API keys, git access tokens, warehouse credentials, public share tokens, JWTs. This must be enforced via code review on every call site, and covered by a unit test per sensitive resource type (see §6).
 - **Injection risks:** no raw SQL or dynamic query construction — all reads go through the Django ORM with the indexed fields in §4.1.
@@ -257,7 +244,7 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
 - **Unit tests — secrets exclusion** (one per sensitive resource type): warehouse credentials, git access token, org logo upload, public share token — assert none of these ever appear in a `changes` JSON blob after going through the real call site.
 - **API tests** (`tests/api_tests/test_audit_log_api.py`):
   - `GET /api/audit-logs/` returns only the caller's org's entries.
-  - Filtering by `orguser_email`, `resource_type`, `action`, `status`, date range each work in isolation and combined.
+  - Filtering by `orguser_email`, `resource_type`, `action`, date range each work in isolation and combined.
   - Permission denial for a role without `can_view_audit_logs`.
   - Pagination behaves correctly at the `limit` boundary (200).
 - **Integration / spot-check tests** — for a representative sample across each in-scope area (one from auth, one from dashboards, one from dbt, one from pipelines), assert that calling the real endpoint produces exactly one new `AuditLog` row with the expected `resource_type`/`action`.
