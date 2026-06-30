@@ -21,7 +21,7 @@ Audit Logging doesn't fit the usual "Entity A changed, who consumes A" shape. It
 | Chart | 0 | CRUD | in scope | `api/charts_api.py` |
 | Metric | 0 | CRUD | in scope | `api/metric_api.py` |
 | KPI | 0 | CRUD | in scope | `api/kpi_api.py` |
-| Dashboard | 0 | CRUD, publish, share, lock, set-as-default | in scope | `api/dashboard_native_api.py` |
+| Dashboard | 0 | CRUD, publish, share, set-as-default | in scope | `api/dashboard_native_api.py` |
 | ReportSnapshot | 0 | CRUD, share | in scope | `api/report_api.py` |
 | Alert | 0 | Alert create/edit/delete are user-initiated | **deferred** | Alerts entity was still being scoped/shipped at the time of writing this plan. Add audit hooks as part of (or immediately after) the Alerts rollout, not retrofitted blind here. |
 | Notification | 0 | System-generated, not user-initiated | **out of scope** | A Notification is itself a delivery mechanism, not a user action — nothing to audit. |
@@ -34,27 +34,30 @@ All `in scope` rows are drawn from the events list in `spec.md` §5.1. The two `
 
 ## 3. High-Level Design (HLD)
 
-Audit logging is implemented as a synchronous service-layer call, invoked from inside each existing API view function immediately after the underlying action succeeds. There is no new service, no message queue, and no async worker.
+Audit logging is implemented as an **asynchronous Celery task**, enqueued from inside each existing API view function immediately after the underlying action succeeds. Dalgo already runs Celery for other background work (e.g. dbt runs, notification delivery — `run_dbt_via_celery`), so this reuses existing infrastructure rather than introducing a new one.
 
-**The audit write can never break the main request.** It only runs after the real action has already succeeded, and `create_audit_log()` is designed to swallow its own failures internally (logged, never raised — see §4.3) rather than propagate them. So if the database write for the audit entry fails for any reason, the user's original action still returns success as normal; only the audit trail for that one action is missing, not the action itself.
+**The audit write can never break or measurably slow the main request.** The call site only *enqueues* a task (`create_audit_log(...)`, a thin wrapper around `.delay()`) — it does not wait for the row to be written. Enqueueing is fast, and if it fails for any reason (e.g. the Celery broker is briefly unreachable), that failure is caught and logged via `CustomLogger`, never raised — see §4.2. So the user's original action always returns success as normal, with no added latency from the audit write itself.
 
-**If the main action itself fails, no audit log entry is created.** The audit call sits after the real action succeeds in the code, so it never runs on a failure path. Every event is logged on success only — including login, with no exception.
+**If the main action itself fails, no audit log entry is created.** The enqueue call sits after the real action succeeds in the code, so it never runs on a failure path. Every event is logged on success only — including login, with no exception.
+
+**Accepted trade-off: eventual consistency, not strict consistency.** Moving the write off the request path means an audit entry may not be queryable the instant the action completes — there's a small window while the task sits in the queue and gets processed. It also means a (rare) audit entry can be lost if the broker drops the task or the worker crashes mid-task before it's durably written, with no automatic backfill. This was a deliberate call: the team decided the latency and decoupling benefit of async is worth a small amount of consistency risk, rather than guaranteeing zero gaps at the cost of adding latency to every audited request.
 
 ```
 User action --> Django Ninja API view --> existing service call (unchanged)
-                                       --> create_audit_log() [NEW]
-                                       --> response returned
+                                       --> create_audit_log() [NEW] --> enqueues Celery task
+                                       --> response returned                |
+                                                                             v
+                                                          Celery worker --> writes AuditLog row
 ```
 
 Key design decisions:
 
-- **Synchronous, in-request write.** Audit writes happen in the same request/response cycle as the action they record. This guarantees that if the write to `AuditLog` fails, it's surfaced immediately (logged, never raised) rather than silently lost in a background queue.
+- **Asynchronous, via Celery task.** Audit writes happen out-of-band from the request/response cycle. This keeps the audited action's response time unaffected by the audit write, at the cost of eventual (not immediate) consistency and a small, accepted risk of losing an entry if the broker/worker has an outage — see the trade-off note above.
 - **Single table, discriminated by `resource_type`.** One `AuditLog` model rather than per-resource tables, avoiding join complexity across very different resource shapes (a dashboard, a git repo switch, a login attempt).
 - **No new external service integrations.** Airbyte, Prefect, and the warehouse are unaffected — audit logging only observes Dalgo's own API layer, not these external systems directly.
-- **No new API surface for writing.** Audit entries are only ever created by `create_audit_log()` calls inside existing endpoints — there is no public "create an audit log" endpoint.
-- **One new read endpoint.** `GET /api/audit-logs/` for querying, gated by a new permission (`can_view_audit_logs`) — see §4.2 and open question on role.
+- **No new API surface, write or read.** Audit entries are only ever created by `create_audit_log()` calls inside existing endpoints. No query endpoint either — deferred to v2 (spec.md §3).
 
-**Why not use an off-the-shelf audit library (e.g. `django-auditlog`, `django-simple-history`, `django-easy-audit`)?** These packages work by hooking into Django's `post_save` / `post_delete` model signals — they automatically log when a model instance changes. That fits a subset of our events well (Dashboard, Chart, Metric, KPI, Pipeline CRUD), but a large share of the events list in `spec.md` §5.1 aren't model saves at all: login (no row is saved at all on a login, success or attempted), dbt git pull, canvas lock/unlock, manual sync trigger, dashboard share. A signal-based library has no hook for any of these because nothing gets saved or deleted — they're just actions succeeding. Adopting one of these libraries would only cover roughly a third of our events, and we'd still need the custom `create_audit_log()` service layer for the rest — at that point we'd be maintaining two audit systems writing in two different shapes instead of one. The single custom service layer covers all ~70 events uniformly with one call pattern, which is simpler to maintain despite requiring more upfront wiring.
+**Why not use an off-the-shelf audit library (e.g. `django-auditlog`, `django-simple-history`, `django-easy-audit`)?** These packages work by hooking into Django's `post_save` / `post_delete` model signals — they automatically log when a model instance changes. That fits a subset of our events well (Dashboard, Chart, Metric, KPI, Pipeline CRUD), but a large share of the events list in `spec.md` §5.1 aren't model saves at all: login (no row is saved at all on a login, success or attempted), dbt git pull, manual sync trigger, dashboard share. A signal-based library has no hook for any of these because nothing gets saved or deleted — they're just actions succeeding. Adopting one of these libraries would only cover roughly a third of our events, and we'd still need the custom `create_audit_log()` service layer for the rest — at that point we'd be maintaining two audit systems writing in two different shapes instead of one. The single custom service layer covers all ~70 events uniformly with one call pattern, which is simpler to maintain despite requiring more upfront wiring.
 
 ## 4. Low-Level Design (LLD)
 
@@ -136,36 +139,14 @@ class AuditLog(models.Model):
         ]
 ```
 
-### 4.2 API design
+### 4.2 Backend logic — service layer
 
-New file: `DDP_backend/ddpui/api/audit_log_api.py`, registered on the existing Ninja router setup in `routes.py`.
-
-**`GET /api/audit-logs/`** — list/query audit logs for the caller's org.
-
-Query parameters:
-
-| Param | Type | Notes |
-|---|---|---|
-| `orguser_email` | str, optional | partial match |
-| `resource_type` | str, optional | exact match against `AuditLogResourceType` |
-| `action` | str, optional | exact match against `AuditLogAction` |
-| `resource_id` | str, optional | exact match |
-| `start_date` | date, optional | inclusive |
-| `end_date` | date, optional | inclusive |
-| `page` | int, default 1 | |
-| `limit` | int, default 50, max 200 | |
-
-Response: paginated list of `AuditLogSchema` (id, timestamp, orguser_email, resource_type, resource_id, resource_name, action, changes).
-
-Permission: gated by `@has_permission(["can_view_audit_logs"])` — new permission slug to be seeded in `seed/permissions.json`. Which roles get this permission is decided as seed data (see spec.md §7), not hardcoded in the endpoint — a one-line change either way.
-
-Always scoped to `request.orguser.org` — no cross-org query path in v1. If Dalgo's platform team needs cross-org visibility, that's a distinct superuser code path to design later, not a parameter on this endpoint.
-
-### 4.3 Backend logic — service layer
-
-New file: `DDP_backend/ddpui/core/audit_log_service.py`
+New file: `DDP_backend/ddpui/core/audit_log_service.py` (thin, synchronous-looking wrapper called from API views)
+New file: `DDP_backend/ddpui/celery_tasks/audit_log_tasks.py` (the actual Celery task that writes the row)
 
 ```python
+# core/audit_log_service.py
+
 def create_audit_log(
     *,
     org,
@@ -175,11 +156,16 @@ def create_audit_log(
     action: str,
     resource_name: str = "",
     changes: dict | None = None,
-) -> AuditLog | None:
+) -> None:
     """
-    Creates one immutable audit log entry. Never raises — a failure to write
-    an audit log must never break the primary request. Failures are logged
-    via CustomLogger instead.
+    Enqueues an audit log write as a Celery task. Never raises — if
+    enqueueing itself fails (e.g. broker unreachable), that failure is
+    caught and logged via CustomLogger instead of propagating, so a
+    broker outage can never break the primary request.
+
+    Only JSON-serializable primitives are passed through to the task
+    (org.id / orguser.id, not the model instances themselves) since
+    Celery task arguments must be serializable.
     """
 
 
@@ -189,6 +175,22 @@ def compute_changes(before: dict, after: dict, exclude_fields: list[str] | None 
     {"field": {"old": x, "new": y}}. exclude_fields is mandatory for any
     resource that might carry secrets (passwords, tokens, credentials,
     share tokens) — callers must pass it explicitly for those resources.
+    """
+```
+
+```python
+# celery_tasks/audit_log_tasks.py
+
+@app.task(bind=True, max_retries=3, default_retry_delay=10)
+def write_audit_log_task(
+    self, *, org_id, orguser_id, resource_type, resource_id, action, resource_name, changes
+):
+    """
+    Writes the actual AuditLog row. Retries a small, bounded number of
+    times on transient DB errors (e.g. connection blip). If retries are
+    exhausted, the failure is logged and the task is dropped — per the
+    accepted eventual-consistency trade-off (HLD §3), this is not backed
+    by a dead-letter queue or manual replay in v1.
     """
 ```
 
@@ -216,52 +218,48 @@ def delete_dashboard(request, dashboard_id: int):
 
 This pattern is repeated at every in-scope endpoint listed in §2's Blast Radius table — roughly 60-70 call sites across `user_org_api.py`, `airbyte_api.py`, `pipeline_api.py`, `dbt_api.py`, `transform_api.py`, `dashboard_native_api.py`, `charts_api.py`, `metric_api.py`, `kpi_api.py`, `report_api.py`.
 
-### 4.4 Frontend components
+### 4.3 Frontend components
 
 None in v1 — no `webapp_v2` changes. This is a backend-only implementation, per spec.md §1.
 
-### 4.5 Integration points
+### 4.4 Integration points
 
 - Audit calls are made directly from the Ninja view functions, after the existing service call succeeds — no new internal API contract between layers.
-- No outbound calls to Airbyte, Prefect, or the warehouse are added; this feature only touches Dalgo's own request/response cycle.
+- **New dependency: Celery.** Audit log writes go through Dalgo's existing Celery worker pool (`write_audit_log_task`), the same infrastructure already used for dbt runs and notification delivery. No new broker or worker fleet is introduced — this reuses what's there.
+- No outbound calls to Airbyte, Prefect, or the warehouse are added; this feature only touches Dalgo's own request/response cycle plus the existing Celery layer.
 
 ## 5. Security Review
 
-- **Authentication & Authorization:** the new `GET /api/audit-logs/` endpoint is protected by `@has_permission(["can_view_audit_logs"])`, consistent with every other endpoint in the codebase. Role-to-permission mapping is seed data — see spec.md §7 for which roles get this permission.
-- **Input validation:** query parameters on the list endpoint are validated via a Pydantic/Ninja schema (enum-constrained `resource_type`, `action`; `limit` capped at 200) before hitting the ORM.
-- **Data access control:** every query is scoped to `request.orguser.org` server-side — never trusts a client-supplied org filter. No multi-tenant leak path exists because there is no client-controllable "which org" parameter.
-- **Sensitive data:** this is the highest-risk part of the feature. `compute_changes()` requires an explicit `exclude_fields` list for any resource that can carry secrets — passwords, API keys, git access tokens, warehouse credentials, public share tokens, JWTs. This must be enforced via code review on every call site, and covered by a unit test per sensitive resource type (see §6).
-- **Injection risks:** no raw SQL or dynamic query construction — all reads go through the Django ORM with the indexed fields in §4.1.
+- **Authentication & Authorization:** no read API in v1 (spec.md §3), so no `@has_permission` gate to review yet. Writes only happen from inside existing, already-authenticated endpoints.
+- **Sensitive data:** this is the highest-risk part of the feature regardless of v1's scope. `compute_changes()` requires an explicit `exclude_fields` list for any resource that can carry secrets — passwords, API keys, git access tokens, warehouse credentials, public share tokens, JWTs. This must be enforced via code review on every call site, and covered by a unit test per sensitive resource type (see §6).
+- **Injection risks:** no raw SQL or dynamic query construction on the write path — `write_audit_log_task` writes through the Django ORM, using the indexed fields in §4.1.
 - **External service calls:** none added by this feature.
-- **Rate limiting / abuse:** the write path piggybacks on existing authenticated endpoints, so no new abuse surface. The read endpoint is permission-gated; no public/anonymous access.
+- **Rate limiting / abuse:** the write path piggybacks on existing authenticated endpoints, so no new abuse surface. With no read endpoint in v1, there's no public/anonymous read surface to consider either.
 
 ## 6. Testing Strategy
 
 - **Unit tests — service layer** (`core/audit_log_service.py`):
-  - `create_audit_log()` writes the expected row for create/update/delete/login/logout actions.
-  - `create_audit_log()` never raises, even when the DB write fails (mock a DB error, assert no exception propagates, assert it's logged).
+  - `create_audit_log()` enqueues `write_audit_log_task` with the expected arguments for create/update/delete/login/logout actions.
+  - `create_audit_log()` never raises, even when enqueueing itself fails (mock a broker/connection error on `.delay()`, assert no exception propagates, assert it's logged).
   - `compute_changes()` correctly diffs two dicts and excludes fields in the exclude list.
+- **Unit tests — Celery task** (`celery_tasks/audit_log_tasks.py`):
+  - `write_audit_log_task` writes the expected `AuditLog` row given valid arguments.
+  - Retries the expected number of times on a transient DB error, then gives up and logs the failure (does not raise out of the task).
 - **Unit tests — secrets exclusion** (one per sensitive resource type): warehouse credentials, git access token, org logo upload, public share token — assert none of these ever appear in a `changes` JSON blob after going through the real call site.
-- **API tests** (`tests/api_tests/test_audit_log_api.py`):
-  - `GET /api/audit-logs/` returns only the caller's org's entries.
-  - Filtering by `orguser_email`, `resource_type`, `action`, date range each work in isolation and combined.
-  - Permission denial for a role without `can_view_audit_logs`.
-  - Pagination behaves correctly at the `limit` boundary (200).
-- **Integration / spot-check tests** — for a representative sample across each in-scope area (one from auth, one from dashboards, one from dbt, one from pipelines), assert that calling the real endpoint produces exactly one new `AuditLog` row with the expected `resource_type`/`action`.
-- **Edge cases:** delete of an already-deleted resource (should not log twice), partial failures (action succeeds but audit write fails — assert primary action still returns success to the caller).
+- **Integration / spot-check tests** — for a representative sample across each in-scope area (one from auth, one from dashboards, one from dbt, one from pipelines), assert that calling the real action endpoint (e.g. `DELETE /api/dashboards/{id}`) produces exactly one new `AuditLog` row with the expected `resource_type`/`action`. Run with `CELERY_TASK_ALWAYS_EAGER=True` so the task executes synchronously and deterministically within the test, rather than asserting against a real queue.
+- **Edge cases:** delete of an already-deleted resource (should not log twice), enqueue failure (broker unreachable — assert primary action still returns success to the caller, per the accepted trade-off in HLD §3), retry exhaustion on the task (assert it's logged and dropped, not retried forever).
 
 ## 7. Milestones
 
 #### Milestone 1: Core infrastructure
 
-- **Deliverable:** `AuditLog` model + migration, `audit_log_service.py` (`create_audit_log`, `compute_changes`), `can_view_audit_logs` permission seeded.
+- **Deliverable:** `AuditLog` model + migration, `audit_log_service.py` (`create_audit_log`, `compute_changes`), `audit_log_tasks.py` (`write_audit_log_task`).
 - **Services:** DDP_backend
 - **Key tasks:**
   - [ ] Create `models/audit_log.py` and migration
-  - [ ] Implement `core/audit_log_service.py`
-  - [ ] Seed `can_view_audit_logs` permission
-  - [ ] Unit tests for service layer + secrets exclusion
-- **Acceptance criteria:** `create_audit_log()` can be called standalone and produces a correct row; no call site wired up yet.
+  - [ ] Implement `core/audit_log_service.py` (enqueues) and `celery_tasks/audit_log_tasks.py` (writes, with bounded retries)
+  - [ ] Unit tests for service layer + Celery task + secrets exclusion
+- **Acceptance criteria:** `create_audit_log()` can be called standalone and enqueues a task that produces a correct row (with `CELERY_TASK_ALWAYS_EAGER=True` in tests); no call site wired up yet.
 
 #### Milestone 2: Auth & user management events
 
@@ -289,24 +287,24 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
 - **Deliverable:** Dashboards, Charts, Metrics, KPIs, Reports & Comments are logged.
 - **Services:** DDP_backend
 - **Key tasks:**
-  - [ ] Wire `dashboard_native_api.py`: CRUD, publish, share (unshare logs as a regular update), lock/unlock, set-as-default, filters
+  - [ ] Wire `dashboard_native_api.py`: CRUD, publish, share (unshare logs as a regular update), set-as-default, filters
   - [ ] Wire `charts_api.py`: CRUD
   - [ ] Wire `metric_api.py` + `kpi_api.py`: CRUD
   - [ ] Wire `report_api.py`: CRUD, share (unshare logs as a regular update), comments
 - **Acceptance criteria:** same pattern as above; share-token values verified excluded from `changes`.
 
-#### Milestone 5: Query API & retention
+#### Milestone 5: Retention
 
-- **Deliverable:** `GET /api/audit-logs/` ships; retention cleanup ships once the team confirms the retention policy (§8).
+- **Deliverable:** retention cleanup ships once the team confirms the retention policy (§8).
 - **Services:** DDP_backend
 - **Key tasks:**
-  - [ ] Implement and test the list/filter/paginate endpoint
   - [ ] Implement `purge_old_audit_logs` management command (retention period as a parameter, default TBD per open question). Building it as a manually-invoked command keeps both options open — it can be left as a manual tool or wired to a scheduled job once the team decides whether removal should be automatic.
-  - [ ] Full API test suite for the endpoint
-- **Acceptance criteria:** an org admin (or whichever role is confirmed) can query and filter their org's audit history; old logs are purged per whatever retention policy the team confirms.
+- **Acceptance criteria:** old logs are purged per whatever retention policy the team confirms; data in the meantime is readable via direct database query by Dalgo's team.
 
 ## 8. Open Questions & Risks
 
-- **Role gating for the query endpoint** — blocks finalizing the permission seed data for Milestone 5. Carried over from spec.md §7.
 - **Retention policy** — whether removal should be automatic or manual, and if automatic, what period. Blocks finalizing whether `purge_old_audit_logs` stays a manual tool or gets wired to a scheduled job, and its default period. Carried over from spec.md §7.
 - **Migration risk** — none. This is a net-new table; no existing data is migrated.
+- **Async consistency risk (accepted)** — audit writes go through Celery (HLD §3), so entries are eventually consistent, not immediately queryable, and a small number can be lost if the broker/worker has an outage during retry exhaustion. The team explicitly chose this trade-off over the latency cost of a synchronous write. No dead-letter queue or manual replay path exists in v1 — worth revisiting if lost entries turn out to matter more in practice than expected.
+- **Async ordering risk (accepted)** — if two actions happen on the same resource moments apart (e.g. create then immediately delete), the two resulting audit tasks are enqueued in the correct order, but Celery does not strictly guarantee they're *processed* in that same order — especially if one hits a retry. In rare cases, the `timestamp` on written rows could be slightly out of step with the true order of events. Not expected to be common or load-bearing for v1's use cases (incident investigation, "who did X"), but worth knowing if exact ordering ever becomes a hard requirement.
+- **Org deletion cascades the audit trail (accepted for now)** — `org` is `on_delete=models.CASCADE` (§4.1). If an org is deleted, every audit log row for that org is deleted too, including any entry that would have recorded the deletion itself — there's no way to later show "this org was deleted, by whom, and when." In practice this is low-risk today since org deletion is a manual, engineer-run process (`manage.py deleteorg`, with a dry-run option), not a customer-facing or automated action. Kept as `CASCADE` for v1; revisit (e.g. `SET_NULL` + a denormalized `org_name`, mirroring the `orguser`/`orguser_email` pattern) if a need to retain audit history past org deletion comes up later.
