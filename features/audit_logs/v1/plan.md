@@ -15,7 +15,7 @@ Audit Logging doesn't fit the usual "Entity A changed, who consumes A" shape. It
 |---|---|---|---|---|
 | Source (Airbyte) | 0 (direct logging target) | CRUD + manual sync/reset are user-initiated actions | in scope | `api/airbyte_api.py` |
 | Warehouse | 0 | Connect/update/remove are user-initiated | in scope | `api/user_org_api.py` |
-| Transform (dbt) | 0 | ~20 distinct user actions across workspace, git, canvas, Elementary | in scope | `api/dbt_api.py`, `api/transform_api.py` — full list in spec.md Appendix A |
+| Transform (dbt) | 0 | ~16 distinct user actions across workspace, git, canvas | in scope | `api/dbt_api.py`, `api/transform_api.py` — full list in spec.md Appendix A |
 | Pipeline | 0 | CRUD, schedule toggle, manual trigger are user-initiated | in scope | `api/pipeline_api.py` |
 | Data Quality check | 0 | Created/updated/deleted as pipeline steps | **deferred** | Confidence in domain map is `tribal-knowledge-needed` (blocking vs non-blocking unclear); this surface is still stabilizing. Add hooks once it's verified. |
 | Chart | 0 | CRUD | in scope | `api/charts_api.py` |
@@ -279,7 +279,7 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
   - [ ] Wire warehouse CRUD
   - [ ] Wire `airbyte_api.py`: source/connection CRUD, manual sync, reset, schema change
   - [ ] Wire `pipeline_api.py`: pipeline CRUD, schedule toggle, manual trigger
-  - [ ] Wire `dbt_api.py` + `transform_api.py`: all ~20 events from Appendix A
+  - [ ] Wire `dbt_api.py` + `transform_api.py`: all ~16 events from Appendix A
 - **Acceptance criteria:** same as Milestone 2, applied to this set; dbt secrets (git tokens) verified excluded from `changes`.
 
 #### Milestone 4: Analytics & reporting events

@@ -44,7 +44,7 @@ Every significant create / update / delete / lifecycle action across these areas
 - **Warehouse** — connected, updated, removed
 - **Data Sources & Connections** — source created / updated / deleted, connection created / updated / deleted, manual sync triggered, connection reset, schema change detected and applied
 - **Pipelines** — created / updated / deleted, schedule turned on or off, manually triggered
-- **Transformations (dbt)** — dbt workspace setup (project created/deleted, workspace deleted); git repo operations (repo switched, changes published, changes pulled); visual model builder/canvas operations (node created/updated/deleted, chain finalized into a model, remote project synced); sources & schema (sources synced, target schema updated); running dbt (run triggered, docs generated); data quality (Elementary report fetched/refreshed, tracking tables created, profile created, report deployment created) — full enumerated list in Appendix A
+- **Transformations (dbt)** — dbt workspace setup (project created/deleted, workspace deleted); git repo operations (repo switched, changes published, changes pulled); visual model builder/canvas operations (node created/updated/deleted, chain finalized into a model, remote project synced); sources & schema (sources synced, target schema updated); running dbt (run triggered, docs generated) — full enumerated list in Appendix A
 - **Dashboards** — created / updated / deleted, published / unpublished, shared publicly (share revoked is logged as a regular update), set as org default, filter created / updated / deleted
 - **Charts** — created / updated / deleted
 - **Metrics & KPIs** — created / updated / deleted
@@ -115,10 +115,3 @@ Passwords, API keys, git access tokens, warehouse credentials, and public share 
 
 - A dbt run is triggered
 - dbt docs are generated
-
-**Data Quality (Elementary)**
-
-- An Elementary report is fetched or refreshed
-- Elementary tracking tables are created
-- An Elementary profile is created
-- An Elementary report deployment is created
