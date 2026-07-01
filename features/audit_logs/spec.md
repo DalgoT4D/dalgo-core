@@ -40,7 +40,7 @@ Every significant create / update / delete / lifecycle action across these areas
 
 - **Login & Authentication** — login, logout, password change, password reset request, email verification
 - **User & Organization Management** — user added to org, user removed from org, user role changed, invitation sent / resent / accepted / deleted, organization created
-- **Settings & Branding** — org logo uploaded, updated, deleted
+- **Settings & Branding** — org logo uploaded, updated, deleted; Discord notification toggle enabled or disabled
 - **Warehouse** — connected, updated, removed
 - **Data Sources & Connections** — source created / updated / deleted, connection created / updated / deleted, manual sync triggered, connection reset, schema change detected and applied
 - **Pipelines** — created / updated / deleted, schedule turned on or off, manually triggered
@@ -52,7 +52,7 @@ Every significant create / update / delete / lifecycle action across these areas
 
 ### 5.2 What's captured per event
 
-Each audit entry records: who performed it (actor email), which organization, what kind of resource and which specific one, what action was taken, what changed (old value → new value, where applicable), and when it happened. Only successful actions are logged, so there is no separate success/failure status on the entry itself.
+Each audit entry records: who performed it (actor email), which organization, what kind of resource and which specific one, what action was taken, what changed (old value → new value, where applicable), and when it happened. Only successful actions are logged, so there is no separate success/failure status on the entry itself. Only write actions are captured (create, update, delete, execute, share, login, logout) — read/view operations such as viewing a dashboard or listing resources are never logged.
 
 ### 5.3 Data isolation
 
@@ -60,7 +60,7 @@ Every audit entry belongs to exactly one organization. No query API exists yet (
 
 ### 5.4 Immutability
 
-Audit log entries are never edited or deleted through normal use — there is no edit or delete API for them. Whether and how old entries are eventually removed is covered by the retention policy open question in §7.
+Audit log entries are never edited or deleted through normal use — there is no edit or delete API for them. Entries older than 1 year are purged automatically via the `purge_old_audit_logs` management command.
 
 ### 5.5 Secrets are never logged
 
@@ -71,15 +71,11 @@ Passwords, API keys, git access tokens, warehouse credentials, and public share 
 - **None blocking.** This is foundational infrastructure rather than a feature that depends on another. It does, however, touch nearly every existing API endpoint to add a logging call — see `v1/plan.md`'s Blast Radius analysis for the full list.
 - **Enables:** future versions can layer in a query API, a browsing UI on top of it, retention configuration per org, and export to external tools.
 
-## 7. Open questions — for team / engineering review
-
-- **What should the retention policy be?** Whether removal should be automatic (a scheduled purge) or manual, and if automatic, what period — options discussed: 6 months, 1 year, indefinitely. Longer retention helps long-term investigations but increases storage cost.
-
-## 8. Success indicators
+## 7. Success indicators
 
 - **Coverage** — percentage of the events listed in §5.1 that have a working audit log call wired in.
 - **Time-to-answer** — Dalgo's team can answer "who did X" questions via a direct database query, without needing to add new logging or reconstruct events from other sources.
-- **Zero secret leakage** — no password, token, or credential ever appears in an audit log's `changes` field, verified through code review and tests.
+- **Zero secret leakage** — no password, token, or credential ever appears in an audit log's `field_changes` field, verified through code review and tests.
 
 ---
 
