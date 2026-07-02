@@ -60,7 +60,7 @@ Every audit entry belongs to exactly one organization. No query API exists yet (
 
 ### 5.4 Immutability
 
-Audit log entries are never edited or deleted through normal use — there is no edit or delete API for them. Entries older than 1 year are purged automatically via the `purge_old_audit_logs` management command.
+Audit log entries are never edited or deleted through normal use — there is no edit or delete API for them. Old entries are purged automatically via the `purge_old_audit_logs` management command on a monthly schedule. The retention period is configurable via the `AUDIT_LOG_RETENTION_DAYS` environment variable (default: 365 days) so it can be changed without a code deployment.
 
 ### 5.5 Secrets are never logged
 

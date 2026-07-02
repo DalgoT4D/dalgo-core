@@ -335,12 +335,12 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
 
 #### Milestone 5: Retention
 
-- **Deliverable:** `purge_old_audit_logs` management command + a Celery Beat periodic task that runs it automatically on a monthly schedule. Entries older than 1 year are deleted with no manual intervention needed.
+- **Deliverable:** `purge_old_audit_logs` management command + a Celery Beat periodic task that runs it automatically on a monthly schedule. Retention period is configurable via `AUDIT_LOG_RETENTION_DAYS` env variable so it can be changed without a code deployment.
 - **Services:** DDP_backend
 - **Key tasks:**
-  - [ ] Implement `purge_old_audit_logs` management command with `--days` parameter defaulting to 365.
+  - [ ] Implement `purge_old_audit_logs` management command. Reads `AUDIT_LOG_RETENTION_DAYS` from the environment (default: 365) — so changing from 1 year to 6 months is a single env var update with no code change required.
   - [ ] Register a Celery Beat periodic task (monthly cadence) to call this command automatically — following the same pattern used by `dispatch_due_alerts` in `ddpui/celeryworkers/alert_tasks.py`.
-- **Acceptance criteria:** the periodic task runs automatically every month and removes all `AuditLog` rows older than 365 days; engineers can also run the command manually on demand if needed.
+- **Acceptance criteria:** the periodic task runs automatically every month and removes all `AuditLog` rows older than `AUDIT_LOG_RETENTION_DAYS` days; engineers can also run the command manually on demand if needed.
 
 ## 8. Open Questions & Risks
 
