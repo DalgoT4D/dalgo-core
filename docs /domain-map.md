@@ -210,8 +210,6 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 - **Change impact:** If picker component is shared, auto-inherits Metric library changes. If not, changes must be duplicated.
 - **Confidence:** `tribal-knowledge-needed` — **this is a blocker question for the Metrics v1 plan.** Ask Pratiksha whether Explore's chart builder reuses the dashboard chart builder's MetricsSelector.
 
----
-
 ## Output / Distribution Layer
 
 ### ReportSnapshot *(the entity called "Report" in product conversations)*
