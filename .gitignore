@@ -20,3 +20,5 @@ __pycache__/
 # obsidian
 .obsidian/
 .claude/worktrees
+.serena
+.superpowers
