@@ -2,7 +2,7 @@
 
 **Status:** Draft v1 (for engineering review)
 **Spec:** [spec.md](./spec.md) · **Research:** [research.md](./research.md) · **Roadmap:** [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md)
-**Depends on:** Layer 1 (`../content/plan.md`) — specifically `ResourceShare` (with CharField `resource_id`), `UserGroup`, the resolver + `RESOURCE_TYPES` registry, and the `run_chart_query` seam. **Do not start M2+ of this plan before Layer 1's M1–M3 are merged.**
+**Depends on:** Layer 1 (`../resourcesharing/plan.md`) — specifically `ResourceShare` (with CharField `resource_id`), `UserGroup`, the resolver + `RESOURCE_TYPES` registry, and the `run_chart_query` seam. **Do not start M2+ of this plan before Layer 1's M1–M3 are merged.**
 **Date:** 2026-07-02
 
 **Acronyms:** FK (foreign key) · dbt (transform tool) · RLS (Layer 3) · PII (personal data).

@@ -1,7 +1,7 @@
 # Plan — Row/Column RLS (Layer 3) — scoping plan
 
 **Status:** Scoping draft — deliberately NOT an implementation plan. Layer 3's detailed LLD depends on decisions Layer 2 hasn't shipped yet (dataset grain, discovery, the `run_chart_query` seam in production). This document scopes the approach, names the one big architectural decision, and defines the trigger for full planning.
-**Depends on:** Layer 2 (`../dataset-access/`) shipped; Layer 1 (`../content/`) groups + principal model.
+**Depends on:** Layer 2 (`../dataset-access/`) shipped; Layer 1 (`../resourcesharing/`) groups + principal model.
 **Roadmap:** [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md) · **Stub:** [README.md](./README.md)
 **Date:** 2026-07-02
 

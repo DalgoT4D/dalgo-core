@@ -33,7 +33,7 @@ That control-plane vs data-plane split is the most important line in this doc: i
 | Folder | Layer | Status |
 |---|---|---|
 | `v2/` | **Foundation** — role system (Spec A) | ✅ shipped (DDP_backend#1414, webapp_v2#331) |
-| `content/` | **Layer 1** — content resource sharing | 📋 planned (`content/plan.md`) |
+| `resourcesharing/` | **Layer 1** — content resource sharing | 📋 planned (`resourcesharing/plan.md`) |
 | `dataset-access/` | **Layer 2** — dataset access + self-service connections | 🔲 to plan next |
 | `rls-access/` | **Layer 3** — row/column RLS | 🔲 to plan later |
 | `v1/` | source/archive (original specs, holes analysis, PM vision) | 🗄️ reference |
@@ -61,7 +61,7 @@ Layer 1 isn't just "share a dashboard." It builds a general access core that the
 
 ## The five "get-this-right-now" implications for the Layer 1 build
 
-These are guardrails for building and reviewing `content/plan.md`, so the later layers stitch in cleanly.
+These are guardrails for building and reviewing `resourcesharing/plan.md`, so the later layers stitch in cleanly.
 
 > **1. Keep the resolver resource-type-agnostic.** Branch on *data* (the floor field + share rows), never on hardcoded `if resource_type == "dashboard"`. Then adding `dataset`/`connection` is an enum value, not a rewrite.
 

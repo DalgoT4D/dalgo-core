@@ -2,7 +2,7 @@
 
 **For:** `features/access-control/dataset-access/plan.md`
 **Date:** 2026-07-02 · **Branch read:** `feature/rbac` (DDP_backend + webapp_v2)
-**Scope:** net-new findings only. Layer 1 spine (ResourceShare, resolver, registry) is in `../content/research.md` + `../content/plan.md`.
+**Scope:** net-new findings only. Layer 1 spine (ResourceShare, resolver, registry) is in `../resourcesharing/research.md` + `../resourcesharing/plan.md`.
 
 Acronyms: FK (foreign key) · dbt (the transform tool) · RLS (row/column security — Layer 3).
 

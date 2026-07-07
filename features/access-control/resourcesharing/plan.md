@@ -1,20 +1,79 @@
 # Plan — Resource Sharing (Access Control, Layer 1: Content) — v1
 
-**Status:** Draft v1 (2026-07-06) — re-planned from the **`feature/rbac` branch baseline**. Carries forward all product decisions from the 2026-07-02 review (recorded in [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md)); supersedes the earlier deleted draft.
-**Spec:** [resource-sharing-write-spec-2026-06-17.md](./resource-sharing-write-spec-2026-06-17.md) · full vision: [Spec B](./access-control-spec-B-resource-sharing-2026-06-02.md) — **both still need the Q0 amendment** (charts are not independently shareable; see §8).
-**Research:** [research.md](./research.md) (verified on `feature/rbac`, 2026-07-06) · **Roadmap:** [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md)
-**Builds on:** Spec A — on the **`feature/rbac` branch**, PRs still open (DDP_backend [#1414](https://github.com/DalgoT4D/DDP_backend/pull/1414), webapp_v2 [#331](https://github.com/DalgoT4D/webapp_v2/pull/331)). This work stacks on that branch, not on main.
-**Consumed by:** Layer 2 ([../dataset-access/plan.md](../dataset-access/plan.md)) — it waits on this plan's M1–M3 and inherits `ResourceShare`, `UserGroup`, the resolver + shareable-types table, and the `run_chart_query` seam.
+**Status:** Draft v1 (2026-07-06, restructured 2026-07-07) — re-planned from the **`feature/rbac` branch baseline**. Carries forward all product decisions from the 2026-07-02 review (recorded in [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md)); supersedes the earlier deleted draft.
 
-**Acronyms:** FK (foreign key — a DB column pointing at another table's row) · DTO (the JSON an API returns) · RLS (row-level security — Layer 3) · PII (personal data) · TTL (cache lifetime) · IA (information architecture).
+| Link | What it is |
+|---|---|
+| [resource-sharing-write-spec-2026-06-17.md](./resource-sharing-write-spec-2026-06-17.md) | The spec this plan implements |
+| [Spec B](./access-control-spec-B-resource-sharing-2026-06-02.md) | The full product vision (superset of this plan) |
+| [research.md](./research.md) | Codebase facts, verified on `feature/rbac` (2026-07-06) — every `file:line` in this plan comes from there |
+| [../ACCESS-MODEL-ROADMAP.md](../ACCESS-MODEL-ROADMAP.md) | The 3-layer roadmap; records the 2026-07-02 decisions |
+| [../dataset-access/plan.md](../dataset-access/plan.md) | Layer 2 — waits on this plan's M1–M3 and inherits `ResourceShare`, `UserGroup`, the resolver + shareable-types table, and the `run_chart_query` seam |
+
+**Builds on:** Spec A (the 3-role system) — lives on the **`feature/rbac` branch**, PRs still open (DDP_backend [#1414](https://github.com/DalgoT4D/DDP_backend/pull/1414), webapp_v2 [#331](https://github.com/DalgoT4D/webapp_v2/pull/331)). This work stacks on that branch, not on main.
+
+⚠️ Both spec documents **still need the Q0 amendment** (charts are not independently shareable — see §8).
+
+---
+
+## 0. How to read this plan
+
+**If you're new to the feature:** read the Glossary below, then §1 (what we're building), §3.1 (the one rule everything follows), and §4.0 (which file does what). That's enough to pick up any task.
+
+**If you're reviewing the design:** §3.4 (the five SOLID rules — they're the PR review criteria), §5 (security), §8 (open questions).
+
+**If you're implementing a milestone:** §7 names your milestone; §4 has the code-level detail; every `file:line` reference is verified in [research.md](./research.md).
+
+### Glossary — the ten terms this plan uses
+
+| Term | Plain meaning | Example |
+|---|---|---|
+| **Shareable resource** | A thing that can appear in the share modal: Dashboard, Report, Alert (fully), Metric/KPI (General access only). **Not Chart.** | Anjali opens "Share" on the "Field Performance" dashboard. |
+| **General access** | The resource's audience dial: *who in the org* (audience) × *what they may do* (level). Google Drive's "General access" section, same idea. | "Analysts and up can **view**" — Priya (Analyst) sees it; Sarah (Member) doesn't. |
+| **Audience** | The "who" half of General access: `private` \| `admins` \| `analysts_plus` \| `all_users`. | `all_users` = every member of the org. |
+| **Level** | The "what" half: `view` or `edit`. | View = look; Edit = change, re-share. |
+| **Grant** | One row saying "this person / group / tier gets View-or-Edit on this one resource". Stored in the `ResourceShare` table. | "The Funders group → View on Field Performance." |
+| **Principal** | Whoever a grant points at: a user, a group, or an audience tier. (Kept open — Layer 3 adds "attribute" principals like `region = North`.) | The Funders group is the principal in the grant above. |
+| **Owner** | The one person with full control (edit, delete, transfer). A new column, separate from `created_by` (who made it — a historical fact that never changes). | Priya created it, then transferred it — Sarah is now `owner`; `created_by` still says Priya. |
+| **Resolver** | The one read-only function that answers "can this viewer view/edit this resource?" Every list, page, tile, and write-guard asks it. | See the decision ladder in §4.4. |
+| **rtype** | The resource-type string in URLs and the grants table: `dashboard`, `report`, `alert`, `metric`, `kpi`. | `PUT /api/access/dashboard/42/general` |
+| **Kill switch** | One org-wide setting (`allow_public_sharing`) that disables public links everywhere — including links that already exist. | Admin Raj flips it off → every public dashboard link stops rendering, immediately. |
+
+**Acronyms:** FK (foreign key — a DB column pointing at another table's row) · DTO (the JSON shape an API returns) · RLS (row-level security — Layer 3) · PII (personal data) · TTL (cache lifetime).
+
+### The whole feature in one picture
+
+```
+                       "Can Sarah see the Field Performance dashboard?"
+                                          │
+                                          ▼
+                              access_resolver (one function)
+                                          │
+        ┌──────────────────┬──────────────┼───────────────────┐
+        ▼                  ▼              ▼                   ▼
+   Is she Admin?      Is she the      General access     Any grant rows?
+   (always Edit)      owner?          admit her tier?    (her, her groups,
+                      (always Edit)   (dial on the       her tier)
+                                      resource)
+        └──────────────────┴──────────────┴───────────────────┘
+                                          │
+                              take the BEST answer found;
+                              if she's a Member, cap at View
+```
 
 ---
 
 ## 1. Overview
 
-**What we're building:** who can View or Edit each content resource. **Shareable resources** (Dashboard, Report, Alert; Metric/KPI at general-access-only depth) get **General access** (audience × level) plus **direct grants** to people and groups. **Charts are not independently shareable** — a chart is visible wherever its dashboards are visible (2026-07-02 decision). A share modal does sharing + inviting in one place; groups, public links (Dashboards + Reports), ownership transfer, request-access, bulk sharing, and comments on Reports complete the surface.
+**What we're building:** who can View or Edit each content resource.
 
-**Decisions carried forward (2026-06-30 / 2026-07-02, all recorded in the roadmap):**
+> **The rule:** shareable resources get **General access** (audience × level) plus **direct grants** to people and groups; charts are **not** independently shareable — a chart is visible wherever its dashboards are visible (2026-07-02 decision).
+> **Example:** Anjali sets "Field Performance" to *Analysts+ / View* and additionally grants the Funders group View. Every chart on that dashboard renders for those viewers automatically — no per-chart settings exist.
+> **Why it matters:** one sharing unit (the dashboard) means no chart-vs-dashboard permission mismatches, which deleted an entire class of warning modals from the spec.
+
+One share modal does sharing + inviting in one place. Groups, public links (Dashboards + Reports, under one Admin global), ownership transfer, request-access, bulk sharing, and comments on Reports complete the surface.
+
+### 1.1 Decisions carried forward (2026-06-30 / 2026-07-02, recorded in the roadmap)
 
 | Decision | Choice |
 |---|---|
@@ -27,7 +86,7 @@
 | Metric/KPI | General-access only (no share modal; access-requests allowed) |
 | Notifications | Reuse the existing `Notification` model |
 
-**Where we are (the `feature/rbac` baseline — research §1, §4):**
+### 1.2 Where we are (the `feature/rbac` baseline — research §1, §4)
 
 | Already on the branch | Still missing (this plan builds it) |
 |---|---|
@@ -39,6 +98,8 @@
 | `ShareModal` (dashboards, public toggle only); `ReportShareMenu` (reports, separate) | People/groups/General-access rows; one modal for both resource types |
 | Bulk multi-select on the **Charts** list only | Bulk bars on Dashboards/Reports/Alerts (copy the Charts pattern) |
 | Invitation model (no expiry); invite cap `inviter.level ≥ invitee.level` | `expires_at` + 30-day expiry; explicit "non-Admin invites Member only" (the 2 ≥ 2 loophole is live) |
+
+### 1.3 Services and branches
 
 **Services affected:** DDP_backend (heavily — models, resolver, access/group/request/transfer/bulk endpoints, seed, invite expiry) · webapp_v2 (share modal, Groups page, badges + "Shared with you", request-access, transfer modal, comments gating) · prefect-proxy (untouched — no user model).
 
@@ -70,9 +131,9 @@ New entities: `ResourceShare`, `UserGroup`, `UserGroupMember`, `AccessRequest`. 
 
 ### 3.1 The mental model
 
-**The rule:** Access to a shareable resource = **general access ∪ direct grants ∪ owner/admin override**, at the most permissive level any path gives — and a Member never exceeds View.
-**Example:** "Field Performance" has General access = Analysts+ / View. Priya (Analyst) can view it. The Funders group holds a View grant, so funder Sarah (Member) sees it too. Anjali owns it (Edit + delete + transfer). Admin Raj can do everything, everywhere.
-**Why it matters:** one resolver answers every access question — lists, detail pages, dashboard tiles, write guards — so there is exactly one place to get right.
+> **The rule:** access to a shareable resource = **general access ∪ direct grants ∪ owner/admin override**, at the most permissive level any path gives — and a Member never exceeds View.
+> **Example:** "Field Performance" has General access = Analysts+ / View. Priya (Analyst) can view it. The Funders group holds a View grant, so funder Sarah (Member) sees it too. Anjali owns it (Edit + delete + transfer). Admin Raj can do everything, everywhere.
+> **Why it matters:** one resolver answers every access question — lists, detail pages, dashboard tiles, write guards — so there is exactly one place to get right.
 
 **Charts simply ride along.** Share a dashboard and every chart on it is visible to that audience, automatically, always — no warnings, no mismatch possible. To keep a chart from an audience, don't put it on their dashboard. Data-level protection (PII columns, restricted tables) is Layer 2's dataset grants.
 
@@ -110,17 +171,17 @@ Public tiles → /api/v1/public/... token-gated (unchanged, plus kill switch)
 
 ### 3.4 Design principles — where SOLID bites in this feature
 
-SOLID (Single responsibility, Open/closed, Liskov substitution, Interface segregation, Dependency inversion) is not decoration here — Layers 2 and 3 only stitch in cleanly if these five rules hold. Each row is a review criterion for every PR in §7.
+SOLID (Single responsibility, Open/closed, Liskov substitution, Interface segregation, Dependency inversion) is not decoration here — Layers 2 and 3 only stitch in cleanly if these five rules hold. **Each row is a review criterion for every PR in §7.**
 
 | Principle | The rule in this design | Concrete example |
 |---|---|---|
 | **S** — one job per module | The resolver only *answers* access questions — pure function, no writes, no notifications, no HTTP. Every mutation lives in `sharing_actions.py` (§4.0); API functions stay thin (validate → call the action → serialize). | `effective_permission()` never sends the "you got access" notification — the approve-request action does, by calling `create_notification()` after inserting the grant. |
 | **O** — extend by data, not edits | New shareable types are **rows in `shareable_types.py`**, never resolver edits. The resolver branches on data (`general_*` fields + share rows + capability flags), never on `if resource_type == "dashboard"`. Same for principals: one `principal_match_q()` predicate; a new principal kind extends that one function. | Layer 2 adds `dataset` by registering `("dataset", Dataset, caps={general, grants})` — zero lines change in `access_resolver.py`. Layer 3's `attribute` principal ("region = North") lands only in `principal_match_q()`. |
-| **L** — every registered type behaves identically | Anything in the registry must honestly satisfy the shareable contract (string pk, `general_audience`/`general_level`, owner accessor). No registered type may raise "not supported" from a contract method. Types that *can't* fulfil the contract stay out of the registry — they aren't special-cased inside it. | Chart is **not registered** (rather than registered-but-throws-on-grants); Metric/KPI are registered with `grants=False` as a declared capability, so the share endpoint rejects a grant on a metric by *reading the flag*, not by knowing what a metric is. |
-| **I** — small capability flags, not one fat interface | The registry declares narrow capabilities per type — `general`, `grants`, `public_link`, `requests` — instead of one all-or-nothing "Shareable" interface. Consumers check only the capability they need. | The share modal renders its public-link section off `public_link: true` (dashboards, reports) and simply omits it for alerts — no `entityType === 'alert'` conditionals in the modal. |
-| **D** — depend on the seam, not the concrete | Endpoints depend on the resolver, the resolver depends on the registry contract (it never imports `Dashboard`); chart execution depends on the `run_chart_query` hook; the resolver's group-membership cache is an injected callable so tests run without Redis. | Layer 2's dataset check plugs into `run_chart_query` without touching `charts_api.py`; resolver unit tests pass a stub `get_group_ids=lambda u: {…}`. |
+| **L** — every registered type behaves identically | Anything in the shareable-types table must honestly satisfy the shareable contract (string pk, `general_audience`/`general_level`, owner accessor). No registered type may raise "not supported" from a contract method. Types that *can't* fulfil the contract stay out of the table — they aren't special-cased inside it. | Chart is **not registered** (rather than registered-but-throws-on-grants); Metric/KPI are registered with `grants=False` as a declared capability, so the share endpoint rejects a grant on a metric by *reading the flag*, not by knowing what a metric is. |
+| **I** — small capability flags, not one fat interface | Each type declares narrow capabilities — `general`, `grants`, `public_link`, `requests` — instead of one all-or-nothing "Shareable" interface. Consumers check only the capability they need. | The share modal renders its public-link section off `public_link: true` (dashboards, reports) and simply omits it for alerts — no `entityType === 'alert'` conditionals in the modal. |
+| **D** — depend on the seam, not the concrete | Endpoints depend on the resolver; the resolver depends on the shareable contract (it never imports `Dashboard`); chart execution depends on the `run_chart_query` hook; the resolver's group-membership cache is an injected callable so tests run without Redis. | Layer 2's dataset check plugs into `run_chart_query` without touching `charts_api.py`; resolver unit tests pass a stub `get_group_ids=lambda u: {…}`. |
 
-**Why it matters:** the roadmap's "five get-this-right-now implications" are exactly these principles applied — break one (say, a `resource_type` branch inside the resolver) and Layer 2 becomes a rewrite instead of a registry entry.
+**Why it matters:** the roadmap's "five get-this-right-now implications" are exactly these principles applied — break one (say, a `resource_type` branch inside the resolver) and Layer 2 becomes a rewrite instead of a one-row addition.
 
 ---
 
@@ -137,8 +198,6 @@ ddpui/api/access_api.py  # the front door: auth check → call sharing_actions/r
 ddpui/api/groups_api.py  # front door for group CRUD (group models live in the org app)
 ```
 
-What each file is for:
-
 | File | The one question it answers | What lives in it | What must NEVER live in it |
 |---|---|---|---|
 | `shareable_types.py` | "What things can be shared, and what can you do with each?" | The `RESOURCE_TYPES` table: rtype → model + capability flags (`general`, `grants`, `public_link`, `requests`). The **only** place resource types are enumerated. Layer 2 adds `dataset` here as one entry. | Any logic. It's data. |
@@ -148,7 +207,7 @@ What each file is for:
 
 **Deliberately not files (yet):** transfer (~20 lines) and bulk (a loop) live inside `sharing_actions.py` — they don't earn separate files. Group membership logic sits with `groups_api.py`/the org app, matching existing convention. The request-access workflow (Milestone 9) gets its own `requests.py` **only if** `sharing_actions.py` feels crowded when we get there — decided then, not now.
 
-Frontend: one hook, `useResourceAccess(rtype, id)`, is the only code that talks to `/api/access/*`; `ShareModal` renders off the capability flags the DTO echoes from `shareable_types.py` (public-link section appears for dashboards, silently absent for alerts — no per-type conditionals). We split ShareModal into child components only when it actually gets crowded.
+**Frontend:** one hook, `useResourceAccess(rtype, id)`, is the only code that talks to `/api/access/*`; `ShareModal` renders off the capability flags the DTO echoes from `shareable_types.py` (public-link section appears for dashboards, silently absent for alerts — no per-type conditionals). We split ShareModal into child components only when it actually gets crowded.
 
 ### 4.1 New tables
 
@@ -183,15 +242,21 @@ owner            = FK(OrgUser, SET_NULL, null=True, related_name="owned_%(class)
 # Chart: owner ONLY (delete + transfer). No general_*, no grants.
 ```
 
-**Migration (M1, starts at 0168):**
-- Add columns; backfill `owner = created_by`; backfill `general_*` from the org default (factory all_users/view — day-after behavior identical to day-before).
-- **Flip `created_by` to SET_NULL** on the 5 CASCADE models — Dashboard (`dashboard.py:111`), Chart (`visualization.py:60`), Metric (`metric.py:62`), KPI (`metric.py:122`), Alert (`alert.py:90`); ReportSnapshot already SET_NULL. Without this, a transferred resource dies with its creator's account.
-- Update `can_delete_resource()` (`core/ownership.py:5`) to check `owner_id` first, falling back to `created_by_id` — the six existing delete call-sites keep working unchanged.
-- `OrgPreferences` (`models/org_preferences.py:7`) += `default_general_audience`, `default_general_level`, `allow_public_sharing` (default True).
+**Migration (M1, starts at 0168)** — four steps, and why each is needed:
 
-### 4.3 Seed — new slugs
+| Step | What breaks without it |
+|---|---|
+| Add columns; backfill `owner = created_by`; backfill `general_*` (factory `all_users`/`view`) | No owner → nothing to transfer, delete rights can't move. Backfills mean day-after behavior = day-before: nobody gets locked out by the migration. |
+| **Flip `created_by` to SET_NULL** on the 5 CASCADE models — Dashboard (`dashboard.py:111`), Chart (`visualization.py:60`), Metric (`metric.py:62`), KPI (`metric.py:122`), Alert (`alert.py:90`); ReportSnapshot already SET_NULL | Today, deleting Priya's account **silently deletes every dashboard, chart, and alert she created** — even org-critical ones, even ones she transferred away. This is a live bug the feature makes fatal (transfer would be a lie). Behavior change on its own — flag in the PR description. |
+| Update `can_delete_resource()` (`core/ownership.py:5`) to check `owner_id` first, falling back to `created_by_id` | Sarah becomes owner via transfer but still can't delete — the check only knows `created_by`. One edit fixes all six existing delete call-sites at once. |
+| `OrgPreferences` (`models/org_preferences.py:7`) += `default_general_audience`, `default_general_level`, `allow_public_sharing` (default True) | Org-level defaults for new resources + the kill switch. UI lands in M5, but adding the columns now means the "read the org default" code is written once. |
 
-Add `can_share_reports`, `can_share_alerts`, `can_share_metrics`, `can_share_kpis` (joining the existing `can_share_dashboards`, pk 72; **no `can_share_charts`**). Admin + Analyst hold them; Member none. Data migration inserts `Permission` + `RolePermission` rows and **deletes the Redis key** (`ROLE_PERMISSIONS_REDIS_KEY`, default `dalgo_permissions_key`) — the middleware rebuilds it lazily on the next request (`auth.py:187`). Never call `set_roles_and_permissions_in_redis()` inside a migration (breaks Redis-less CI).
+### 4.3 Seed — new permission slugs
+
+Add `can_share_reports`, `can_share_alerts`, `can_share_metrics`, `can_share_kpis` (joining the existing `can_share_dashboards`, pk 72; **no `can_share_charts`**). Admin + Analyst hold them; Member none.
+
+> **The rule:** the data migration inserts `Permission` + `RolePermission` rows and **deletes the Redis key** (`ROLE_PERMISSIONS_REDIS_KEY`, default `dalgo_permissions_key`); the middleware rebuilds it lazily on the next request (`auth.py:187`).
+> **Why it matters:** calling `set_roles_and_permissions_in_redis()` inside a migration breaks Redis-less CI — key-delete is the established safe pattern.
 
 **Sequencing note:** existing installs must have run `migrate_rbac_v2_roles` (the Spec A management command) before this migration, so the role rows the seed references exist. Fresh installs are fine (3-role seed).
 
@@ -199,26 +264,53 @@ Add `can_share_reports`, `can_share_alerts`, `can_share_metrics`, `can_share_kpi
 
 ### 4.4 Resolver (`core/sharing/access_resolver.py`)
 
-`effective_permission(viewer, rtype, resource)` — in order: admin/super-admin → edit; owner (`owner_id or created_by_id`) → edit; general access if role tier meets audience; grants via **one** `principal_match_q(viewer)` predicate (shared by the resolver, the list filter, and any future caller); best level wins; **Member capped at View**; `getattr`-safe on null/legacy roles → default-deny, never 500. `ROLE_RANK` derives from role slugs, deliberately ≠ `Role.level`.
+`effective_permission(viewer, rtype, resource)` walks this ladder and returns `edit`, `view`, or nothing:
 
-`accessible_filter(viewer, rtype)` — one-query Q for list endpoints: general-access tier match (excluding private) ∪ granted ids ∪ owned ∪ created. Wired into the five org-only list services (research §3): dashboards (`dashboard_service.py:273`), reports (`report_api.py:54`), alerts (`alert_api.py:192`), metrics (`metric_api.py:36`), KPIs (`kpi_api.py:46`). **Charts keep today's role-gated list** (`chart_service.py:88`) — no filter change.
+```
+1. Admin / super-admin?                          → Edit  (org-wide override)
+2. Owner? (owner_id, falling back to created_by) → Edit
+3. General access admits viewer's role tier?     → the resource's general_level
+4. Grant rows matching the viewer?               → best level among them
+   (her user id, her groups' ids, her audience tier — all via ONE
+    principal_match_q(viewer) predicate, shared with the list filter)
+5. Take the highest level steps 3–4 produced;
+   viewer is a Member?                           → cap at View
+6. Nothing matched, or role is null/legacy?      → no access (default-deny, never a 500)
+```
 
-**Caching (D — injected, not hardwired):** the resolver takes a `get_group_ids(viewer)` callable; the default implementation caches in Redis via `RedisClient` (`utils/redis_client.py:9`, short TTL, busted on grant/general/group/transfer changes). Unit tests pass a stub — no Redis needed to test access logic.
+Notes: `ROLE_RANK` derives from role slugs, deliberately ≠ `Role.level`. All role reads are `getattr`-safe so a null/legacy role denies instead of crashing.
+
+`accessible_filter(viewer, rtype)` — the same logic as **one ORM Q object** for list endpoints (one query, no N+1): general-access tier match (excluding private) ∪ granted ids ∪ owned ∪ created. Wired into the five org-only list services (research §3): dashboards (`dashboard_service.py:273`), reports (`report_api.py:54`), alerts (`alert_api.py:192`), metrics (`metric_api.py:36`), KPIs (`kpi_api.py:46`). **Charts keep today's role-gated list** (`chart_service.py:88`) — no filter change.
+
+**Caching (the D rule — injected, not hardwired):** the resolver takes a `get_group_ids(viewer)` callable; the default implementation caches in Redis via `RedisClient` (`utils/redis_client.py:9`, short TTL, busted on grant/general/group/transfer changes). Unit tests pass a stub — no Redis needed to test access logic.
 
 ### 4.5 Narrowing General access (warn-and-offer — spec Flow 2)
 
-**The rule:** narrowing never silently drops or silently keeps direct shares.
-**Example:** Anjali narrows "Field Performance" from All users to Admins only. The API's first response lists the Funders-group grant that would keep Sarah in; Anjali picks "remove them too" and the client re-sends with `remove_grant_ids`.
-**Why it matters:** "make it private" must actually lock it down — leftover grants are the classic over-share bug.
+> **The rule:** narrowing never silently drops or silently keeps direct shares.
+> **Example:** Anjali narrows "Field Performance" from All users to Admins only. The API's first response lists the Funders-group grant that would keep Sarah in; Anjali picks "remove them too" and the client re-sends with `remove_grant_ids`.
+> **Why it matters:** "make it private" must actually lock it down — leftover grants are the classic over-share bug.
 
 `PUT …/general` with a narrower audience returns the persisting grants; the client re-sends with `remove_grant_ids`. The bulk variant aggregates across a selection (one prompt, per-resource ids).
 
-### 4.6 Invitations, requests, comments, alerts
+### 4.6 The four side-flows
 
-- **Invites:** add `Invitation.expires_at` (now + 30 days); expiry check in `accept_invitation_v1` (`orguserfunctions.py:281`); daily cleanup task (match pending `ResourceShare` rows by `invited_by__org` + email — Invitation has no org FK); `resend_invitation` (`:365`) refreshes `expires_at`. **Existing-user emails never reach accept** (`invite_user_v1` short-circuits) → the share endpoint resolves existing users first; pending rows flip to active in both paths. **Close the 2 ≥ 2 loophole** (`orguserfunctions.py:223`): the share-modal invite path adds an explicit "non-Admin invites Member only" check — today's `level ≥ level` cap would let an Analyst invite an Analyst.
-- **Requests:** notify the **owner** via `create_notification()` (`notifications_functions.py:114`); approve inserts a grant (all shareable rtypes incl. metric/kpi — the alert click-through case); unauthenticated visitors get a sign-in prompt; requests expire in 30 days.
-- **Comments (re-gate):** `create_comment` (`report_api.py:399`) requires `can_edit_dashboards`, which Members lack → **relax** create/read to `can_view_dashboards` + resolver-View on the snapshot. Moderation of others' comments = resolver-Edit — a real `CommentService` change (`comment_service.py:147-148, :172-173` are author-only today). Anonymous/public viewers stay blocked (authenticated router) — verify in tests.
-- **Alerts:** `recipients` JSON stays the delivery store; gains `{"type": "group"}` entries expanded at fire time; the notification carries trigger context. `ResourceShare` governs alert *config* access only — recipient status grants no resource access.
+**Invites (share modal can invite non-members):**
+- Add `Invitation.expires_at` (now + 30 days); expiry check in `accept_invitation_v1` (`orguserfunctions.py:281`); `resend_invitation` (`:365`) refreshes `expires_at`; daily cleanup task (match pending `ResourceShare` rows by `invited_by__org` + email — Invitation has no org FK).
+- **Existing-user emails never reach accept** (`invite_user_v1` short-circuits) → the share endpoint resolves existing users first; pending rows flip to active in both paths.
+- **Close the 2 ≥ 2 loophole** (`orguserfunctions.py:223`): today's cap is `inviter.level ≥ invitee.level`, so an Analyst (level 2) can invite another Analyst (level 2). The share-modal invite path adds an explicit "non-Admin invites Member only" check.
+
+**Access requests:**
+- Requester hits a locked resource → request lands with the **owner** via `create_notification()` (`notifications_functions.py:114`).
+- Approve inserts a grant (all shareable rtypes incl. metric/kpi — the alert click-through case); owner can downgrade Edit→View. Unauthenticated visitors get a sign-in prompt. Requests expire in 30 days.
+
+**Comments on Reports (re-gate):**
+- Create is gated by `can_edit_dashboards` today (`report_api.py:399`) — Members can't comment at all. **Relax** create/read to `can_view_dashboards` + resolver-View on the snapshot.
+- Moderating *others'* comments = resolver-Edit — a real `CommentService` change (`comment_service.py:147-148, :172-173` are author-only today).
+- Anonymous/public viewers stay blocked (authenticated router) — verify in tests.
+
+**Alerts:**
+- `recipients` JSON stays the delivery store; gains `{"type": "group"}` entries expanded at fire time; the notification carries trigger context.
+- `ResourceShare` governs alert *config* access only — being a recipient grants no resource access.
 - **Metric/KPI general access is standalone-only** — never consulted during chart render (references ≠ shares).
 
 ### 4.7 Frontend
@@ -261,10 +353,28 @@ Add `can_share_reports`, `can_share_alerts`, `can_share_metrics`, `can_share_kpi
 
 ## 6. Testing Strategy
 
-**Backend (pytest):** resolver truth-table as **pure-function tests** (stub `get_group_ids`, no Redis, no HTTP — possible because of §3.4's D rule) covering owner / admin / general / user-grant / group-grant / audience-grant / Member-cap / private / null-role / legacy-slug · shareable-types contract test: every registered rtype satisfies the shareable contract (string pk, `general_*`, owner accessor) and every capability flag is honored by the endpoints (grant on a `grants=False` rtype → 400, not 500) · list scoping + query-count on all five lists · **chart context**: Member with dashboard-View gets tile data with `dashboard_id`, 403 without; wrong-dashboard id → 403; charts absent from Member's world · narrowing warn-and-offer (single + bulk aggregate) · invite expiry + existing-user immediate activation + resend refresh + the non-Admin→Member cap · transfer (+ creator-deletion survival via SET_NULL, no reclaim route) · comments re-gate (Member-View creates; View can't moderate others'; resolver-Edit can) · kill switch (toggle blocked AND existing token render dies) · alert group-recipient fire-time expansion · seed migration idempotent on a fresh install *and* after `migrate_rbac_v2_roles`.
-**Frontend (Vitest):** ShareModal states (people/general/pending/transfer/requests); badges; bulk summary; tiles pass context; 403 interception renders request-access; `PERMISSIONS` const covers the new slugs.
+**Backend (pytest)** — the resolver truth-table runs as **pure-function tests** (stub `get_group_ids`, no Redis, no HTTP — possible because of §3.4's D rule):
+
+| Area | What we prove |
+|---|---|
+| Resolver truth table | owner / admin / general / user-grant / group-grant / audience-grant / Member-cap / private / null-role / legacy-slug — every cell of the ladder in §4.4 |
+| Shareable-types contract | every registered rtype satisfies the contract (string pk, `general_*`, owner accessor); every capability flag is honored by the endpoints (grant on a `grants=False` rtype → 400, not 500) |
+| List scoping | all five lists show exactly the admitted resources, **one query each** (query-count asserted) |
+| Chart context | Member with dashboard-View gets tile data with `dashboard_id`; 403 without; wrong-dashboard id → 403; charts absent from Member's world |
+| Narrowing | warn-and-offer round-trip, single + bulk aggregate |
+| Invites | expiry, existing-user immediate activation, resend refresh, the non-Admin→Member cap |
+| Transfer | new owner's powers; creator-deletion survival via SET_NULL; no reclaim route exists |
+| Comments | Member-View creates; View can't moderate others'; resolver-Edit can |
+| Kill switch | toggle blocked AND existing token render dies |
+| Alerts | group recipients expanded at fire time |
+| Seed migration | idempotent on a fresh install *and* after `migrate_rbac_v2_roles` |
+| User deletion | deleting an OrgUser no longer cascades their content (the SET_NULL flip, §4.2) |
+
+**Frontend (Vitest):** ShareModal states (people/general/pending/transfer/requests) · badges · bulk summary · tiles pass `dashboard_id` · 403 interception renders request-access · `PERMISSIONS` const covers the new slugs.
+
 **E2E (Playwright):** share with a 30-person group in under 60s · Member sees only "Shared with you" · request-access round-trip · narrow-then-remove flow.
-**Edge:** group deleted mid-share; user leaves a group but holds a direct grant; pending-then-expired invite; org with public sharing disabled mid-flight.
+
+**Edge cases:** group deleted mid-share · user leaves a group but holds a direct grant · pending-then-expired invite · org disables public sharing mid-flight.
 
 ---
 
@@ -336,12 +446,15 @@ M1–M4 are the core viewer flow (ship together to `feature/rbac`'s successor br
 5. **Q5 — cache-bust integration test** for the group-ids Redis cache.
 
 **Risks:**
-- **Stacked-branch coordination:** this work branches off `feature/rbac` while Spec A's PRs are open. If Spec A gets review changes, this branch must rebase. Mitigation: merge #1414/#331 promptly, or keep rebases small per milestone.
-- **Migration ordering on existing installs:** the seed migration assumes `migrate_rbac_v2_roles` has run. Document in the release runbook; the migration should fail loudly (not silently skip) if legacy role pks are found.
-- **`created_by` SET_NULL flip** touches 5 models with CASCADE today — verify no code path relies on cascade-deletion of resources when an OrgUser is removed (user-deletion flow test in M1).
+
+| Risk | Mitigation |
+|---|---|
+| **Stacked-branch coordination** — this work branches off `feature/rbac` while Spec A's PRs are open; review changes there force rebases here | Merge #1414/#331 promptly, or keep rebases small per milestone |
+| **Migration ordering on existing installs** — the seed migration assumes `migrate_rbac_v2_roles` has run | Document in the release runbook; the migration fails loudly (not silently skips) if legacy role pks are found |
+| **`created_by` SET_NULL flip** changes behavior on its own (deleting a user stops deleting their content) | Deliberate — protects NGO data; user-deletion test in M1; called out in the PR description |
 
 ---
 
-Draft v1 saved. Review and tell me what to revise. When ready, run `/engineering/execute-plan features/access-control/content/plan.md`.
+Draft v1 saved. Review and tell me what to revise. When ready, run `/engineering/execute-plan features/access-control/resourcesharing/plan.md`.
 
 > **Post-build (M11):** stop and ask before the Playwright-MCP browser pass.

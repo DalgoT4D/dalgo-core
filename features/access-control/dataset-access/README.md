@@ -1,7 +1,7 @@
 # Layer 2 — Dataset Access + Self-Service Connections (scope stub)
 
 **Status:** not yet planned — this is a scope stub capturing the 2026-07-02 brainstorm, so planning can start from a known shape.
-**Depends on:** Layer 1 (`../content/`) — reuses `owner`, `ResourceShare`, `UserGroup`, the resolver, and the floor.
+**Depends on:** Layer 1 (`../resourcesharing/`) — reuses `owner`, `ResourceShare`, `UserGroup`, the resolver, and the floor.
 **Roadmap:** `../ACCESS-MODEL-ROADMAP.md`.
 
 **Acronyms:** dbt (the transform tool that builds modeled tables) · RLS (row/column security — Layer 3) · FK (foreign key).

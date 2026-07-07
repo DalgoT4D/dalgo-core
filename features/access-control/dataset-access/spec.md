@@ -1,7 +1,7 @@
 # Dataset Access + Self-Service Connections — v1 (Layer 2)
 
 **Status:** Draft (from the 2026-07-02 brainstorm; decisions confirmed with the user)
-**Depends on:** Layer 1 — content resource sharing (`../content/`), which ships the spine: `ResourceShare`, groups, resolver, registry, share modal.
+**Depends on:** Layer 1 — content resource sharing (`../resourcesharing/`), which ships the spine: `ResourceShare`, groups, resolver, registry, share modal.
 **Roadmap:** `../ACCESS-MODEL-ROADMAP.md` · **Research:** [research.md](./research.md) · **Plan:** [plan.md](./plan.md)
 
 **Acronyms:** dbt (transform tool) · RLS (row/column security — Layer 3, not this spec) · PII (personal data).

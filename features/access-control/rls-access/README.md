@@ -1,7 +1,7 @@
 # Layer 3 — Row/Column RLS (scope stub)
 
 **Status:** not yet planned — deferred follow-on. This stub records the intent and the seams so it isn't lost.
-**Depends on:** Layer 2 (`../dataset-access/`) for datasets, and Layer 1 (`../content/`) for groups + the principal model.
+**Depends on:** Layer 2 (`../dataset-access/`) for datasets, and Layer 1 (`../resourcesharing/`) for groups + the principal model.
 **Roadmap:** `../ACCESS-MODEL-ROADMAP.md`.
 
 **Acronyms:** RLS (row-level security — filter rows / mask columns by who's viewing) · PII (personal data) · dbt (transform tool).
