@@ -1,0 +1,44 @@
+feature: branding
+output_dir: settings
+nuances: |
+  - Screenshot engine has no file-upload step type — file uploads and typing
+    into the URL field can't be scripted. upload_saved and link_saved each
+    require the docs org to already have a logo saved via that specific
+    method when the recipe runs (Upload tab shows its saved state only if
+    the org's current logo was uploaded as a file; Link tab shows its saved
+    state only if the org's current logo was set via URL). Since Upload and
+    Link are mutually exclusive, only one of the two can be captured in any
+    single run — the other will skip with a warning. To refresh both, run
+    the recipe, manually switch the org's logo method on staging, then
+    re-run.
+  - Tabs use data-testid="branding-tab-upload" / "branding-tab-link".
+  - A one-time onboarding overlay ("We've simplified how access works") can
+    appear on first login for the docs staging user and blocks the page —
+    dismiss with Escape before snapping.
+
+flows:
+  - name: default_state
+    steps:
+      - navigate: /settings/branding
+      - press: Escape
+      - wait: 600
+      - snap: branding_default.png
+        label: Branding — default view (no logo saved)
+
+  - name: upload_saved
+    optional: true
+    steps:
+      - navigate: /settings/branding
+      - press: Escape
+      - wait: 600
+      - snap: branding_upload_saved.png
+        label: Branding — Upload tab (file saved)
+
+  - name: link_saved
+    optional: true
+    steps:
+      - navigate: /settings/branding
+      - press: Escape
+      - wait: 600
+      - snap: branding_link_tab.png
+        label: Branding — Link tab (URL saved)
