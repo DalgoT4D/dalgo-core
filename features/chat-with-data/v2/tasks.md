@@ -34,8 +34,16 @@ Status legend: `[ ]` todo · `[x]` done · `[~]` in progress
 - [x] Fix: blank chart pages — create_chart wrote x_axis_column but the render path GROUPs BY dimension_column; existing rows repaired (backend d5ffbfb8)
 - [x] Dashboard tools: list_dashboards / create_dashboard / add_charts_to_dashboard with suggest-first prompt flow, can_create_dashboards in RunContext, dashboard chips in chat (backend f4d77040, frontend)
 
+## Agreed priority order (2026-07-08 planning)
+1. SHIP: push both branches, backend PR then frontend PR, cross-linked (validate-spec first)
+2. Polish sitting designed-but-unapplied: answer-template prompt + markdown-subset rendering · per-connection context cache + effort knob · auto-select last session on refresh
+3. TurnGraph (research committed: research-langgraph-pipeline.md) — BEFORE M5 content, since retrieve_context_node is where cards plug in
+4. M5 enrichment + BM25, then M6 settings UI
+5. Eval increments (feedback buttons → Langfuse score; dataset/experiment runner once traces accumulate)
+Evidence-gated backlog: HITL dashboard approval · decomposer subagent · chart-config → ChartService convergence · read-only warehouse role · checkpointer cleanup job
+
 ## Milestone 5: Table cards + enrichment agent + BM25 injection (Phase 2)
-- [ ] `ChatWithDataTableCard` model + fingerprint + migration
+- [x] `ChatWithDataTableCard` model + fingerprint + migration (0169) + `rank-bm25` dep (backend d4aeff47)
 - [ ] Enrichment agent (offline, reuses tool registry) + Celery task (`TaskProgress` pattern) + trigger endpoint beside `org_preferences_api`
 - [ ] dbt-webhook auto-refresh hook (`FLOW_RUN_COMPLETED` branch)
 - [ ] BM25 ranker (`rank_bm25` dep) + top-card injection via dynamic_prompt middleware + staleness fallback
