@@ -29,6 +29,11 @@ Status legend: `[ ]` todo · `[x]` done · `[~]` in progress
 
 **Phase 1 validation:** backend full suite 2138 passed · frontend full suite 1458 passed (2026-07-08)
 
+## Post-Phase-1 additions (2026-07-08)
+- [x] Fix: context-blind router diverted follow-ups ('chart this', 'above one') to needs_clarification — router now sees a thread tail; clarify can only divert the first turn (backend 405ca315)
+- [x] Fix: blank chart pages — create_chart wrote x_axis_column but the render path GROUPs BY dimension_column; existing rows repaired (backend d5ffbfb8)
+- [x] Dashboard tools: list_dashboards / create_dashboard / add_charts_to_dashboard with suggest-first prompt flow, can_create_dashboards in RunContext, dashboard chips in chat (backend f4d77040, frontend)
+
 ## Milestone 5: Table cards + enrichment agent + BM25 injection (Phase 2)
 - [ ] `ChatWithDataTableCard` model + fingerprint + migration
 - [ ] Enrichment agent (offline, reuses tool registry) + Celery task (`TaskProgress` pattern) + trigger endpoint beside `org_preferences_api`
