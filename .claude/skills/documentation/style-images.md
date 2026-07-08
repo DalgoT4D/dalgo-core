@@ -30,10 +30,20 @@ Always standard markdown. Never import+JSX. Paths start with `/img/` (Docusaurus
 
 ## Missing screenshots
 
-If a real screenshot isn't available, use `:::info Screenshot coming soon` — not an HTML comment.
+If a real screenshot isn't available, use `:::info Screenshot coming soon` — not an HTML comment and not plain-text brackets.
 
 ```markdown
 :::info Screenshot coming soon
 A screenshot of the warehouse connection test will be added here.
 :::
 ```
+
+**Anti-patterns for screenshot placeholders:**
+
+| Don't | Why |
+|---|---|
+| `<!-- SCREENSHOT: ... -->` | Invisible in rendered docs |
+| `[SCREENSHOT: describe the screenshot]` | Looks like a broken link in rendered docs |
+| `{screenshot}` | No context for the person taking screenshots |
+
+The `:::info Screenshot coming soon` pattern is the only accepted form. It renders visibly in Docusaurus and is picked up by the bulk screenshot refresh script.

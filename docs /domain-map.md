@@ -210,8 +210,6 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 - **Change impact:** If picker component is shared, auto-inherits Metric library changes. If not, changes must be duplicated.
 - **Confidence:** `tribal-knowledge-needed` — **this is a blocker question for the Metrics v1 plan.** Ask Pratiksha whether Explore's chart builder reuses the dashboard chart builder's MetricsSelector.
 
----
-
 ## Output / Distribution Layer
 
 ### ReportSnapshot *(the entity called "Report" in product conversations)*
@@ -304,15 +302,16 @@ Only 1-hop edges are listed per entity. Transitive paths (Metric → Dashboard �
 
 ### Organization
 - **One-line identity:** The multi-tenant boundary — every entity above is scoped to exactly one Org.
-- **What it is (detail):** Org contains configuration, plan, users (OrgUsers), warehouse connection, preferences.
+- **What it is (detail):** Org contains configuration, plan, users (OrgUsers), warehouse connection, preferences, and branding (`logo_url`, `logo_s3_key`, `logo_filename` — set via Settings → Branding, file upload or external URL).
 - **Consumes:** Plan, billing, warehouse config, user roster.
-- **Consumed by:** Every other entity (all data is org-scoped).
+- **Consumed by:** Every other entity (all data is org-scoped). Branding fields are read by dashboard/chart/PDF exports and public dashboard/report links (embed-of relationship, not a separate entity).
 - **Platform-specific behaviors:**
   - Warehouse choice (Postgres vs BigQuery) is per-org.
   - `org_supersets`, `org_wren`, `org_preferences` are auxiliary per-org config tables.
   - Org deletion must cascade carefully — data-privacy / donor-compliance requirement.
-- **Change impact:** Org-level config changes cascade to every entity within that org.
-- **Confidence:** `draft`
+  - Logo upload and URL-link are mutually exclusive — the current logo must be removed before switching methods. Uploaded files go to S3; URL-linked logos are stored as a direct external reference.
+- **Change impact:** Org-level config changes cascade to every entity within that org. Logo changes are reflected immediately on the next render of the app header, exports, and public links (no cache invalidation needed).
+- **Confidence:** `verified` (cross-checked against `DDP_backend/ddpui/models/org.py`)
 
 ### OrgUser
 - **One-line identity:** A user within an organization, with a role that gates what they can see and edit.
@@ -376,9 +375,9 @@ Update order for the next team review session:
    - Warehouse (org config + adapter layer)
    - Transform (`models/dbt_workflow.py`, `ddpdbt/`)
    - Pipeline (`ddpprefect/`, `models/flow_runs.py`)
-   - Organization, OrgUser
+   - OrgUser
 3. `verified` entries only need re-check on model changes:
-   - Chart, Dashboard, ReportSnapshot, Share link (both modes), Notification, Metric, KPI
+   - Chart, Dashboard, ReportSnapshot, Share link (both modes), Notification, Metric, KPI, Organization
 
 ### What is intentionally NOT in this map
 

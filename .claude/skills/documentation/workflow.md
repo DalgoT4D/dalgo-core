@@ -2,6 +2,16 @@
 
 Process to generate or update a doc page, from research to published markdown.
 
+## 0. Check repo access
+
+Before starting, confirm `dalgo_docs` is cloneable:
+
+```bash
+git ls-remote https://github.com/DalgoT4D/dalgo_docs HEAD
+```
+
+If the clone fails (403/network blocked), write draft files to `dalgo-core/drafts/docs-{date}/` instead and open a PR in `dalgo-core` with `SIDEBAR-CHANGES.md` explaining what to apply. Skip steps 5 (screenshots) and 7 (sidebar). Note the constraint clearly in the PR body.
+
 ## 1. Parse Input & Determine Mode
 
 **Mode A — Feature Name** (default): input is a feature description (e.g. "orchestrate", "data quality").
@@ -60,7 +70,7 @@ Creating or editing the recipe:
 
 Then run: `cd dalgo-core && uv run python scripts/screenshot.py X`. Verify expected files land in `dalgo_docs/static/img/{output_dir}/`. Iterate on any selector that misses — don't ship guesses.
 
-Use `:::info Screenshot coming soon` only when the feature isn't built. Bulk refresh (`screenshot.py` with no args) picks up every recipe automatically.
+Use `:::info Screenshot coming soon` when a real screenshot is not available — for unbuilt features or when running in an environment without browser access. Bulk refresh (`screenshot.py` with no args) picks up every recipe automatically.
 
 ## 6. Write Documentation
 
