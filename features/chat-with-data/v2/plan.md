@@ -153,3 +153,64 @@ scale), and a pre-execution reflection call on the simple lane.
 | Two more LLM calls per turn (route + validate) add cost | Both Haiku, ~1–2K tokens each ≈ fraction of a cent; validator runs off the critical path |
 | Router misclassifies a data question as small-talk | Route only obviously-non-data intents away; when unsure, send to the SQL agent (fail open) |
 | LLM-validates-LLM shared blind spots | Checklist framing + actual result in hand + human review of `warn` rows builds the real eval set over time |
+
+---
+
+## 8. Execution plan (added 2026-07-09 — supersedes §6 phasing detail)
+
+Reconciled with: Phase 1 ✅ shipped · M5 slice 1 ✅ (card model + migration 0169 +
+`rank-bm25`) · TurnGraph direction agreed (see `research-langgraph-pipeline.md` —
+stage 2 becomes a graph node, not `dynamic_prompt` injection) · the
+ai-engineering-reviewer audit (2026-07-08) which found one P1.
+
+Every slice below is one red-green-refactor cycle. Order of milestones is the
+order of work.
+
+### M0 — Pre-ship fixes (audit findings) — ~half day, lands IN the first PRs
+
+| Slice | RED test first | Fix |
+|---|---|---|
+| 0.1 **P1 trim no-op** | compiled `create_agent` + recording fake model + 100-message thread → assert model receives ≤ token budget (fails today: `llm_input_messages` is ignored) | `trim_history` → `@wrap_model_call` + `request.override(messages=…)` |
+| 0.2 Stream node filter | runner fed a fake stream with a non-`model` node chunk → assert no `token` event | gate on `_meta["langgraph_node"] == "model"` |
+| 0.3 Langfuse host gate | `get_langfuse()` with an external host and no explicit opt-in → assert disabled | require self-host or `CHAT_WITH_DATA_TRACE_EXTERNAL=true` |
+| 0.4 Aux token audit | small-talk turn → audit usage > 0 | fold router/validator/reflection `usage_metadata` into audit totals |
+| 0.5 Agent singleton | — (refactor, existing suite is the harness) | build agent once per process, not per message |
+
+**Then: SHIP.** validate-spec → push both branches → backend PR, frontend PR, cross-linked.
+
+### M-G — TurnGraph (approach 2) — 1–2 days, own PR
+
+| Slice | Proves |
+|---|---|
+| G1 `graph.py`: `TurnState` + `route_node` + conditional edges | small talk ends at `casual_reply_node` without touching the agent |
+| G2 compiled agent mounted as subgraph node, checkpointer on parent only | same `thread_id` continuity; messages channel shared |
+| G3 `validate_node` writes `state["validation"]` | verdict in checkpoint, event unchanged |
+| G4 runner: `astream(..., subgraphs=True)` → same WS events | **existing runner tests pass unmodified — the regression harness** |
+| G5 `retrieve_context_node` (no-op body) + graph-shape test | the pipeline is visible: `draw_mermaid()` matches §3's diagram |
+| G6 write `architecture/approach-2.md`; mark approach-1 superseded | docs never drift |
+
+### M5 — Enrichment agent + BM25 retrieval — ~1 week, own PR
+
+| Slice | What |
+|---|---|
+| E1 `enrichment/facts.py` | per-table facts via existing tool seams (columns, samples, uniqueness) — stubbed in tests |
+| E2 `enrichment/cards.py` | `TableCard` Pydantic + ONE Haiku call via `.with_structured_output` — **fails LOUD** (reviewer's rule: a malformed card must not poison the store; first customer for structured output) |
+| E3 fingerprint + `is_stale()` | hash(columns + dbt docs); mismatch → live discovery fallback + mark for rebuild (§4 staleness rule) |
+| E4 `enrich_org()` orchestrator | iterate allowed tables, `abatch` the card calls, upsert; per-table error isolation |
+| E5 Celery task + `TaskProgress` | template: `run_dbt_commands.delay()` pattern |
+| E6 trigger API | `POST /api/chat-with-data/enrichment` gated `can_edit_llm_settings` → task_id; `GET` status |
+| E7 dbt-webhook refresh | `FLOW_RUN_COMPLETED` branch → enqueue stale-only rebuild |
+| E8 `retrieval.py` | BM25 rank cards vs question, top-3 with a min-score floor — pure code, pure tests |
+| E9 wire into `retrieve_context_node` | cards → system prompt block; stale card skipped; agent prompt asserted in test |
+| E10 measurement | `cards_used` into audit + trace metadata — the §6 exit evidence (discovery turns drop) becomes queryable |
+
+### M6 — Settings UI — 2–3 days, frontend PR
+
+`app/settings/ai-data/page.tsx` + nav entry · rebuild button → task_id → poll
+`GET /api/tasks/{id}` (elementary-setup pattern) · last-built + per-table status ·
+component tests.
+
+### Explicitly deferred (unchanged from §6)
+
+Phase 3 decomposer (evidence-gated via Langfuse) · chart verifier · supervisor
+graph (never, absent registry overgrowth) · vector search.

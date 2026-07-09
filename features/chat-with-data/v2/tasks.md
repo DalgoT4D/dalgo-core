@@ -42,12 +42,34 @@ Status legend: `[ ]` todo · `[x]` done · `[~]` in progress
 5. Eval increments (feedback buttons → Langfuse score; dataset/experiment runner once traces accumulate)
 Evidence-gated backlog: HITL dashboard approval · decomposer subagent · chart-config → ChartService convergence · read-only warehouse role · checkpointer cleanup job
 
-## Milestone 5: Table cards + enrichment agent + BM25 injection (Phase 2)
+## Milestone 0: Pre-ship audit fixes (plan §8 M0) — before the PRs
+- [ ] 0.1 P1: trim_history is a silent no-op → @wrap_model_call + request.override + graph-level contract test
+- [ ] 0.2 Stream token events filtered to the model node
+- [ ] 0.3 Langfuse external-host consent gate
+- [ ] 0.4 Aux (Haiku) token usage folded into turn audit
+- [ ] 0.5 Agent compiled once per process
+- [ ] SHIP: validate-spec → push → backend PR + frontend PR cross-linked
+
+## Milestone G: TurnGraph (plan §8 M-G, research-langgraph-pipeline.md)
+- [ ] G1 graph.py: TurnState + route_node + conditional edges
+- [ ] G2 agent as subgraph node; parent-only checkpointer; thread continuity
+- [ ] G3 validate_node → state.validation
+- [ ] G4 runner astream(subgraphs=True); existing runner tests pass UNMODIFIED
+- [ ] G5 retrieve_context_node placeholder + graph-shape test
+- [ ] G6 architecture/approach-2.md; approach-1 marked superseded
+
+## Milestone 5: Table cards + enrichment agent + BM25 (plan §8 M5)
 - [x] `ChatWithDataTableCard` model + fingerprint + migration (0169) + `rank-bm25` dep (backend d4aeff47)
-- [ ] Enrichment agent (offline, reuses tool registry) + Celery task (`TaskProgress` pattern) + trigger endpoint beside `org_preferences_api`
-- [ ] dbt-webhook auto-refresh hook (`FLOW_RUN_COMPLETED` branch)
-- [ ] BM25 ranker (`rank_bm25` dep) + top-card injection via dynamic_prompt middleware + staleness fallback
-- [ ] Tests throughout
+- [ ] E1 facts.py per-table facts (stubbed seams)
+- [ ] E2 cards.py TableCard + structured-output Haiku call (fails LOUD)
+- [ ] E3 fingerprint + is_stale + live-discovery fallback
+- [ ] E4 enrich_org orchestrator (abatch, per-table error isolation)
+- [ ] E5 Celery task + TaskProgress
+- [ ] E6 trigger endpoint (can_edit_llm_settings) + status
+- [ ] E7 dbt-webhook stale-only refresh
+- [ ] E8 retrieval.py BM25 top-3 + min-score floor
+- [ ] E9 wire into retrieve_context_node + staleness skip
+- [ ] E10 cards_used → audit + trace metadata (exit evidence)
 
 ## Milestone 6: Settings UI for metadata rebuild (Phase 2)
 - [ ] `app/settings/ai-data/page.tsx` + nav entry (pattern: elementary-setup polling)
