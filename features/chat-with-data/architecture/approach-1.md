@@ -1,6 +1,8 @@
 # Approach 1 — Compiled Agent Loop with Staged Calls
 
-**Status:** CURRENT (running on `feature/chat-with-data` in DDP_backend + webapp_v2)
+**Status:** SUPERSEDED by [`approach-2.md`](./approach-2.md) (2026-07-09 — the
+pipeline became the hand-built TurnGraph; §1–§3, §5–§7 remain accurate for the
+layers that did not move)
 **Date:** 2026-07-08 · covers v1 (M1–M5) + v2 Phase 1 + chart/dashboard tools
 **Convention:** this folder versions our architecture. When the architecture
 materially changes (e.g. the TurnGraph lands), we write `approach-2.md` and

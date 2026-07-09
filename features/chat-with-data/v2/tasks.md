@@ -50,13 +50,15 @@ Evidence-gated backlog: HITL dashboard approval · decomposer subagent · chart-
 - [ ] 0.5 Agent compiled once per process
 - [ ] SHIP: validate-spec → push → backend PR + frontend PR cross-linked
 
-## Milestone G: TurnGraph (plan §8 M-G, research-langgraph-pipeline.md)
-- [ ] G1 graph.py: TurnState + route_node + conditional edges
-- [ ] G2 agent as subgraph node; parent-only checkpointer; thread continuity
-- [ ] G3 validate_node → state.validation
-- [ ] G4 runner astream(subgraphs=True); existing runner tests pass UNMODIFIED
-- [ ] G5 retrieve_context_node placeholder + graph-shape test
-- [ ] G6 architecture/approach-2.md; approach-1 marked superseded
+## Milestone G: TurnGraph (plan §8 M-G, research-langgraph-pipeline.md) ✅ 2026-07-09
+*Deviation: user chose to start M-G before M0 (plan order was M0 → ship → M-G). M0 slices remain open above.*
+- [x] G1 graph.py: TurnState + route_node + conditional edges (backend b9f2675a)
+- [x] G2 agent as subgraph node; parent-only checkpointer; thread continuity (b9f2675a)
+- [x] G3 validate_node → state.validation; validator sees only the current turn's SQL (b9f2675a)
+- [x] G4 runner astream(subgraphs=True); all 9 existing runner tests passed UNMODIFIED; token events gated to the model node (absorbs M0-0.2) (bc7bf8c9)
+- [x] G5 retrieve_context_node placeholder + graph-shape test (5f9b3b67)
+- [x] G6 architecture/approach-2.md written; approach-1 marked SUPERSEDED
+- Validation: full backend suite (minus warehouse integration tests) green 2026-07-09
 
 ## Milestone 5: Table cards + enrichment agent + BM25 (plan §8 M5)
 - [x] `ChatWithDataTableCard` model + fingerprint + migration (0169) + `rank-bm25` dep (backend d4aeff47)
