@@ -36,7 +36,7 @@ Status legend: `[ ]` todo · `[x]` done · `[~]` in progress
 
 ## Agreed priority order (2026-07-08 planning)
 1. SHIP: push both branches, backend PR then frontend PR, cross-linked (validate-spec first)
-2. Polish sitting designed-but-unapplied: answer-template prompt + markdown-subset rendering · per-connection context cache + effort knob · auto-select last session on refresh
+2. Polish sitting designed-but-unapplied: ~~answer-template prompt + markdown-subset rendering~~ ✅ 2026-07-09 (backend e9256c18, frontend e5803cfb+df623863: AssistantMarkdown subset renderer — bold/bullets/numbered/### topics/> key-insight callout/`code` chips, allowlist by construction, prompt contract pinned by test; browser-verified end-to-end incl. history replay) · per-connection context cache + effort knob · auto-select last session on refresh
 3. TurnGraph (research committed: research-langgraph-pipeline.md) — BEFORE M5 content, since retrieve_context_node is where cards plug in
 4. M5 enrichment + BM25, then M6 settings UI
 5. Eval increments (feedback buttons → Langfuse score; dataset/experiment runner once traces accumulate)
