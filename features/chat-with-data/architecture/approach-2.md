@@ -1,10 +1,13 @@
 # Approach 2 — TurnGraph: the pipeline as a hand-built graph
 
 **Status:** CURRENT (running on `feature/chat-with-data` in DDP_backend + webapp_v2)
-**Date:** 2026-07-09 · supersedes [`approach-1.md`](./approach-1.md)
-**What changed:** the turn pipeline moved from Python control flow in `runner.py`
-into our first hand-built LangGraph. Everything else — tools, guard, brains,
-WebSocket protocol, frontend — is unchanged from Approach 1.
+**Date:** 2026-07-09 (TurnGraph) · updated same day with the answer contract (§5)
+· supersedes [`approach-1.md`](./approach-1.md)
+**What changed:** (1) the turn pipeline moved from Python control flow in
+`runner.py` into our first hand-built LangGraph; (2) answers became structured —
+a prompt-side answer template paired with a frontend markdown-subset renderer.
+Everything else — tools, guard, brains, WebSocket protocol — is unchanged from
+Approach 1.
 
 Acronyms: LLM (large language model) · WS (WebSocket) · BM25 (a classic
 keyword-ranking algorithm, no ML involved) · HITL (human-in-the-loop).
@@ -97,11 +100,46 @@ into `messages` mode. The runner forwards tokens only from the agent's
 `model` node — router/validator/casual-reply output can never leak into
 Priya's chat. (This absorbed audit fix M0-0.2.)
 
-## 5. Design rules — carried forward and new
+## 5. The answer contract — prompt ⇄ renderer (added 2026-07-09)
+
+Answers are structured by a two-sided contract between the repos:
+
+| Side | File | Role |
+|---|---|---|
+| DDP_backend | `agent/prompts.py` "How to answer" | teaches the answer SHAPE and names the only formatting allowed |
+| webapp_v2 | `components/chat-with-data/AssistantMarkdown.tsx` + `markdown.ts` | renders exactly that subset; everything else stays literal text |
+
+**The shape:** bold headline number first → structure scaled to answer size
+(a single fact stays one sentence; 3+ items become "- " bullets; long
+multi-topic answers get "### " headings) → at most one "> " key-insight
+callout (rendered as a teal highlight strip) → one closing line on how the
+answer was computed. Numbers use thousands separators.
+
+**Example (real output, browser-verified):** "Break down our surveys by
+country" → bold **1,818** headline, three bullets (India **908**, Uganda
+**765**, Indonesia **145**), a teal callout flagging Indonesia's low count as
+a possible data-collection gap, then "Source: `prod.classroom_surveys_merged`,
+grouped by `country`."
+
+**Why hand-rolled, not react-markdown:** the renderer is an allowlist by
+construction — links and raw HTML render as literal text (pinned by a test),
+so a misbehaving model cannot inject them; zero added bundle weight for slow
+connections; no ESM/Jest friction. One concession from live testing: models
+wrap table names in backticks despite the ban, so single backticks render as
+a subtle code chip instead of literal backticks.
+
+**Drift guard:** a backend test
+(`test_system_prompt_allows_exactly_the_markdown_subset_the_ui_renders`)
+pins the prompt's allowed-formatting list to what the renderer styles — the
+cross-repo contract fails a build instead of silently rotting. History
+replays through the same renderer; pre-change plain-text answers render
+unchanged.
+
+## 6. Design rules — carried forward and new
 
 Rules 1–5 of Approach 1 §6 stand (frozen agent topology; single calls for
 single jobs; every auxiliary brain fails open; contracts from real consumers;
-everything measured). New with the TurnGraph:
+everything measured). New with this approach:
 
 6. **The pipeline graph is ours to rewire; the agent subgraph is not.**
    New stages (decomposer, HITL approval) enter as parent nodes/edges; the
@@ -111,8 +149,11 @@ everything measured). New with the TurnGraph:
 8. **Validation sees one turn.** `validate_node` extracts SQL/results only
    from messages after the last user message — a turn-2 verdict can never be
    contaminated by turn-1 queries.
+9. **Formatting is a two-sided contract.** The prompt may only permit what
+   the renderer styles (§5); either side changing alone is a bug, and a test
+   on the backend enforces the pairing.
 
-## 6. What this unlocks (earmarked, not built)
+## 7. What this unlocks (earmarked, not built)
 
 | Capability | First concrete use |
 |---|---|
@@ -121,7 +162,7 @@ everything measured). New with the TurnGraph:
 | `Send` API fan-out from a new branch | Phase-3 decomposer for multi-table comparisons (evidence-gated via Langfuse) |
 | Per-stage state in the checkpoint | pause/resume + stage-level eval slices |
 
-## 7. Known constraints
+## 8. Known constraints
 
 Approach 1 §7 still applies (first-question latency, protobuf pin,
 single-table charts, SQL-layer read-only). Additionally:
