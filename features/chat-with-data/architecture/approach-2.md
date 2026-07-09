@@ -1,8 +1,8 @@
 # Approach 2 — TurnGraph: the pipeline as a hand-built graph
 
 **Status:** CURRENT (running on `feature/chat-with-data` in DDP_backend + webapp_v2)
-**Date:** 2026-07-09 (TurnGraph) · updated same day with the answer contract (§5)
-· supersedes [`approach-1.md`](./approach-1.md)
+**Date:** 2026-07-09 (TurnGraph) · updated same day with the answer contract (§6)
+and the end-to-end turn walkthrough (§3) · supersedes [`approach-1.md`](./approach-1.md)
 **What changed:** (1) the turn pipeline moved from Python control flow in
 `runner.py` into our first hand-built LangGraph; (2) answers became structured —
 a prompt-side answer template paired with a frontend markdown-subset renderer.
@@ -61,7 +61,81 @@ class TurnState(TypedDict):
     validation: dict | None  # validator verdict — in the checkpoint
 ```
 
-## 3. What the graph replaced in runner.py
+## 3. The journey of one question — end to end
+
+What exactly happens when Priya hits Enter, layer by layer:
+
+```
+BROWSER (webapp_v2)
+  ChatPane input ──► WebSocket already open for this session (cookie JWT)
+                     sends {"action": "send_message", "message": "how many surveys?"}
+        │
+        ▼
+CONSUMER  websockets/chat_with_data_consumer.py
+  connect-time gates (already passed): JWT cookie → OrgUser · can_use_chat_with_data
+  permission · CHAT_WITH_DATA feature flag · AI consent (llm_optin) · warehouse exists
+  · session belongs to this user
+  per-message gates: rate limit (10/min, Redis) · turn lock (one question at a
+  time per session, Redis, 180s TTL)
+        │
+        │  build_run_context(orguser)          agent/context.py
+        │  = the ONLY ORM/credentials touch: warehouse client, allowed schemas,
+        │    chart/dashboard permissions → RunContext (the model never sees org ids)
+        ▼
+RUNNER  runner.py — builds the TurnGraph, streams it, translates events
+        │  Langfuse trace starts · thread_id = session's checkpointer thread
+        ▼
+TURNGRAPH  graph.py (each box = a real graph node, checkpointed in Postgres)
+        │
+   route_node ── one Haiku call; sees the conversation tail; fail-open
+        │
+        ├── small talk ────────► casual_reply_node ──► END   (agent never runs)
+        ├── vague FIRST turn ──► clarify_node ───────► END   ("Compare what to what?")
+        └── data question
+                │
+        retrieve_context_node   (no-op today — M5 will inject BM25 table cards here)
+                │
+        sql_agent  ◄─ the compiled agent, mounted as a subgraph
+        │   middleware: org system prompt (dialect + answer template) ·
+        │   history trim · 3-failed-SQLs limiter · old-tool-result clearing
+        │   model (Sonnet 5) ⇄ tools loop:
+        │     list_tables / get_table_details / profile_column   (discovery)
+        │     execute_sql ─► sqlglot AST GUARD (single SELECT only, schema
+        │        allowlist, LIMIT clamp) ─► reflection critique (complex lane
+        │        only) ─► warehouse. Errors return AS TEXT so the model retries.
+        │     create_chart / dashboards tools (permission-gated via RunContext)
+                │
+        validate_node ── Haiku checklist over THIS turn's SQL + result + answer
+                │         → state.validation → END
+        ▼
+RUNNER translates the stream into WS events, in this order:
+  tool_start/tool_end (chips: "Running query…" + view SQL)
+  token, token, token…        (ONLY from the agent's model node — router/
+                               validator tokens can never leak)
+  message_complete            (answer text + result table + chart chips + token usage)
+  validation                  (only if verdict = warn → amber strip)
+  title_updated               (first turn: Haiku names the session)
+        ▼
+BROWSER  reducer applies events → MessageBubble renders the answer through
+  AssistantMarkdown (bold · bullets · ### topics · teal callout · code chips)
+  + ResultTable + chart links + "Worth checking:" strip
+```
+
+Three things persist after the stream ends (in a `finally:` — even on failure):
+
+| Store | What | Why |
+|---|---|---|
+| LangGraph Postgres checkpointer | the full message thread | follow-ups have memory; history survives refresh |
+| `ChatWithDataTurnAudit` (Django) | question, SQL(s), tools, tokens, latency, route intent, validation verdict | the evaluation layer — eval golden datasets grow from here |
+| Langfuse trace | per-stage spans + `result_validation` score | "where did this turn spend its time" is a query |
+
+**Failure behavior is deliberate and asymmetric.** The router, reflection, and
+validator all **fail open** — a broken helper can never block a real question;
+worst case you get v1 behavior. The SQL guard **fails closed** — no parse, no
+execution. If the model itself dies mid-turn, the user gets one friendly error
+event and the audit row is still written with `status="failed"`.
+
+## 4. What the graph replaced in runner.py
 
 | Approach 1 (runner.py Python) | Approach 2 (graph) |
 |---|---|
@@ -77,7 +151,7 @@ and maps namespaced chunks onto the **unchanged** WS protocol. The consumer
 and the entire frontend were not touched; the 9 pre-existing runner tests
 pass unmodified — that was the milestone's regression harness.
 
-## 4. Mechanics that make it low-risk
+## 5. Mechanics that make it low-risk
 
 **Subgraph mounting.** `create_agent`'s compiled graph is passed straight to
 `add_node("sql_agent", agent)` — it reads/writes the parent's `messages`
@@ -100,7 +174,7 @@ into `messages` mode. The runner forwards tokens only from the agent's
 `model` node — router/validator/casual-reply output can never leak into
 Priya's chat. (This absorbed audit fix M0-0.2.)
 
-## 5. The answer contract — prompt ⇄ renderer (added 2026-07-09)
+## 6. The answer contract — prompt ⇄ renderer (added 2026-07-09)
 
 Answers are structured by a two-sided contract between the repos:
 
@@ -135,7 +209,7 @@ cross-repo contract fails a build instead of silently rotting. History
 replays through the same renderer; pre-change plain-text answers render
 unchanged.
 
-## 6. Design rules — carried forward and new
+## 7. Design rules — carried forward and new
 
 Rules 1–5 of Approach 1 §6 stand (frozen agent topology; single calls for
 single jobs; every auxiliary brain fails open; contracts from real consumers;
@@ -150,10 +224,10 @@ everything measured). New with this approach:
    from messages after the last user message — a turn-2 verdict can never be
    contaminated by turn-1 queries.
 9. **Formatting is a two-sided contract.** The prompt may only permit what
-   the renderer styles (§5); either side changing alone is a bug, and a test
+   the renderer styles (§6); either side changing alone is a bug, and a test
    on the backend enforces the pairing.
 
-## 7. What this unlocks (earmarked, not built)
+## 8. What this unlocks (earmarked, not built)
 
 | Capability | First concrete use |
 |---|---|
@@ -162,7 +236,7 @@ everything measured). New with this approach:
 | `Send` API fan-out from a new branch | Phase-3 decomposer for multi-table comparisons (evidence-gated via Langfuse) |
 | Per-stage state in the checkpoint | pause/resume + stage-level eval slices |
 
-## 8. Known constraints
+## 9. Known constraints
 
 Approach 1 §7 still applies (first-question latency, protobuf pin,
 single-table charts, SQL-layer read-only). Additionally:
