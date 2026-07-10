@@ -1,109 +1,161 @@
-# Research — Platform Admin Portal v1
+# Research — Admin Portal v1 (Week 1: Org Onboarding + User Management)
 
 **For:** `features/admin-portal/v1/plan.md`
-**Date:** 2026-07-02
-**Scope:** net-new findings only — things specific to a *cross-org, Dalgo-staff* portal. Where a fact already lives in `features/access-control/v2/research.md` (auth flow, role model, sidebar contract, migration conventions), this file points there instead of repeating it.
+**Date:** 2026-07-10
+**Scope:** net-new findings from a direct read of DDP_backend and webapp_v2. This repo has **no** `backend-architecture/landmarks.md` or `frontend-architecture/landmarks.md`, so the reusable file:line facts live here.
 
-> Acronyms: FK (foreign key — a DB column pointing at another table's row) · JWT (JSON Web Token — the signed login token) · RBAC (role-based access control) · PII (personally identifiable information).
+**Acronyms:** FK (foreign key — a DB column pointing at another table's row) · RBAC (role-based access control — who can do what, decided by their role) · JWT (JSON web token — the signed login token) · SWR (a React data-fetching/caching hook) · OrgUser (the row linking one user to one org, carrying their role there).
 
-> **Note:** the backend/frontend `landmarks.md` files referenced by the planning command do **not** exist in this repo. The equivalent facts came from `access-control/v2/research.md` plus two Explore passes on 2026-07-02.
-
----
-
-## 1. The load-bearing constraint: the whole API is single-org
-
-**The rule:** Every authenticated API request is scoped to exactly one org by the `x-dalgo-org` request header. `CustomAuthMiddleware` (`DDP_backend/ddpui/auth.py:62`) reads that header, resolves `request.orguser` from `(user, org)`, and loads `request.permissions` from Redis for *that* org.
-**Example:** When Priya's browser calls `GET /api/organizations/users`, it sends `x-dalgo-org: akshara`. The middleware builds `request.orguser` for Akshara only — she can never see another org's data through the normal API.
-**Why it matters:** A cross-org portal **cannot** ride the normal request path. It needs a separate authorization path that (a) authenticates the Dalgo staff user, (b) checks a *platform* flag, and (c) takes the target org as an explicit parameter, not the header. This is the single biggest design decision in the plan (see HLD).
+> The whole feature turns on one fact: **everything in Dalgo today is single-org.** Every user/org function reads the caller's own org from the `x-dalgo-org` request header. A cross-org admin portal needs new, platform-admin-gated, org-parameterized endpoints. The rest of this file is the evidence for that and the pieces we can reuse.
 
 ---
 
-## 2. The platform-admin concept already half-exists
+## 1. Who is a "platform admin" — and why nothing enforces it yet
 
-**The rule:** There is already a platform-vs-org distinction — three boolean flags on the user, spanning all orgs.
-**Where:** `DDP_backend/ddpui/models/org_user.py` — `UserAttributes` has `is_platform_admin`, `is_consultant`, `can_create_orgs`. Added in migration `ddpui/migrations/0047_userattributes_is_platform_admin.py`.
+There are **two different "admin" concepts** in the codebase. They are easy to confuse.
 
-| Flag | Set by | Read by today |
-|---|---|---|
-| `is_platform_admin` | `management/commands/manage-user-attributes.py` only | surfaced read-only in the current-user payload (`ddpui/core/orguserfunctions.py:72`) |
-| `is_consultant` | same command | same |
-| `can_create_orgs` | same command | gates org creation |
-
-**Gaps this feature fills:**
-- There is **no `@has_permission`-style gate keyed on `is_platform_admin`** and **no platform API router**. The flag is set and displayed but never *enforces* anything. This feature adds the enforcement layer.
-- **Superadmin gate:** Django's built-in `User.is_superuser` is unused in app logic today (no `is_staff`/`is_superuser` references anywhere in `ddpui/`). It's the natural, already-present gate for the "one superadmin who manages the platform-admin list" — no new flag needed.
-
-- **Legacy `AdminUser`** model (`DDP_backend/ddpui/models/admin_user.py`) exists but is essentially unused. **Do not** build on it — build on `UserAttributes.is_platform_admin`.
-- **No Django admin** is configured (`admin.site.register` appears nowhere). This portal is not a Django-admin skin.
-
----
-
-## 3. Org has no lifecycle/status field (suspend/archive is greenfield)
-
-**The rule:** The `Org` model has no status, no soft-delete, no suspended state.
-**Where:** `DDP_backend/ddpui/models/org.py:123` — `Org` fields are `name`, `slug`, `airbyte_workspace_id`, `dbt` (FK), `viz_url`, `viz_login_type`, `website`, `queue_config`, `created_at`, `updated_at`. Deletion today is a **hard delete** via the `deleteorg` management command.
-
-- `OrgType` enum exists (`org.py:21`: `SUBSCRIPTION` / `TRIAL` / `DEMO`) but that's *plan type*, not lifecycle — and plan lives in `models/org_plans.py` (`OrgPlan`), read via `Org.base_plan()`. Do not overload `OrgType` for suspend/archive.
-- **Net:** add a new `status` field (`active` / `suspended` / `archived`) + timestamps to `Org`, migration backfills every existing org to `active`.
-
-Related per-org models (matter for the directory's health signals and the suspend cascade): `OrgWarehouse` (`org.py:229`), `OrgDataFlowv1` (Prefect deployments), `OrgPrefectBlockv1`, `OrgFeatureFlag`.
-
----
-
-## 4. Cross-org operations today = management commands only
-
-**The rule:** Every cross-org action is a Django management command run by a developer — there is no runtime UI or API for any of it.
-**Where:** `DDP_backend/ddpui/management/commands/` —
-
-| Command | What the portal replaces it with |
-|---|---|
-| `createorganduser.py` | "Create org" flow (org shell + first-Admin invite) |
-| `deleteorg.py` | Archive (soft) — hard delete stays a command in v1 |
-| `addusertoorg.py` | "Add user" in the org's Users tab |
-| `manage-user-attributes.py` | "Platform Staff" add/remove (sets `is_platform_admin`) |
-| `create-system-orguser.py` | (not in v1 scope) |
-
-Cross-org iteration (`Org.objects.all()`) otherwise appears only in Celery batch jobs (`celeryworkers/tasks.py`, `fetch_and_sync_airbyte_jobs.py`) — background, not an admin surface.
-
-**Reuse, don't rewrite:** the per-org user functions in `DDP_backend/ddpui/core/orguserfunctions.py` (invite, resend, delete, role change) already exist and are permission-gated in `ddpui/api/user_org_api.py` (invite `:469`, resend `:504`, delete `:288`, role change `:342`, org create `:539`). The portal's user actions should call these service functions with an **explicit org** built from the path param, rather than reimplementing them.
-
----
-
-## 5. Suspend-cascade integration points (pinned 2026-07-02)
-
-**Two assumptions from the spec were wrong** — confirmed by direct code read:
-
-- **There is no cron Alert feature.** The `features/alerts` spec is not shipped. No `alert.py` model, no warehouse-query eval task. Dalgo's real "alerts" are **Prefect pipeline-failure notifications** fired from a webhook (`ddpui/core/webhooks/webhook_functions.py:213`, `notify_users_about_failed_run`), not a schedule. Since suspend pauses the pipelines, they won't run → won't fail → won't notify. Gating the webhook is belt-and-suspenders, not the main lever.
-- **There are no scheduled report emails.** No celery-beat report task exists (`celeryworkers/tasks.py:1257` `setup_periodic_tasks` has none). Reports email **on-demand only** via `report_tasks.py:19 send_report_email_task`, triggered by `report_api.py:290` — a path that requires a logged-in user, which suspend already blocks.
-
-**So the genuinely load-bearing cascade is three points, not five:**
-
-| # | Point | Exact location | Gate |
+| Concept | Where it lives | Scope | What it gates today |
 |---|---|---|---|
-| 1 | **Login / token (JWT — primary)** | `ddpui/auth.py:94` `CustomJwtAuthMiddleware.authenticate`; org resolved 140-143; add gate at **line 147** before `request.orguser = orguser` (192) | reject if `org.status != active` |
-| 1b | Login / token (legacy DB-token) | `ddpui/auth.py:54` `CustomAuthMiddleware.authenticate`; add gate at **line 69** (org resolved 62-65) | same |
-| 2 | **Prefect deployment pause** (active step) | loop `OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate")` → `prefect_service.set_deployment_schedule(deployment_id, "inactive")` (`ddpprefect/prefect_service.py:543`; proxy side `prefect-proxy/proxy/service.py:1164`). Pattern to copy: `management/commands/refresh_deployment_schedule.py:19-46` | pause on suspend, `"active"` on reactivate |
-| 3 | **Public share render** (the real no-login exposure) | Reports: single choke point `ddpui/api/public_api.py:1049` `_get_public_report_snapshot`. Dashboards: **no shared resolver** — each endpoint does its own `Dashboard.objects.get(public_share_token=...)`; gate points at `public_api.py` `:94, :144, :197, :381, :463, :476, :568, :621, :895, :958` (add a shared helper). | return "unavailable" if org suspended/archived |
+| `UserAttributes.is_platform_admin` | `ddpui/models/org_user.py:31` (per-`User`) | **Global** (cross-org) | **Nothing.** Set by a command; read only into the login payload. |
+| `super-admin` **role** (slug `super-admin`, level 5, pk 1) | `seed/001_roles.json:7`, `OrgUser.new_role` | **One org** (per OrgUser row) | Maps to the most permission slugs, via `@has_permission`. |
 
-**Defensive extras (cheap, not load-bearing):**
-- Pipeline-failure webhook: gate `webhook_functions.py:213` (early-return if org not active).
-- On-demand report send: gate `report_tasks.py:~35` (task entry, after loading snapshot/orguser).
+> **The rule:** The portal's gate is `UserAttributes.is_platform_admin` — a global boolean on the user, not the org-scoped `super-admin` role.
+> **Example:** Arjun (Dalgo ops) has `is_platform_admin = True`, so he can act across Akshara and Bhumi. Sarah is `super-admin` **inside Akshara only** — that's an org role, and it does not let her touch Bhumi.
+> **Why it matters:** If we gated the portal on the `super-admin` role, we'd be gating on a per-org role that can't express "works across all orgs." The global flag is the correct hook.
 
-**Design stance:** the **public-share gate** is the one that matters most — it's the only path that serves NGO data with no login. Pausing Prefect deployments is the active resource-saving step. Login-block is the umbrella. The alert/report gates are defensive no-ops given the above.
-
-**Prefect pause detail:** there is **no** "pause all of an org's schedules" helper today — you loop `OrgDataFlowv1` yourself. `deployment_id` lives on `OrgDataFlowv1`.
+Key facts:
+- `is_platform_admin` is toggled only by the management command `ddpui/management/commands/manage-user-attributes.py:23` (`--enable/--disable is_platform_admin`). No UI sets it. (Spec confirms managing the platform-admin set is out of scope for v1.)
+- It is surfaced today only inside `lookup_users` (`ddpui/core/orguserfunctions.py:72`), which feeds the `POST /login/` response — **not** `/currentuserv2`.
+- Grep across `ddpui/api/` for `is_platform_admin` as an authorization check → **no hits.** The field exists and is displayed but grants no power. This is the plumbing v1 must build.
+- Django `is_superuser`/`is_staff` are **not used anywhere** (grep: no matches). Not a mechanism here.
+- Sibling flag `UserAttributes.can_create_orgs` **does** gate org creation today (`user_org_api.py:547`).
 
 ---
 
-## 6. Frontend: where the portal plugs in
+## 2. The single-org obstacle (the core design driver)
 
-From `access-control/v2/research.md` §4 and the earlier inventory:
+**The rule:** No user/org function or endpoint accepts a target org. The acting org is chosen by the `x-dalgo-org` header in auth middleware (`ddpui/auth.py:62-64`, `:140-142`), then everything reads `request.orguser.org`.
+**Example:** When Meera calls "list users," the backend returns users of whatever org her `x-dalgo-org` header names — it cannot list Bhumi's users unless Meera is herself an OrgUser of Bhumi.
+**Why it matters:** A platform admin is usually **not** an OrgUser of the org they're fixing. So the portal cannot reuse the existing endpoints as-is; it needs endpoints that take an explicit `{org_id}` and are gated by `is_platform_admin` instead of by an org role.
 
-- **Sidebar** `webapp_v2/components/main-layout.tsx` `getNavItems()` (lines 91–231). No role-based filtering exists yet. The portal must **not** appear here for NGO users — gate on `is_platform_admin`.
-- **`middleware.ts`** handles only iframe embedding today — no auth guard. The portal route guard is net-new; a layout-level `is_platform_admin` check is the simplest.
-- **Auth store** `webapp_v2/stores/authStore.ts` holds the current-user payload; `is_platform_admin` is already in that payload (§2). So the client can gate on it without new plumbing — but **server-side refusal is the real control**, UI hiding is secondary.
-- **Reuse:** `webapp_v2/components/settings/user-management/` (`UserManagement.tsx`, `UsersTable.tsx`, `InvitationsTable.tsx`, `InviteUserDialog.tsx`, `DeleteUserDialog.tsx`) and `components/settings/organizations/CreateOrgDialog.tsx` — adapt to take an explicit org, don't rebuild.
-- **New area:** a `app/platform/` route group (directory, org detail, staff, audit log) rendered only for platform admins.
+Auth flow today:
+```
+login → JWT → CustomJwtAuthMiddleware.authenticate (auth.py:176-188)
+            → picks the OrgUser for the x-dalgo-org header (auth.py:140-142)
+            → loads that role's permission slugs into request.permissions (Redis-backed)
+            → @has_permission(["can_..."]) (auth.py:30-51) checks the slug set
+```
+`@has_permission` only tests permission slugs for **one** org. It cannot express cross-org authority — that check is net-new.
+
+---
+
+## 3. Org model + lifecycle (what create / deactivate / delete map to)
+
+**Org model** — `ddpui/models/org.py:123`.
+
+| Field | Present? | Note |
+|---|---|---|
+| `name`, `slug` | ✅ | `slug` max_length 20, nullable |
+| `viz_url`, `viz_login_type` | ✅ | the visualization/Superset URL |
+| `airbyte_workspace_id`, `website` | ✅ | |
+| `is_active` / status | ❌ | **No active/inactive field. "Deactivate org" is net-new schema.** |
+| `plan` | ❌ on Org | lives on `OrgPlans` (OneToOne, `related_name="org_plans"`, `ddpui/models/org_plans.py:19`); `base_plan` ∈ {"Free Trial","Dalgo","Internal"}; `Org.base_plan()` reads it (`org.py:224`) |
+
+**Create an org** — three entry points, all built on one core function:
+- Core: `create_organization(payload: CreateOrgSchema)` — `ddpui/core/orgfunctions.py:19`. Takes `name, viz_url, website`; slugifies the name; **provisions an Airbyte workspace** (`setup_airbyte_workspace_v1`) and rolls back (`org.delete()`) if Airbyte fails. Plan is a separate call: `create_org_plan(payload, org)` (`orgfunctions.py:51`).
+- API: `POST /v1/organizations/` — `post_organization_v1` (`ddpui/api/user_org_api.py:539`), gated `@has_permission(["can_create_org"])` **plus** an extra `UserAttributes.can_create_orgs is True` check (`:546-548`).
+- Command: `createorganduser` (`ddpui/management/commands/createorganduser.py`) — creates org + user + OrgUser + sets `email_verified`/`can_create_orgs`. This is the bootstrap path in the README.
+
+> **The rule:** Creating an org is not just a DB insert — it calls Airbyte to make a workspace.
+> **Example:** When Arjun creates "Bhumi," the backend also spins up Bhumi's Airbyte workspace; if Airbyte is down, the org is rolled back and nothing is created.
+> **Why it matters:** The create-org endpoint can be slow and can fail on an external service. The UI needs a real loading + error state, not an optimistic insert.
+
+**Deactivate an org** — does **not** exist. No `is_active` field, no login enforcement. This is net-new: add the field + block login/API for users of a deactivated org.
+
+**Delete an org** — exists, but it's heavy and has **no API**:
+- `OrgCleanupService.delete_org()` — `ddpui/services/org_cleanup_service.py:349`. Cascade order: Prefect orchestrate pipelines → dbt/transform layer (+ GitHub repo, secrets) → warehouse (+ Airbyte connections/destinations, secrets) → Airbyte workspace → OrgUsers → EDR pipelines → Prefect blocks → org dir on disk → `org.delete()`.
+- Only reachable via the `deleteorg` management command (`--yes-really`, else dry-run). No endpoint.
+- Invitations aren't cleaned explicitly — they rely on DB `CASCADE` from `Invitation.invited_by` / `Org` FKs.
+
+> **The rule:** Deleting an org tears down external systems (Airbyte, Prefect, secrets manager, files), not just database rows — and it's irreversible.
+> **Example:** Deleting "Akshara" removes its Airbyte workspace, its Prefect deployments, its warehouse credentials, and its files on disk. There is no undo.
+> **Why it matters:** This is why v1 ships **deactivate (reversible)** first and defers permanent delete. Wrapping `delete_org()` in a click needs strong guardrails.
+
+---
+
+## 4. User management (functions, endpoints, and the "active" trap)
+
+All in `ddpui/core/orguserfunctions.py` and `ddpui/api/user_org_api.py`. All single-org (`request.orguser.org`).
+
+| Action | Core fn / API | Location | Notes |
+|---|---|---|---|
+| Invite user | `invite_user_v1(orguser, payload)` | `orguserfunctions.py:205` | org = `orguser.org`; API `POST /v1/organizations/users/invite/` (`user_org_api.py:469`, `can_create_invitation`) |
+| Change role | inline in `update_orguser_v1` / `post_modify_orguser_role` | `orguserfunctions.py:164`, `user_org_api.py:342` | `POST /organizations/user_role/modify/` (`can_edit_orguser_role`) |
+| Deactivate user | `update_orguser_v1` with `payload.active` | `orguserfunctions.py:168-169` | **flips `User.is_active` — GLOBAL across every org** |
+| Remove from org | `delete_orguser_v1(requestor, payload)` | `orguserfunctions.py:179` | hard-deletes the OrgUser row (`:200`); `POST /v1/organizations/users/delete` (`can_delete_orguser`) |
+| List org users | — | `user_org_api.py:228` | `GET /organizations/users` (`can_view_orgusers`), includes inactive |
+| Cancel invite | inline | `user_org_api.py:519` | `DELETE /users/invitations/delete/{id}` (`can_delete_invitation`) — **already lacks org scoping** |
+| Invite cap | `if invited_role.level > orguser.new_role.level: reject` | `orguserfunctions.py:220-222` | inviter can invite at their level or below |
+
+- **Invitation model** — `ddpui/models/org_user.py:142`. Fields: `invited_email`, `invited_by` (FK OrgUser, CASCADE), `invited_on`, `invite_code` (uuid string), `invited_new_role` (FK Role). **No status/expiry column** — "pending" just means the row still exists; "cancel" = delete the row; the org is derived via `invited_by.org`.
+- **OrgUser model** — `ddpui/models/org_user.py:69`. **No `active` field.** "Active" is read from `User.is_active` (`orguserhelpers.py:28`). So per-org deactivation (your chosen design) requires a **new field on OrgUser** (e.g. `is_active`), plus surfacing it in the user list and enforcing it at login/permission-load.
+- **`/currentuserv2`** — `get_current_user_v2` (`user_org_api.py:62`) returns `List[OrgUserResponse]` (one per org). Schema `OrgUserResponse` (`org_user.py:127`) does **not** include `is_platform_admin`. v1 must add it so the client can render the entry link + guard.
+
+---
+
+## 5. Removing a user can delete content (the cascade the spec missed)
+
+`created_by` / `last_modified_by` FKs point at OrgUser. Because "remove from org" hard-deletes the OrgUser row, `on_delete` decides content fate:
+
+| Content | FK behavior | Effect of removing the creator |
+|---|---|---|
+| Dashboard (`models/dashboard.py:116`) | `created_by` **CASCADE** | **Dashboard is deleted** |
+| Chart (`models/visualization.py:60`) | `created_by` **CASCADE** | **Chart is deleted** |
+| ReportSnapshot (`models/report.py:74`) | `created_by` **SET_NULL** | orphaned (kept) |
+| Metric / KPI | — | **models do not exist in this repo** (grep: no `class Metric`/`class KPI`) |
+
+> **The rule (your decision — "accept + warn"):** Removing a user still cascade-deletes their dashboards and charts; the confirm dialog must show the count first.
+> **Example:** Removing Priya from Akshara deletes the 3 dashboards and 5 charts she created. The dialog says "This will also delete 3 dashboards and 5 charts" before Meera confirms.
+> **Why it matters:** Silent deletion of an NGO's dashboards would be a trust disaster. The count query + warning is a hard requirement, not polish.
+
+---
+
+## 6. Frontend shell, auth signal, and reusable pieces (webapp_v2)
+
+**Where the sidebar is decided — not the App Router.**
+```
+app/layout.tsx (root; no sidebar)
+   └─ components/client-layout.tsx  ← branches on pathname
+        ├─ public route  → bare
+        └─ else          → <AuthGuard><MainLayout>{children}</MainLayout></AuthGuard>
+                                           └─ MainLayout owns the sidebar
+```
+- `find app -name layout.tsx` → only `app/layout.tsx` + a no-op `app/change-password/layout.tsx`. Top-level sections (`app/dashboards/`, `app/settings/*`) have **no per-section layout**.
+> **The rule:** A route-group `layout.tsx` will **not** replace the sidebar — the sidebar choice lives in `client-layout.tsx`'s pathname branch.
+> **Example:** To make `/admin/*` show the admin sidebar instead of the app nav, add an `/admin` branch in `client-layout.tsx` that renders `<AuthGuard><AdminLayout>{children}</AdminLayout></AuthGuard>`.
+> **Why it matters:** Copying the "just add a layout.tsx" pattern would silently keep the normal sidebar. This is the one architectural gotcha in the frontend.
+
+**Nav link** — `NavItemType` (`components/main-layout.tsx:42-49`) has `hide?` but **no role field**. `getNavItems()` (`:91-231`) builds the array; render filters `.filter(item => !item.hide)`. Add an "Admin Portal" item and gate it with `hide: !isPlatformAdmin`, mirroring the existing `hide: !isFeatureFlagEnabled(...)` pattern (`:130`).
+
+**Auth / platform-admin on the client:**
+- `middleware.ts` does **no** auth gating (only iframe headers for `/share/*`). The guard is client-side; the backend must be the real enforcer.
+- `stores/authStore.ts` OrgUser (`:15-25`) exposes `new_role_slug`, `permissions[]` — but **no platform-admin flag** (grep: none). Two existing de-facto signals used inconsistently: `new_role_slug === 'super-admin'` and `hasPermission('can_create_org')`. v1 should add a clean `is_platform_admin` to the currentuserv2 payload and use that.
+- `useUserPermissions()` (`hooks/api/usePermissions.ts`) → `hasPermission/hasAnyPermission/hasAllPermissions`.
+
+**API client** — `lib/api.ts`: `apiGet/apiPost/apiPut/apiDelete` (`:192-215`) via `apiFetch` (cookie auth, auto 401-refresh, injects `x-dalgo-org` from `localStorage.selectedOrg`). Canonical usage = SWR + hook-per-domain, e.g. `hooks/api/useUserManagement.ts` (`useSWR('/api/organizations/users', apiGet)`). Mirror this with a new `hooks/api/useAdminPortal.ts`.
+
+**Reusable UI (all current-org-bound — need org-parameterized variants):**
+
+| Need | Best example to mirror | Reuse note |
+|---|---|---|
+| Stat-card grid | `components/kpis/kpi-page.tsx`, `app/impact/page.tsx` | compose shadcn `Card`; no prebuilt metric tile |
+| Searchable/filterable table | `components/settings/user-management/UsersTable.tsx` | popover filters + sort; strongest table pattern |
+| Invite dialog | `components/settings/user-management/InviteUserDialog.tsx` | posts `{invited_email, invited_role_uuid}` |
+| Destructive confirm | `components/settings/user-management/DeleteUserDialog.tsx` | shadcn `AlertDialog`, `bg-destructive` |
+
+> **The rule:** The existing user-management components are hardcoded to the current org (they rely on the `x-dalgo-org` header, not an org param).
+> **Example:** `UsersTable` calls `/api/organizations/users` with no org id — it can only ever show the logged-in org's users.
+> **Why it matters:** They're a **visual** template to copy, not a drop-in. The admin portal needs its own hooks that call the new org-scoped admin endpoints.
 
 ---
 
@@ -111,17 +163,16 @@ From `access-control/v2/research.md` §4 and the earlier inventory:
 
 | Service | Touched? | What |
 |---|---|---|
-| **DDP_backend** | Yes (bulk) | New `platform` API router + `PlatformAdminAuth` auth class; `Org.status` migration; `PlatformAuditLog` model; suspend-cascade gates; reuse of orguser/org-create service fns. |
-| **webapp_v2** | Yes | New `app/platform/` area, route guard, API hooks; reuse of user-management + create-org components. |
-| **prefect-proxy** | **Yes** (new vs. access-control, which didn't touch it) | Pausing/resuming an org's Prefect deployments on suspend/reactivate goes through the proxy. |
+| **DDP_backend** | ✅ heavily | new `is_platform_admin` guard + decorator; new `/api/v1/admin/*` router with `{org_id}` params reusing `create_organization` / user fns; `Org.is_active` migration + login enforcement; `OrgUser` per-org active field; surface `is_platform_admin` in `/currentuserv2` |
+| **webapp_v2** | ✅ | `/admin` branch in `client-layout.tsx` + `AdminLayout`; AdminGuard; conditional nav link; `useAdminPortal` hooks; org-parameterized copies of the user-mgmt UI |
+| **prefect-proxy** | ❌ | no user model, no role logic. Deactivate/delete org already flow through DDP_backend's cleanup service, which calls the proxy — but no proxy code change for Week 1. |
 
-**Validation per service:** backend = pytest (auth-class gating, status migration + backfill, each cascade gate, audit-log writes); frontend = Vitest for the route guard + Playwright E2E for "NGO user cannot reach `/platform`, platform admin can"; cross-service = an integration test that suspends an org and asserts login blocked + deployments paused.
+Validation: backend = pytest (guard rejects non-platform-admin with 403; org-scoped endpoints act on the right org; deactivate blocks login). Frontend = Vitest for guard/nav logic + Playwright for "non-admin never sees the link and is bounced from `/admin`."
 
 ---
 
-## 8. Open technical risks (feed the plan's §8)
+## 8. Latent bugs noticed (not in scope, but flag to the team)
 
-- **Auth bypass surface:** a whole new authorization path that steps outside `x-dalgo-org` is the highest-risk part. It must fail closed — no platform endpoint reachable without `is_platform_admin`.
-- **Cascade completeness:** every outward-facing send must be gated, or a suspended org leaks. The §5 list must be provably complete (grep for every warehouse-querying scheduled task).
-- **Login-block blast:** rejecting login by org status must not lock out platform admins themselves or break the accept-invite path.
-- **Hard delete still a command:** v1 archive is soft; the existing `deleteorg` hard-delete command stays out of the portal (donor-compliance).
+- `is_demo` appears to always evaluate False after the `is_demo`/`type` column removal (enums `OrgType` vs `OrgPlanType` never share a value). Seen at `user_org_api.py:124`, `airbyte_api.py:59+`.
+- `ddpui/core/orguserfunctions.py:94` still calls `Org.objects.filter(type=OrgType.DEMO)`, but `Org` no longer has a `type` field → would raise `FieldError` if reached (dead demo-signup path).
+- `DELETE /users/invitations/delete/{id}` (`user_org_api.py:519`) has no org scoping — any caller with the permission can cancel any org's invitation by id. The admin portal should not rely on this loose behavior; its own cancel endpoint should scope by org.

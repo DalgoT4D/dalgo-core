@@ -1,333 +1,380 @@
-# Platform Admin Portal v1 — Implementation Plan (Draft v1)
+# Implementation Plan — Admin Portal v1 (Week 1: Org Onboarding + User Management)
 
-**Spec:** `features/admin-portal/v1/spec.md` (full vision: `features/admin-portal/spec.md`)
+**Status:** Draft v1 — for engineering review
+**Spec:** `features/admin-portal/v1/spec.md`
 **Research:** `features/admin-portal/v1/research.md`
-**Date:** 2026-07-02
-**Status:** Draft — for engineering review.
+**Date:** 2026-07-10
+**Owner:** Veekshitha Nelluru (DMP 2026) · Issue #1254
 
-> Acronyms: HLD (high-level design) · LLD (low-level design) · JWT (JSON Web Token — the signed login token) · FK (foreign key) · RBAC (role-based access control) · PII (personally identifiable information) · PR (pull request).
+**Acronyms:** HLD (High-Level Design) · LLD (Low-Level Design) · FK (foreign key — a DB column pointing at another row) · RBAC (role-based access control) · JWT (the signed login token) · SWR (a React data-fetching hook) · OrgUser (the row linking one user to one org, with their role) · PII (personally identifiable information).
+
+> **Read this first.** Everything in Dalgo today is **single-org** — every user/org action reads the caller's own org from the `x-dalgo-org` header. This portal is **cross-org**: a Dalgo ops person acts on orgs they don't belong to. So the heart of this plan is a **new, platform-admin-gated, org-parameterized API layer** that reuses the existing org/user core functions. See research §2.
 
 ---
 
 ## 1. Overview
 
-A **Dalgo-staff, cross-org portal** to run the platform: see every org's health, manage any org's users, create/suspend/reactivate/archive orgs, all held by a small fixed group of platform admins, with every action logged.
+**What we're building:** An in-app `/admin` section, visible only to platform admins, where the Dalgo ops team onboards orgs and manages the users inside any org — no engineer, no database console.
+
+**Week 1 build target (this plan):** Org Onboarding + user management. The spec's other three features (Broadcast Notifications, Feature Flags, Airbyte/Pipelines viewer) are **Later** and are not planned here.
 
 **Services affected:**
 
 | Service | Role in this feature |
 |---|---|
-| **DDP_backend** (Django + Ninja) | The bulk — new cross-org API, org status, audit log, suspend cascade. |
-| **webapp_v2** (Next.js) | The `/platform` portal UI, gated to platform admins. |
-| **prefect-proxy** (FastAPI) | Pause/resume an org's Prefect deployments on suspend/reactivate. |
+| DDP_backend (Django + Django Ninja) | New admin API, the platform-admin guard, `Org.is_active` + per-org user active field, `/currentuserv2` change |
+| webapp_v2 (Next.js 15) | The `/admin` section, admin sidebar, AdminGuard, admin hooks + screens |
+| prefect-proxy | **Not touched** in Week 1 |
+
+**Scope decisions confirmed with the team (2026-07-10):**
+
+| Decision | Choice |
+|---|---|
+| Org retire | **Deactivate only** (reversible). Permanent delete deferred. |
+| Deactivate user | **Per-org** active flag (new schema on OrgUser). |
+| Remove user with content | **Keep cascade, warn first** (show dashboards/charts that will be deleted). |
+| Create org | **Create the org, then invite** its first admin on the Users tab. |
+
+> **Spec reconciliation:** The spec's Story 7 / Flow F / "Delete Org" dialog described **permanent delete** as Week 1. The team chose **deactivate-only** for Week 1, so permanent delete and its cascade dialog move to a later slice. Recommend updating the spec to match (noted in §8).
 
 ---
 
 ## 2. Blast Radius
 
-**Primary entities changed:** `Organization` (new `status` — active/suspended/archived), `OrgUser` (cross-org management, reusing existing flows). **New:** a platform-admin enforcement tier and a `PlatformAuditLog`.
-
-The load-bearing insight from the domain map: an org has activity that could continue past a login block. But a code read (research §5) **corrected two assumptions** — the cron-Alert and scheduled-report features I worried about **do not exist yet**. The one real no-login exposure is **public share links**.
-
-> ⚠️ **Planner default — confirm on review.** The user stepped away during the blast-radius questions. Suspend cascade is set to **in-scope** as the safe default.
+Primary entities changed: **Organization** and **OrgUser** (from `docs/domain-map.md`). Organization is consumed by *every* other entity (all data is org-scoped); OrgUser is consumed by content via `created_by`. Below is every 1-hop and 2-hop surface and its confirmed status.
 
 | Surface | Hop | Why affected | Status | Notes |
 |---|---|---|---|---|
-| **Pipeline** | 1 | Suspend pauses the org's Prefect deployments (active step) | **in-scope** | Spec states pipelines pause. prefect-proxy touch. Loop `OrgDataFlowv1` → `set_deployment_schedule("inactive")`. |
-| **Share link** (Dashboard + Report public) | 1–2 | Public tokens serve NGO data with **no login** — the real exposure vector | **in-scope** ⚠️ | Suspended/archived org's public links return "unavailable". Gate in `public_api.py`. |
-| **OrgUser** | 1 | Cross-org role change / remove / invite | **in-scope (reused)** | Reuses `orguserfunctions.py`; no new per-org behavior. |
-| **Alert (pipeline-failure notification)** | 1 | Prefect-failure webhook notifies on run failure | **unaffected (moot)** | The `features/alerts` cron feature is **not shipped**. Real notifications fire only on a pipeline run — and suspend pauses pipelines, so none run. Defensive gate at `webhook_functions.py:213` only. |
-| **Report email** | 1 | On-demand send only — **no scheduler exists** | **unaffected (moot)** | Sending requires a logged-in user, which suspend blocks. Defensive gate at `report_tasks.py` task entry. |
-| **Notification** | 2 | Pipeline paused → fewer run notifications | **unaffected (indirect)** | Downstream of paused pipelines; no change to Notification itself. |
-| **Dashboard / Chart / Metric / KPI** (content) | 1–2 | Owned by OrgUsers whose roles the portal can change | **unaffected** | Portal never renders NGO content (no impersonation in v1). Role/remove reuse existing per-org handling. |
-| **Warehouse** | 1 | Org-scoped, but suspend doesn't touch warehouse data | **unaffected** | Data retained on suspend/archive; never queried by the portal. |
-| **Explore / Data Quality** | 1 | Org-scoped surfaces | **unaffected** | Not rendered in the portal; no cross-org exposure. |
+| **Organization** | 0 | Create / edit / deactivate | **In scope** | New `is_active` field; deactivate blocks login. Delete deferred. |
+| **OrgUser** | 0 | Invite / role / deactivate / remove | **In scope** | New per-org active field; cross-org via new endpoints. |
+| **Invitation** | 1 | Cancel a pending invite | **In scope** | Cancel = delete row; scope by org in the new endpoint. |
+| **Dashboard** | 1 | `created_by` CASCADE — deleted when its creator is removed | **In scope (warn)** | Remove-user dialog shows the count. No FK change in v1. |
+| **Chart** | 1 | `created_by` CASCADE — deleted when its creator is removed | **In scope (warn)** | Same warning path as Dashboard. |
+| **ReportSnapshot** | 1 | `created_by` SET_NULL — orphaned, not deleted | **In scope (note)** | Safe; just note the inconsistency. |
+| **Login / auth (all app surfaces)** | 1 | Deactivating an org or a per-org user must block access | **In scope** | Enforced at JWT permission-load. See §5. |
+| Warehouse, Source, Transform, Pipeline, Data Quality | 2 | Torn down by org **delete** cascade | **Deferred** | Only relevant to permanent delete, which is deferred. |
+| Notification | 1 | Broadcast notifications feature | **Deferred** | Spec "Later." Not built in v1. |
+| Feature flags / OrgPreferences | 1 | Feature-flag toggles feature | **Deferred** | Spec "Later." |
+| Airbyte connection status / Prefect run history | 2 | Airbyte & Pipelines viewer | **Deferred** | Spec "Later" (read-only). |
+| Share link, Metric, KPI, Explore, Alert | 2+ | — | **Not affected** | Metric/KPI models don't exist in this repo. Others are downstream of content this feature doesn't render; the portal manages user/org records, not their data. |
 
-**Not listed = not affected.** Source, Transform, and the analytics builders are internal to an org and are neither rendered nor mutated by the portal.
+> **The rule:** The portal manages **records** (orgs, users, invites), not an NGO's **data** (dashboards' contents, warehouse rows).
+> **Example:** Meera can remove Priya from Akshara, but the portal never shows Akshara's "Field Performance" dashboard's numbers.
+> **Why it matters:** It keeps the cross-org blast radius small — the only content the portal can destroy is via the remove-user cascade, which is gated behind a counted warning.
 
 ---
 
 ## 3. High-Level Design (HLD)
 
-### 3.1 The core decision — a separate cross-org authorization path
-
-**The rule:** The portal does not use the normal `x-dalgo-org`-scoped request path. It uses a new `platform` API router whose auth checks the `is_platform_admin` flag on the logged-in user and takes the target org as an explicit parameter.
-**Example:** Meera calls `GET /api/platform/orgs`. There's no `x-dalgo-org` header — the endpoint returns *all* orgs because Meera's `is_platform_admin` is true. To act on Akshara she calls `POST /api/platform/orgs/akshara/users/{id}/resend`, passing the org in the path.
-**Why it matters:** It keeps cross-org power in one isolated, auditable place, instead of bolting a bypass onto the single-org middleware that guards every NGO's data.
+### 3.1 The one big idea: a cross-org admin API
 
 ```
-Dalgo staff browser
-   │  JWT (same login as everyone)
-   ▼
-/api/platform/*   ──►  PlatformAdminAuth
-                         │  is_platform_admin == True ?  ── no ──► 403
-                         │  (superadmin routes also need is_superuser)
-                         ▼ yes
-                       endpoint(org_slug in path) ──► service fn ──► PlatformAuditLog write
+Browser (/admin/*)                         DDP_backend
+──────────────────                         ───────────
+AdminGuard (client)  ──JWT + request──►  @platform_admin_required   ← NEW guard
+  hides link, bounces                       reads UserAttributes.is_platform_admin
+  non-admins                                     │ not admin → 403
+        │                                        ▼
+        │                              /api/v1/admin/orgs/{id}/...   ← NEW router
+        ▼                                        │  takes org_id explicitly
+  useAdminPortal hooks ───────────────►  reuses create_organization(),
+  (org_id in the URL, not the header)      invite_user_v1(), delete_orguser_v1()
+                                           but on the TARGET org, not request.orguser.org
 ```
 
-### 3.2 Two gates, both already present
+> **The rule:** The admin endpoints are gated by the global `is_platform_admin` flag and take the target org in the URL — not the `x-dalgo-org` header.
+> **Example:** `GET /api/v1/admin/orgs/42/users` returns org 42's users because Arjun is a platform admin, even though Arjun has no OrgUser row in org 42.
+> **Why it matters:** The existing `@has_permission` system can't express "works across all orgs" (research §2). This new layer is the only correct way to do cross-org.
 
-| Gate | Backed by | Guards |
-|---|---|---|
-| **Platform admin** | `UserAttributes.is_platform_admin` (exists) | the whole `/api/platform` router |
-| **Superadmin** | Django `User.is_superuser` (exists, unused today) | Platform Staff add/remove only |
+### 3.2 New / changed API endpoints
 
-No new role or flag is invented — both already exist in the codebase (research §2).
+All under `/api/v1/admin/`, all gated by the new `@platform_admin_required`. Reuse existing core functions, passing the target `Org` explicitly.
 
-### 3.3 Suspend cascade — gate at execution, pause at action
+| Method | Endpoint | Reuses | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/admin/orgs` | new query | List all orgs (name, plan, user count, active) |
+| POST | `/api/v1/admin/orgs` | `create_organization` + `create_org_plan` | Create an org (name, slug, viz_url, plan) |
+| GET | `/api/v1/admin/orgs/{id}` | new query | Org detail (Overview facts) |
+| PUT | `/api/v1/admin/orgs/{id}` | new update | Edit org basic details |
+| POST | `/api/v1/admin/orgs/{id}/deactivate` | new | Set `is_active=False` (reversible) |
+| POST | `/api/v1/admin/orgs/{id}/reactivate` | new | Set `is_active=True` |
+| GET | `/api/v1/admin/orgs/{id}/users` | list-users query | List an org's users + pending invites |
+| POST | `/api/v1/admin/orgs/{id}/users/invite` | `invite_user_v1` (org-param variant) | Invite a user to the org |
+| PUT | `/api/v1/admin/orgs/{id}/users/{ouid}/role` | role-change logic | Change a user's role |
+| POST | `/api/v1/admin/orgs/{id}/users/{ouid}/deactivate` | new (per-org flag) | Deactivate a user **in this org only** |
+| POST | `/api/v1/admin/orgs/{id}/users/{ouid}/reactivate` | new | Reactivate in this org |
+| GET | `/api/v1/admin/orgs/{id}/users/{ouid}/removal-impact` | count query | Count dashboards/charts that removal would delete |
+| DELETE | `/api/v1/admin/orgs/{id}/users/{ouid}` | `delete_orguser_v1` (org-param variant) | Remove user from org (cascades content) |
+| DELETE | `/api/v1/admin/orgs/{id}/invitations/{iid}` | new (org-scoped) | Cancel a pending invitation |
+| GET | `/api/v1/admin/stats` | new | Dashboard counts: total orgs, total users |
 
-**The rule:** Suspending sets `Org.status = suspended`. Three points do the real work — login block, an active Prefect pause, and a public-share gate. Two more are cheap defensive no-ops.
+**Changed existing endpoint:** `GET /currentuserv2` (`user_org_api.py:62`) — add `is_platform_admin` to `OrgUserResponse` so the client can render the entry link + AdminGuard.
 
-```
-suspend(org)
-  ├─ Org.status = suspended
-  └─ pause all OrgDataFlowv1 deployments   (prefect-proxy)   ← active step
+> **Deferred endpoints (do not build in Week 1):** `DELETE /orgs/{id}` (permanent delete), notifications, feature flags, Airbyte/pipeline reads.
 
-execution points then check status:
-  login/token       → reject if suspended            (umbrella)
-  public share view → "unavailable" if suspended     ← the real no-login exposure
-  pipeline webhook  → skip notify   (moot: no run happens while paused — defensive)
-  report send task  → skip send     (moot: needs login — defensive)
-```
+### 3.3 External-service touchpoints
 
-**Why only these:** research §5 found no cron-Alert feature and no scheduled-report feature exist. The only thing that serves NGO data without a login is a **public share link**, so that gate is the one that matters; the rest follow from "no login + no pipeline runs."
-
-**Reactivate** reverses: `status = active`, resume deployments. **Archive** = the suspend cascade + excluded from the active directory list; data retained and recoverable.
-
-### 3.4 New / changed endpoints (all under `/api/platform`)
-
-| Method + path | Does | Gate |
-|---|---|---|
-| `GET /orgs` | Directory: all orgs + health signals | platform admin |
-| `GET /orgs/{slug}` | Org detail (metadata + health, no NGO content) | platform admin |
-| `POST /orgs` | Create org shell + invite first Admin | platform admin |
-| `POST /orgs/{slug}/status` | Suspend / reactivate / archive | platform admin |
-| `GET /orgs/{slug}/users` | List the org's users | platform admin |
-| `POST /orgs/{slug}/users` | Add user with a role | platform admin |
-| `POST /orgs/{slug}/users/{id}/role` | Change role (within org's role model) | platform admin |
-| `POST /orgs/{slug}/users/{id}/resend` | Resend invite | platform admin |
-| `DELETE /orgs/{slug}/users/{id}` | Remove user | platform admin |
-| `GET /staff` · `POST /staff` · `DELETE /staff/{id}` | List / add / remove platform admins | **superadmin** |
-| `GET /audit-log` | Filterable action log | platform admin |
-
-### 3.5 External services
-
-- **prefect-proxy** — the only external touch: pause/resume an org's deployments on suspend/reactivate. Reuses Dalgo's existing proxy client (research §5).
-- **Airbyte / dbt / warehouse** — untouched in v1. Create-org does **not** provision a warehouse (deferred); suspend does not delete warehouse data.
+- **Create org** calls Airbyte (`setup_airbyte_workspace_v1`) — slow, can fail; UI needs loading + error states (research §3).
+- **Deactivate org** is DB-only in Week 1 (flag flip + login block). No Airbyte/Prefect call.
+- **Prefect-proxy:** untouched.
 
 ---
 
 ## 4. Low-Level Design (LLD)
 
-### 4.1 Data model
+### 4.1 Data model changes (DDP_backend)
 
-**`Org` (modify — `DDP_backend/ddpui/models/org.py:123`)**
-
+**Migration A — `Org.is_active`:**
 ```python
-class OrgStatus(models.TextChoices):
-    ACTIVE = "active"
-    SUSPENDED = "suspended"
-    ARCHIVED = "archived"
-
-# new fields on Org
-status = models.CharField(max_length=20, choices=OrgStatus.choices, default=OrgStatus.ACTIVE)
-status_changed_at = models.DateTimeField(null=True, blank=True)
-status_reason = models.TextField(null=True, blank=True)
+# ddpui/models/org.py  (class Org, near line 123)
+is_active = models.BooleanField(default=True)
 ```
+- Migration backfills all existing orgs to `True`.
+- Index not required (low row count — tens of orgs).
 
-Migration: add fields + **backfill every existing org to `active`** (data migration). Do not overload the existing `OrgType` enum (that's plan type — research §3).
-
-**`PlatformAuditLog` (new model)**
-
+**Migration B — per-org user active flag on OrgUser:**
 ```python
-class PlatformAuditLog(models.Model):
-    actor = models.ForeignKey(User, on_delete=models.PROTECT)      # the Dalgo staff member
-    action = models.CharField(max_length=64)                        # e.g. "org.suspend", "user.resend_invite"
-    target_org = models.ForeignKey(Org, null=True, on_delete=models.SET_NULL)
-    target_email = models.CharField(max_length=254, null=True)      # user target (email, survives deletion)
-    metadata = models.JSONField(default=dict)                       # before/after, reason, etc.
-    created_at = models.DateTimeField(auto_now_add=True)
+# ddpui/models/org_user.py  (class OrgUser, near line 69)
+is_active = models.BooleanField(default=True)   # per-(user, org); distinct from User.is_active
 ```
+> **The rule:** This new flag is per-org; it does **not** touch `User.is_active`.
+> **Example:** Deactivating Priya in Akshara sets *Akshara's* OrgUser row `is_active=False`; her Bhumi OrgUser row stays `True`, so she still logs into Bhumi.
+> **Why it matters:** It fixes the global-logout footgun (research §4) — the whole reason the team chose the per-org design.
 
-Append-only: no update/delete API. `on_delete=SET_NULL` on org so the log survives an archived/deleted org.
+- Backfill: set `OrgUser.is_active = user.is_active` on migrate, so existing globally-disabled users start disabled everywhere (safe default), then per-org divergence happens going forward.
+- Surface `is_active` in the users-list response (`from_orguser`, `orguserhelpers.py:28`) as the row's Status.
 
-**Platform admin / superadmin:** no new model — `UserAttributes.is_platform_admin` (exists) + `User.is_superuser` (exists).
+**No FK changes in v1.** Dashboard/Chart `created_by` stay `CASCADE` (team chose "accept + warn").
 
-### 4.2 API design
+### 4.2 Auth: the platform-admin guard
 
-- New module `DDP_backend/ddpui/api/platform_api.py` with its own `Router`, mirroring the existing Ninja pattern in `ddpui/api/user_org_api.py`.
-- **`PlatformAdminAuth`** — a Django-Ninja auth class (subclass the existing JWT auth used in `auth.py`) that, after authenticating the user, asserts `UserAttributes.objects.get(user=...).is_platform_admin`. Fails closed → 403. A `require_superuser` dependency adds the `is_superuser` check for `/staff` routes.
-- **Request/response schemas** — Pydantic schemas in `platform_api.py`: `OrgDirectoryRow`, `OrgDetail`, `CreateOrgRequest {name, plan_tier, first_admin_email}`, `OrgStatusRequest {action: suspend|reactivate|archive, reason}`, `AuditLogRow`. Validate email fields; validate `action` against an enum; reject unknown org slug with 404.
-- **Error codes:** 401 (not logged in), 403 (not platform admin / not superuser), 404 (org/user not found), 409 (create-org name taken; illegal status transition e.g. reactivate an active org), 422 (bad payload).
+New decorator, mirroring `@has_permission` (`ddpui/auth.py:30-51`):
+```python
+# ddpui/auth.py
+def platform_admin_required(view):
+    def wrapper(request, *args, **kwargs):
+        ua = UserAttributes.objects.filter(user=request.orguser.user).first()
+        if not (ua and ua.is_platform_admin):
+            raise HttpError(403, "platform admin access required")
+        return view(request, *args, **kwargs)
+    return wrapper
+```
+- The JWT still authenticates the human; the guard adds the cross-org check.
+- Applied to **every** `/api/v1/admin/*` endpoint.
 
-### 4.3 Backend logic
+**Login enforcement for deactivated org / user** — in the middleware that loads permissions (`auth.py:140-142`, permission-load step):
+```
+resolve OrgUser for x-dalgo-org
+  → if OrgUser.is_active is False  → treat as no access (empty permissions / 403)
+  → if OrgUser.org.is_active is False → same
+```
+> **The rule:** A deactivated org or a per-org-deactivated user gets no permissions loaded, so every gated endpoint 403s.
+> **Example:** After Arjun deactivates Akshara, Sarah (Akshara Admin) logs in and every Akshara API call returns 403 — she can't use the app for that org. Her Bhumi access is unaffected.
+> **Why it matters:** Deactivation must be enforced server-side, not by hiding UI — otherwise a deactivated org's users keep working via direct API calls.
 
-| Concern | Approach | Reuse |
+### 4.3 API design — request/response shapes (Django Ninja schemas)
+
+Example, create org:
+```python
+class AdminCreateOrgSchema(Schema):
+    name: str
+    slug: str | None = None        # slugified from name if omitted
+    viz_url: str | None = None
+    base_plan: str = "Free Trial"  # OrgPlanType
+
+class AdminOrgSchema(Schema):       # response
+    id: int
+    name: str
+    slug: str
+    base_plan: str
+    is_active: bool
+    user_count: int
+```
+Error codes: `400` (duplicate slug / invalid email), `403` (not platform admin, from the guard), `404` (org/user not found), `502` (Airbyte provisioning failed on create).
+
+Removal-impact response (drives the warning dialog):
+```python
+class RemovalImpactSchema(Schema):
+    dashboards_deleted: int
+    charts_deleted: int
+    reports_orphaned: int
+```
+Counts come from `Dashboard.objects.filter(created_by=ou).count()` etc.
+
+### 4.4 Backend logic — reuse, don't rewrite
+
+| New admin endpoint | Reuses | Change needed |
 |---|---|---|
-| Directory + health | `Org.objects.all()` annotated with user count, warehouse type (`OrgWarehouse`), last run + fail state (from `OrgDataFlowv1` / flow-run records) | new aggregation query |
-| User actions | Build org context from path slug, call existing service fns | **`ddpui/core/orguserfunctions.py`** (invite/resend/delete/role) |
-| Create org | Wrap the logic behind the `createorganduser` command + `POST /v1/organizations/` | existing org-create + invite |
-| Status change | Set status, write timestamp/reason, pause/resume deployments, write audit log | new `platform_service.py` |
-| Suspend cascade gates | Add `org.status == active` checks at the 5 execution points (research §5) | see §4.5 |
-| Audit log | One helper `record_platform_action(actor, action, org, target_email, metadata)` called by every write endpoint | new |
+| Create org | `create_organization` (`orgfunctions.py:19`) + `create_org_plan` | none — pass the schema through |
+| Invite user | `invite_user_v1` (`orguserfunctions.py:205`) | extract an org-param variant: `invite_user_to_org(target_org, inviter, payload)` so it doesn't read `request.orguser.org` |
+| Remove user | `delete_orguser_v1` (`orguserfunctions.py:179`) | org-param variant keyed on `target_org` |
+| Change role | `post_modify_orguser_role` logic (`user_org_api.py:342`) | org-param variant |
+| Deactivate user | new | set `OrgUser.is_active` (not `User.is_active`) |
 
-### 4.4 Frontend components
+> **The rule:** Refactor the org-scoped core functions to accept a target org, then call them from both the existing single-org endpoints and the new admin endpoints.
+> **Example:** `invite_user_to_org(org=Akshara, inviter=Arjun, payload=...)` is called by the admin portal; the old `invite_user_v1` becomes a thin wrapper passing `request.orguser.org`.
+> **Why it matters:** One code path for "invite a user" keeps the invite-cap and validation rules identical in both surfaces — no drift.
 
-- New route group `webapp_v2/app/platform/`:
-  - `platform/orgs/page.tsx` — directory table (sort/filter by status).
-  - `platform/orgs/[slug]/page.tsx` — detail: Users tab + health panel + lifecycle menu.
-  - `platform/staff/page.tsx` — superadmin only.
-  - `platform/audit-log/page.tsx` — filterable log.
-- **Reuse** `components/settings/user-management/*` (tables, `InviteUserDialog`, `DeleteUserDialog`) and `components/settings/organizations/CreateOrgDialog.tsx`, parameterized by org slug.
-- **New** `components/platform/` for the directory, health panel, lifecycle menu, and typed-name destructive confirm dialog.
-- **Route guard:** a `platform/layout.tsx` that checks `is_platform_admin` from the auth store and renders "not found" otherwise. The portal never appears in `main-layout.tsx` sidebar for NGO users.
-- **API hooks:** `hooks/api/usePlatform.ts` calling `/api/platform/*` (no `x-dalgo-org` header on these calls).
+**Invite cap note:** the cap (`orguserfunctions.py:220-222`, inviter level ≥ invitee level) assumes an inviter role. A platform admin creating invites has no org role in the target org. Decision for the org-param variant: **a platform admin may invite at any role** (Admin/Analyst/Member) — the cap check is skipped when the caller is a platform admin. (Flagged as a confirm in §8.)
 
-### 4.5 Integration points (suspend cascade)
+### 4.5 Frontend components (webapp_v2)
 
-Each gets an `org.status == active` guard (exact refs from research §5):
+**Shell change (the gotcha from research §6):**
+```
+components/client-layout.tsx
+   add branch:  pathname.startsWith('/admin')
+                  → <AuthGuard><AdminLayout>{children}</AdminLayout></AuthGuard>
+```
+- `AdminLayout` = new component with the admin sidebar (Home, Organizations, Notifications, Feature Flags). Notifications + Feature Flags render as "coming soon" placeholders.
+- `AdminGuard` (inside AdminLayout or wrapping it): reads `is_platform_admin` from the auth store; if false, `router.replace('/')`.
+
+**Nav link** — in `getNavItems()` (`main-layout.tsx:91-231`), append an "Admin Portal" item with `hide: !isPlatformAdmin`, thread `isPlatformAdmin` into the call (mirrors the `hide: !isFeatureFlagEnabled(...)` pattern at `:130`).
+
+**New pages / components:**
+
+| Path | Mirrors | Purpose |
+|---|---|---|
+| `app/admin/page.tsx` | `kpis/kpi-page.tsx` card grid | Dashboard: stat cards + recent orgs |
+| `app/admin/organizations/page.tsx` | `UsersTable.tsx` | Orgs list: search + status filter |
+| `app/admin/organizations/new/page.tsx` | existing forms | Create-org form |
+| `app/admin/organizations/[id]/page.tsx` | tabs pattern | Org detail: Overview / Users / Airbyte(placeholder) / Pipelines(placeholder) |
+| `components/admin/AdminLayout.tsx` | `main-layout.tsx` | Admin sidebar shell |
+| `components/admin/AdminGuard.tsx` | `auth-guard.tsx` | Client redirect for non-admins |
+| `components/admin/OrgUsersTable.tsx` | `UsersTable.tsx` | Org-parameterized users table |
+| `components/admin/InviteUserDialog.tsx` | `settings/.../InviteUserDialog.tsx` | Invite (takes org id) |
+| `components/admin/ChangeRoleDialog.tsx` | inline role edit | Change role |
+| `components/admin/RemoveUserDialog.tsx` | `DeleteUserDialog.tsx` | Remove — shows deletion count |
+| `hooks/api/useAdminPortal.ts` | `useUserManagement.ts` | SWR hooks calling `/api/v1/admin/*` |
+
+> **The rule:** The admin hooks put the org id **in the URL**, not the `x-dalgo-org` header.
+> **Example:** `useSWR('/api/v1/admin/orgs/42/users', apiGet)` fetches org 42's users regardless of which org is selected in `localStorage`.
+> **Why it matters:** The existing user-mgmt hooks are current-org-bound (research §6); reusing them would show the wrong org's users.
+
+### 4.6 Data flow — remove a user (the riskiest action)
 
 ```
-1. Login/token (primary) ── ddpui/auth.py:147 (CustomJwtAuthMiddleware) ── reject suspended
-   Login/token (legacy)  ── ddpui/auth.py:69  (CustomAuthMiddleware)
-2. Public share (real)   ── public_api.py:1049 (report resolver) + per-endpoint dashboard
-                            gates (:94,:144,:197,:381,:463,:476,:568,:621,:895,:958)
-                            → add a shared dashboard-token helper; "unavailable" if suspended
-3. Prefect pause (active) ── loop OrgDataFlowv1.filter(org, dataflow_type="orchestrate")
-                            → prefect_service.set_deployment_schedule(deployment_id,"inactive")
-                            (pattern: management/commands/refresh_deployment_schedule.py:19-46)
-4. Webhook notify (defensive) ── webhook_functions.py:213  ── skip if org suspended
-5. Report send (defensive)    ── report_tasks.py task entry ── skip if org suspended
+Meera clicks "Remove" on Priya (org 42)
+  → GET /api/v1/admin/orgs/42/users/{priya}/removal-impact
+  → dialog: "This will also delete 3 dashboards and 5 charts Priya created"
+  → Meera confirms
+  → DELETE /api/v1/admin/orgs/42/users/{priya}
+  → delete_orguser_to_org(org=42, target=priya)  (hard delete; CASCADE fires)
+  → row disappears from OrgUsersTable
 ```
-
-**No "pause all schedules" helper exists** — the loop over `OrgDataFlowv1` is net-new code (small).
 
 ---
 
 ## 5. Security Review
 
-**The portal is the highest-privilege surface in Dalgo — cross-tenant by design. Security is the feature, not an add-on.**
-
-| Concern | Assessment |
+| Area | Finding / plan |
 |---|---|
-| **AuthN / AuthZ** | Every `/api/platform` route uses `PlatformAdminAuth` (checks `is_platform_admin`). `/staff` routes additionally require `is_superuser`. Fails closed. UI hiding is secondary — the server refuses. |
-| **The `x-dalgo-org` bypass** | Platform endpoints intentionally step outside single-org scoping. Risk: a regression that exposes this path to non-platform-admins. Mitigation: one shared auth class, unit-tested to 403 a normal OrgUser; no per-endpoint ad-hoc checks. |
-| **Input validation** | Pydantic schemas validate every payload. Org slug → 404 if unknown. Role changes validated against the org's role model. Emails validated. Status action validated against an enum + legal-transition check. |
-| **Data access control** | v1 exposes **metadata and user records only** — never warehouse rows or rendered dashboards (no impersonation). Endpoints must not join through to NGO content. |
-| **Sensitive data / PII** | User emails are PII and appear in the directory, user tabs, and audit log. No new storage of credentials/tokens. Audit log stores emails (not passwords). |
-| **Injection** | No raw SQL — ORM annotations only for the directory. No user input reaches a query string. |
-| **External calls** | prefect-proxy calls reuse the existing authenticated proxy client; no new secrets. Responses validated before use. |
-| **Abuse / rate limiting** | Audience is ~5 staff, so abuse risk is low, but destructive actions (suspend/archive) require a typed org-name confirmation client-side **and** are recorded in the audit log server-side. Consider a light rate limit on create-org. |
-| **Accountability** | Every write action writes a `PlatformAuditLog` row (append-only). This is the primary control against insider misuse. |
+| **Authorization** | Every `/api/v1/admin/*` endpoint carries `@platform_admin_required` (reads `UserAttributes.is_platform_admin`). This is the *only* thing standing between an org Admin and cross-org data — it must be on every route. Add a test that a non-platform-admin gets 403 on each. |
+| **Two layers** | Client AdminGuard is UX only (hides link, redirects). Real enforcement is the backend guard. Never rely on the client. |
+| **Input validation** | All inputs via Django Ninja schemas (Pydantic): org name/slug, email, role uuid, plan enum. Reject duplicate slug (`400`), invalid email (`400`). |
+| **Multi-tenant leak** | The whole point of the guard: without it, org-id-in-URL endpoints would let any authenticated user read any org. The guard + org-id lookups (404 on missing) are the isolation. Test cross-org access is refused. |
+| **Sensitive data / PII** | The portal shows user emails and roles (PII) — already visible to org Admins today, now to platform admins across orgs. No new secret exposure (create-org handles Airbyte creds server-side via existing `create_organization`; nothing new surfaced to the client). |
+| **Deactivation enforcement** | Deactivated org/user must be blocked at permission-load (§4.2), not just hidden. Test: a user in a deactivated org gets 403 on a normal app endpoint. |
+| **Injection** | No raw SQL; all via the ORM. Counts use `.filter().count()`. |
+| **Destructive action** | Remove-user cascades deletes. Guardrail: the counted warning + explicit confirm. Permanent org delete is deferred, so the heaviest destructive path isn't exposed in Week 1. |
+| **Rate limiting** | Low-traffic internal tool (a handful of ops users). No new throttling needed beyond existing app defaults. |
 
 ---
 
 ## 6. Testing Strategy
 
-**Unit (pytest — DDP_backend)**
-- `PlatformAdminAuth`: a normal OrgUser → 403; a platform admin → 200; a platform admin on `/staff` without `is_superuser` → 403.
-- `Org.status` migration: every pre-existing org backfills to `active`.
-- Each cascade gate: suspended org → login rejected; every public dashboard + report share endpoint → "unavailable"; defensive webhook/report-send gates no-op. (Assert the shared `resolve_public_dashboard` helper is used by all public dashboard endpoints so none is missed.)
-- Status transitions: reactivate-an-active-org → 409; archive keeps data.
-- Audit log: every write endpoint records exactly one row with actor/action/target.
-- User actions reuse `orguserfunctions` and behave identically to the per-org path.
+**Backend (pytest):**
+- Guard: non-platform-admin → 403 on every `/api/v1/admin/*` route; platform admin → 200.
+- Org-scoped correctness: `GET /admin/orgs/42/users` returns org 42's users when the caller belongs to org 7 (proves cross-org via the guard, not the header).
+- Create org: happy path creates Org + OrgPlans; duplicate slug → 400; Airbyte failure → rollback, nothing persisted (mock `setup_airbyte_workspace_v1`).
+- Deactivate org: sets `is_active=False`; a user in that org then gets 403 on a normal endpoint (permission-load enforcement).
+- Per-org user deactivate: Priya in Akshara `is_active=False` does **not** change her Bhumi OrgUser or `User.is_active`.
+- Remove user: removal-impact count matches actual dashboards/charts; delete cascades them; reports orphaned (SET_NULL).
+- Invite via admin: platform admin can invite as Admin/Analyst/Member (cap skipped); invitation row created with correct `invited_by.org`.
+- Cancel invite: scoped to the target org (does not hit the loose global delete path).
 
-**Integration / cross-service**
-- Suspend Akshara → assert (a) its users get 401 on login, (b) its Prefect deployments are paused via the proxy, (c) a public share token for it returns unavailable.
-- Reactivate → deployments resume, login works.
+**Frontend (Vitest + Playwright):**
+- Vitest: `getNavItems` hides the Admin link when `isPlatformAdmin` is false; AdminGuard redirects a non-admin.
+- Playwright E2E: a non-admin typing `/admin` is bounced to `/`; a platform admin sees the admin sidebar, creates an org, opens it, invites a user, and sees the row appear.
 
-**Frontend (Vitest + Playwright)**
-- Vitest: `platform/layout` guard renders "not found" when `is_platform_admin` is false.
-- Playwright E2E: an NGO user (Priya) cannot reach `/platform` (server 403 + no nav entry); a platform admin (Meera) sees the directory and resolves a user; typed-name confirm blocks suspend until the name matches.
+**Edge cases:** empty state (no orgs → zero counts + create CTA); org with only pending invites; removing the last Admin of an org (allow, but note); deactivating an already-inactive org (idempotent).
 
-**Edge cases**
-- Create-org with a duplicate name → 409.
-- Removing a user who owns content (existing per-org orphaning behavior applies — unchanged).
-- Suspending an org that has no pipelines / no warehouse (no crash).
-- Platform admin suspends an org they themselves belong to as an OrgUser → they must not lock *themselves* out of the portal (portal access is by `is_platform_admin`, not org membership — verify).
-
-**Test data:** ≥2 orgs (one with pipelines + a public share + an alert, one bare), a platform-admin user, a superuser, and a normal OrgUser.
+**Test data:** two orgs (Akshara, Bhumi), one shared user (Priya) in both, one platform admin (Arjun), one org Admin (Sarah) for the negative-authorization tests.
 
 ---
 
 ## 7. Milestones
 
-Each milestone is independently shippable and PR-sized. The audit-log model lands in M1 so every later action writes to it.
+Each milestone is independently shippable and reviewable as one PR.
 
-#### Milestone 1: Platform foundation + security boundary
-- **Deliverable:** The `/api/platform` router exists with `PlatformAdminAuth`, a `whoami` endpoint, the `PlatformAuditLog` model, and a gated empty `/platform` portal shell in the frontend. Nothing cross-org yet — but the boundary is real.
+#### Milestone 1: Platform-admin gate + client can see it
+- **Deliverable:** The backend guard exists and `/currentuserv2` tells the client who's a platform admin. No portal yet.
 - **Services:** DDP_backend, webapp_v2
 - **Key tasks:**
-  - [ ] `PlatformAdminAuth` auth class + `require_superuser` dependency
-  - [ ] `platform_api.py` router with `GET /platform/whoami`
-  - [ ] `PlatformAuditLog` model + migration + `record_platform_action` helper
-  - [ ] `app/platform/layout.tsx` route guard on `is_platform_admin`; portal absent from NGO sidebar
-- **Acceptance:** A platform admin loads an empty portal; Priya (NGO user) gets 403 on `/api/platform/whoami` and sees no portal link.
+  - [ ] Add `@platform_admin_required` in `ddpui/auth.py`.
+  - [ ] Add `is_platform_admin` to `OrgUserResponse` + `get_current_user_v2`.
+  - [ ] Auth store + `useUserPermissions` expose `isPlatformAdmin`.
+  - [ ] Backend tests: guard 403/200.
+- **Acceptance:** A platform admin's `/currentuserv2` returns `is_platform_admin: true`; a stub `/api/v1/admin/ping` returns 200 for admins, 403 for everyone else.
 
-#### Milestone 2: Org directory + health (read-only)
-- **Deliverable:** The directory lists all orgs with health signals; org detail shows metadata + health (read-only).
+#### Milestone 2: The `/admin` shell (guarded, empty)
+- **Deliverable:** `/admin` renders the admin sidebar for platform admins; non-admins are bounced. Dashboard shows real total-orgs / total-users counts.
+- **Services:** webapp_v2, DDP_backend (`/admin/stats`)
+- **Key tasks:**
+  - [ ] `/admin` branch in `client-layout.tsx` + `AdminLayout` + `AdminGuard`.
+  - [ ] "Admin Portal" nav link gated by `isPlatformAdmin`.
+  - [ ] `GET /api/v1/admin/stats` + dashboard stat cards (Total Orgs, Total Users; Notifications Sent / Feature Flags ON render as "coming soon" placeholders).
+  - [ ] Playwright: non-admin bounced from `/admin`.
+- **Acceptance:** Arjun sees the link and the dashboard with correct counts; Sarah sees no link and is redirected from `/admin`.
+
+#### Milestone 3: Organizations — list, create, edit, deactivate
+- **Deliverable:** Full org lifecycle minus permanent delete.
 - **Services:** DDP_backend, webapp_v2
 - **Key tasks:**
-  - [ ] `GET /platform/orgs` + `GET /platform/orgs/{slug}` with annotated health (users, warehouse, last run, fail state)
-  - [ ] Directory table (sort/filter by status) + detail page + empty state
-- **Acceptance:** Meera sees every org, spots a FAILING one without opening it, and clicks into detail.
+  - [ ] Migration A: `Org.is_active` + backfill.
+  - [ ] Deactivate/reactivate enforcement at permission-load.
+  - [ ] Admin endpoints: list, create, detail, edit, deactivate, reactivate.
+  - [ ] Orgs list page (search + status filter), create-org form, org detail Overview tab, recent-orgs table links.
+  - [ ] Tests: create rollback on Airbyte failure; deactivate blocks login.
+- **Acceptance:** Arjun creates "Bhumi," edits it, deactivates it (Bhumi users get 403), reactivates it.
 
-#### Milestone 3: Cross-org user management
-- **Deliverable:** From an org's Users tab, resend invite / change role / remove / add — reusing existing per-org logic; every action logged.
+#### Milestone 4: Users tab — invite, role, deactivate, remove, cancel invite
+- **Deliverable:** Cross-org user management inside an org.
 - **Services:** DDP_backend, webapp_v2
 - **Key tasks:**
-  - [ ] `GET/POST /platform/orgs/{slug}/users`, `.../role`, `.../resend`, `DELETE`
-  - [ ] Reuse `orguserfunctions` with an explicit-org context
-  - [ ] Adapt user-management components to a slug param; write audit rows
-- **Acceptance:** Meera resends Priya's invite in Akshara; an audit-log row appears.
+  - [ ] Migration B: `OrgUser.is_active` + backfill + surface in list.
+  - [ ] Org-param variants of invite / role-change / remove; per-org deactivate/reactivate; org-scoped cancel-invite; removal-impact count.
+  - [ ] Org detail Users tab: table (Email, Role, Status incl. Pending), Invite / Change Role / Remove (with count warning) dialogs.
+  - [ ] Tests: per-org deactivate isolation; removal cascade + count; admin invite cap skip.
+- **Acceptance:** Meera invites a user to Akshara, changes their role, deactivates them in Akshara only, removes another user after seeing the deletion warning, and cancels a pending invite.
 
-#### Milestone 4: Create org
-- **Deliverable:** Create an org shell and invite the first Admin (no warehouse provisioning).
-- **Services:** DDP_backend, webapp_v2
-- **Key tasks:**
-  - [ ] `POST /platform/orgs` wrapping org-create + first-Admin invite
-  - [ ] Create-org dialog (name, plan tier, first Admin email); duplicate-name → 409
-- **Acceptance:** Arjun creates an org; it appears in the directory; the first Admin gets an invite; action logged.
-
-#### Milestone 5: Org lifecycle + suspend cascade
-- **Deliverable:** Suspend / reactivate / archive, with the full cascade and typed-name confirmation.
-- **Services:** DDP_backend, webapp_v2, prefect-proxy
-- **Key tasks:**
-  - [ ] `Org.status` field + backfill migration
-  - [ ] `POST /platform/orgs/{slug}/status` with legal-transition checks
-  - [ ] Login gate (`auth.py:147` + `:69`); public-share gate (`public_api.py` — shared dashboard-token helper + report resolver `:1049`)
-  - [ ] Prefect pause/resume: loop `OrgDataFlowv1` → `set_deployment_schedule`
-  - [ ] Defensive gates: webhook notify (`webhook_functions.py:213`), report send task
-  - [ ] Typed-name destructive confirm dialog; archived orgs drop off the active list
-- **Acceptance:** Arjun suspends Akshara → its users can't log in, pipelines pause, and its public dashboard/report links return "unavailable"; reactivate reverses it all.
-
-#### Milestone 6: Platform staff + audit-log viewer
-- **Deliverable:** Superadmin manages the platform-admin list; anyone in the portal can review the filterable audit log.
-- **Services:** DDP_backend, webapp_v2
-- **Key tasks:**
-  - [ ] `GET/POST/DELETE /platform/staff` (superuser-gated) wrapping the `is_platform_admin` flag
-  - [ ] `GET /platform/audit-log` with filters (org, actor, action)
-  - [ ] Staff page (superadmin only) + audit-log page
-- **Acceptance:** Ravi adds a platform admin, then filters the audit log to Akshara and sees Arjun's suspend.
+> **Deferred (later slices, not this plan):** permanent org delete + cascade dialog; Broadcast Notifications; Feature Flags per org; Airbyte & Pipelines viewer; in-portal management of who is a platform admin.
 
 ---
 
 ## 8. Open Questions & Risks
 
-**Open questions (for review):**
-1. **Suspend cascade scope** ⚠️ — the real cascade is **login block + Prefect pause + public-share gate** (the cron-Alert and scheduled-report features I first worried about don't exist — research §5). Confirm public share links should go "unavailable" on suspend. Set in-scope as the planner default because the user was away.
-2. **Archive vs. suspend** — plan treats archive as "suspend cascade + hidden + recoverable." Confirm that's the intended difference.
-3. **Plan tier at create-org** — is "plan tier" a free label, or must it map to an existing `OrgPlan`? Plan assumes it maps to `OrgPlan`.
-4. **Directory "Failing" definition** — plan defines it as "most recent pipeline run failed." Confirm that's the right health signal (vs. staleness or a failing data-quality check).
+**Open questions (need a team answer before the affected milestone):**
+
+| # | Question | Affects | Default if unanswered |
+|---|---|---|---|
+| 1 | When a platform admin invites into an org, confirm the **invite cap is skipped** (admin may invite as any role). | M4 | Skip the cap for platform admins. |
+| 2 | Backfill for Migration B: start `OrgUser.is_active` from `User.is_active` (globally-disabled users start disabled in all orgs)? | M4 | Yes — safe default. |
+| 3 | Dashboard "Notifications Sent" / "Feature Flags ON" cards while those features are deferred — render as disabled "coming soon" tiles? | M2 | Yes — placeholders keep the mockup layout. |
+| 4 | Org "edit" — which fields are editable (name, slug, viz_url, plan)? Slug is used in URLs/Airbyte; is it safe to change? | M3 | Allow name, viz_url, plan; **lock slug** post-create until confirmed. |
+| 5 | Removing the **last Admin** of an org — allow, or block? | M4 | Allow, but surface a note. |
 
 **Risks:**
-- **Auth bypass (highest):** the cross-org path must fail closed. Mitigated by one shared auth class + explicit 403 tests, but it's the part to review hardest.
-- **Public-share gate has no single choke point for dashboards:** each public dashboard endpoint resolves its own token (research §5), so a missed endpoint = a leak. Mitigation: add one shared `resolve_public_dashboard(token)` helper that includes the status check, and route all ~10 endpoints through it.
-- **Login-block self-lockout:** the suspended-org login reject must not block platform admins or the accept-invite path.
-- **Migration:** adding `Org.status` is low-risk (additive + backfill to `active`), but it runs on production orgs — standard migration review applies.
-- **prefect-proxy coupling:** pausing deployments depends on the proxy being reachable; a proxy outage during suspend should fail the action loudly (status not set) rather than half-suspend. No "pause all schedules" helper exists — it's a new loop over `OrgDataFlowv1`.
+
+| Risk | Mitigation |
+|---|---|
+| **The guard is the only cross-org wall.** A missing decorator on one route leaks every org's data. | Central router-level enforcement + a test that iterates all admin routes asserting 403 for non-admins. |
+| **Create-org calls Airbyte** — slow/failure surface. | Real loading + error UI; backend already rolls back on Airbyte failure. |
+| **Remove-user deletes dashboards/charts** (CASCADE kept). | Counted warning + explicit confirm. Revisit switching `created_by` to SET_NULL in a later slice. |
+| **Deactivation enforcement missed** would let a deactivated org keep working via API. | Enforce at permission-load, not UI; explicit test. |
+| **Spec drift:** spec still lists permanent delete as Week 1. | Update `spec.md` Story 7 / Flow F to mark permanent delete deferred (recommended follow-up). |
 
 ---
 
-*Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/engineering/execute-plan features/admin-portal/v1/plan.md` to implement.*
+## Next
+
+Draft v1 saved. Review the plan and tell me what to revise — architecture, scope, milestones, anything. When ready, run `/engineering/execute-plan features/admin-portal/v1/plan.md` to implement.
