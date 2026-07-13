@@ -89,6 +89,28 @@ travels with the capability, every future mutating tool inherits approval for fr
   Report summaries, a future "suggest charts" feature, or dalgo-mcp can call any of
   them without touching the chat graph.
 
+## Research addendum (2026-07-14)
+
+Deep research on how production teams build semantic layers
+(`ai-learnings/research/semantic-layer.md`) validated the plan's core bets (value
+profiles as centerpiece; full-schema injection at our scale; no metric layer;
+deterministic-first cards) and adds five amendments:
+
+1. **Verified queries on the card** — every ecosystem converged on this; LinkedIn
+   measured it as the single biggest accuracy lever (+18 points). M1's card JSON gains a
+   `verified_queries: [{question, sql, verified_at}]` field; the promotion loop (from
+   eval-passing golden items and thumbs-up audit rows) is its own slice after M2.
+2. **PII-classify before profiling (in M1).** Run PII detection (`agent/pii.py` rules +
+   column-name heuristics) over candidate values at profile time; tagged columns get NO
+   value profile. Profiling must not become the leak path around the chat-time masking.
+3. **`is_enum` distinction:** cardinality ≤15 → record values as a *complete* closed
+   domain; 15–50 → top-K with counts as *samples*. One boolean, different prompt semantics.
+4. **`synonyms` as an optional card field** — carried in the JSON now, populated later
+   by the `--describe` pass.
+5. **Re-sync triggers on pipeline completion in v3** (not "future") — dbt-run
+   invalidation is the industry-standard trigger and Dalgo runs the pipelines; Anthropic's
+   "wrong within weeks" staleness warning applies directly.
+
 ## Data flow (one question, after v3)
 
 ```
