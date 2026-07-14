@@ -4,6 +4,58 @@
 **Owner:** Product
 **Purpose:** Stress-test the locked V2 access-control model (Spec A role system + Spec B resource sharing) against realistic Dalgo org shapes; surface where it fails, rank by severity, propose fixes; benchmark against comparable BI tools.
 **Inputs:** `access-control-context-2026-06-02.md`, `access-control-spec-A-role-system-2026-06-02.md`, `access-control-spec-B-resource-sharing-2026-06-02.md`.
+**For reviewers:** this is up for comment. Skim the TL;DR and the at-a-glance table, then drop inline comments on the specific risks (R1–R12) you want to weigh in on.
+
+---
+
+## TL;DR
+
+We stress-tested the locked V2 model (Spec A roles + Spec B sharing) against real Dalgo org types and found **12 risks — 3 blocking, 5 serious, 4 watch.**
+
+The model's *structure* is sound and in places ahead of comparable tools (ownership, additive grants, the no-locked-tile guardrails). The problem is **defaults and governance.** Two locked decisions cause most of the damage:
+
+- **Factory "All users / Edit" floor** → invited funders/board members become editors who can re-share and publish content (R2).
+- **PM→Admin** → external pipeline operators get org-wide god-mode over PII (R1).
+
+Public-sharing-on-by-default (R6) and any-Analyst-can-edit-group-membership (R4) compound it, and there's no separate **data-access plane**, so "private" charts/metrics aren't actually private (R7).
+
+**Five decisions close or shrink ~8 of the 12 risks:**
+
+1. Factory floor default → **View**, not Edit (R2; also shrinks R6/R8/R9).
+2. Public sharing **OFF** by default; toggle gated to owner/Admin (R6).
+3. Group membership locked to **creator+Admin**; consider restricted groups (R4).
+4. **Alert recipients** gated to people who can access the trigger source (R5).
+5. Confirm **infra-ACL → Analyst** sequencing so operators stop needing Admin (R1).
+
+## Risks at a glance
+
+| ID | Risk | Severity | Orgs | One-line fix |
+|---|---|---|---|---|
+| R1 | Pipeline operators must be full Admins — no "operator, not governor" tier | 🔴 Blocking | B, C | Resource-scoped infra grants + View/Run/Edit/Manage verbs → Analyst |
+| R2 | Factory "All users / Edit" makes external Members editors | 🔴 Blocking | A, C, D | Default floor = View |
+| R3 | Spec A interim window shows Members all content | 🔴 Blocking | A, C, D | Hold external-Member onboarding until Spec B (or empty interim) |
+| R4 | Any Analyst+ can mutate any group's membership | 🟠 Serious | C, E | Membership = creator+Admin; restricted groups |
+| R5 | Alert trigger-context leaks values to unauthorized recipients | 🟠 Serious | C | Gate recipients to trigger-source access |
+| R6 | Anyone can publish PII to a public URL (open default + global on) | 🟠 Serious | C | Public default OFF; toggle = owner/Admin |
+| R7 | No data-access plane → "private" charts/metrics aren't private | 🟠 Serious | C, E | Treat data plane first-class; eval Superset RLS; position honestly |
+| R8 | Access-request approver = any Edit-holder (rubber-stamp) | 🟠 Serious | A, C | Approval = owner + Admin |
+| R9 | User hard-delete vs. owned resources undefined | 🟡 Watch | all | Reassign owned resources to oldest Admin on delete |
+| R10 | Migration auto-extend explodes chart share lists | 🟡 Watch | D, E | Extend at group granularity; load-test |
+| R11 | No RLS → funder/program separation needs duplicate dashboards | 🟡 Watch | D, E | Commit RLS target (Superset in-stack) |
+| R12 | 30-day invite expiry is a hard platform constant | 🟡 Watch | field-heavy | Per-org override or one-click re-invite |
+
+## Decisions needed from reviewers
+
+Comment inline on the relevant risk. Open decisions:
+
+- [ ] **R1** — infra-ACL sequencing + verb model (esp. a distinct **Run** permission) + interim posture for partner-operated orgs
+- [ ] **R2** — flip factory floor default to View?
+- [ ] **R3** — interim Member-visibility posture before Spec B ships
+- [ ] **R4** — group membership = creator+Admin only? restricted groups in V1?
+- [ ] **R5** — alert-recipient gating rule
+- [ ] **R6** — public-sharing global defaults OFF + toggle gated to owner/Admin?
+- [ ] **R7** — V1 data-privacy positioning + Superset RLS as the path?
+- [ ] **R8** — access-request approver scope = owner + Admin?
 
 ---
 
@@ -11,9 +63,9 @@
 
 Severity scale:
 
-- **Blocking** — breaks the core safety promise ("safe to invite external partners; PII not accidentally exposed") for a common org type. Should be resolved before GA.
-- **Serious** — a real data-leak or governance gap via a side channel; resolve in V1 or document loudly with a committed fix date.
-- **Watch** — real but lower-likelihood or lower-blast-radius; can ship with a known-limitation note.
+- 🔴 **Blocking** — breaks the core safety promise ("safe to invite external partners; PII not accidentally exposed") for a common org type. Should be resolved before GA.
+- 🟠 **Serious** — a real data-leak or governance gap via a side channel; resolve in V1 or document loudly with a committed fix date.
+- 🟡 **Watch** — real but lower-likelihood or lower-blast-radius; can ship with a known-limitation note.
 
 Org archetypes referenced:
 
@@ -28,83 +80,83 @@ Org archetypes referenced:
 ## Blocking
 
 ### R1 — No "operate infra without governing the org" role; pipeline operators must be full Admins
-**Orgs:** B, C
-**Failure:** Infra (Ingest/Transform/Warehouse/Pipelines/Orchestration) is the one place role still gates function, and only Admin can edit it (Analyst read-only, Member hidden). So anyone who runs pipelines must be Admin = effective owner of every resource, can view/edit/delete/re-share/transfer anything, and reads every warehouse table — including PII and salary. PM→Admin makes every existing pipeline operator an org governor. For an external implementation partner serving multiple NGOs, that's unaudited god-mode over each org's most sensitive data.
-**Why it's structural:** The old Pipeline Manager filled the "infra-operator, not governor" slot; collapsing PM→Admin removed the capability. Content decoupled role from function; infra did not.
-**Planned mitigation (per Product):** Build resource-level access control on the Data items (sources, transform, orchestrate, warehouse) — the same grant model as content — then push infra access down to the **Analyst** role. Once that lands, a pipeline operator can be an Analyst with infra grants, not an Admin. **This downgrades R1's residual risk because there is a committed path.**
-**Proposed infra model (informed by Fivetran / Airbyte / Hevo / dbt Cloud — see Appendix B):** scope infra grants to the **Source/connector**, **Transform project**, and **Orchestration pipeline** level (not a blanket infra flag), and use a **verb model richer than content's View/Edit** because infra has a *run* dimension: **View / Run / Edit / Manage**. An external implementation partner then becomes an **Analyst with Manage (or Run+Edit) grants on the specific pipelines/sources they operate** — they operate infra without being an org governor and without blanket access to PII content. This is precisely the "operator, not governor" tier R1 says is missing, and every comparator ships some version of it.
-**Residual risk until then:** During the window where PM→Admin is live but infra ACLs aren't, partner-operated orgs (B) run with external Admins. Note the cautionary parallel: Airbyte Cloud *Standard* lands every invited user as Workspace Admin with no differentiation — the same trap PM→Admin puts Dalgo in, and a widely-criticized one. Recommend: (a) sequence the infra-ACL work close behind Spec A/B rather than "V-next," and (b) interim guidance that external partners get Admin only where the org accepts it, else stay Analyst (read-only infra) and the org keeps pipeline ops in-house.
-**Decision needed:** Confirm infra-ACL sequencing, the verb model (esp. a distinct **Run** permission for orchestration), and interim posture for partner-operated orgs.
+- **Orgs:** B, C
+- **Failure:** Infra (Ingest/Transform/Warehouse/Pipelines/Orchestration) is the one place role still gates function, and only Admin can edit it (Analyst read-only, Member hidden). So anyone who runs pipelines must be Admin = effective owner of every resource, can view/edit/delete/re-share/transfer anything, and reads every warehouse table — including PII and salary. PM→Admin makes every existing pipeline operator an org governor. For an external implementation partner serving multiple NGOs, that's unaudited god-mode over each org's most sensitive data.
+- **Why it's structural:** The old Pipeline Manager filled the "infra-operator, not governor" slot; collapsing PM→Admin removed the capability. Content decoupled role from function; infra did not.
+- **Planned mitigation (per Product):** Build resource-level access control on the Data items (sources, transform, orchestrate, warehouse) — the same grant model as content — then push infra access down to the **Analyst** role. Once that lands, a pipeline operator can be an Analyst with infra grants, not an Admin. **This downgrades R1's residual risk because there is a committed path.**
+- **Proposed infra model (informed by Fivetran / Airbyte / Hevo / dbt Cloud — see Appendix B):** scope infra grants to the **Source/connector**, **Transform project**, and **Orchestration pipeline** level (not a blanket infra flag), and use a **verb model richer than content's View/Edit** because infra has a *run* dimension: **View / Run / Edit / Manage**. An external implementation partner then becomes an **Analyst with Manage (or Run+Edit) grants on the specific pipelines/sources they operate** — they operate infra without being an org governor and without blanket access to PII content. This is precisely the "operator, not governor" tier R1 says is missing, and every comparator ships some version of it.
+- **Residual risk until then:** During the window where PM→Admin is live but infra ACLs aren't, partner-operated orgs (B) run with external Admins. Note the cautionary parallel: Airbyte Cloud *Standard* lands every invited user as Workspace Admin with no differentiation — the same trap PM→Admin puts Dalgo in, and a widely-criticized one. Recommend: (a) sequence the infra-ACL work close behind Spec A/B rather than "V-next," and (b) interim guidance that external partners get Admin only where the org accepts it, else stay Analyst (read-only infra) and the org keeps pipeline ops in-house.
+- **Decision needed:** Confirm infra-ACL sequencing, the verb model (esp. a distinct **Run** permission for orchestration), and interim posture for partner-operated orgs.
 
 ### R2 — Factory default "All users / Edit" inverts the safety story
-**Orgs:** A, C, D (any org inviting an external Member)
-**Failure:** Every new resource starts editable by all users, including external funders/board Members. Edit confers: re-share to anyone, toggle a public link, regenerate a Report snapshot. So an invited funder can edit your dashboard, re-share it onward, or publish it publicly — the opposite of "safe to invite externals." Safety depends on the owner remembering to narrow each sensitive resource to Private *before* building it; humans forget, and PII-heavy orgs (C) pay for it.
-**Proposed fix:** Change the factory default to **"All users / View"** (or "Analysts+ / Edit"). Keep the open-edit option available for orgs that want it, but don't ship it as the factory value. Editing and re-sharing by external Members should be opt-in, not default. *(Note: §5.2 now makes the org-default a full picker, so this is a one-value change, not a model change.)*
-**Decision needed:** Confirm factory default flips to View. (This single change also shrinks R6, R8, R9.)
+- **Orgs:** A, C, D (any org inviting an external Member)
+- **Failure:** Every new resource starts editable by all users, including external funders/board Members. Edit confers: re-share to anyone, toggle a public link, regenerate a Report snapshot. So an invited funder can edit your dashboard, re-share it onward, or publish it publicly — the opposite of "safe to invite externals." Safety depends on the owner remembering to narrow each sensitive resource to Private *before* building it; humans forget, and PII-heavy orgs (C) pay for it.
+- **Proposed fix:** Change the factory default to **"All users / View"** (or "Analysts+ / Edit"). Keep the open-edit option available for orgs that want it, but don't ship it as the factory value. Editing and re-sharing by external Members should be opt-in, not default. *(Note: §5.2 now makes the org-default a full picker, so this is a one-value change, not a model change.)*
+- **Decision needed:** Confirm factory default flips to View. (This single change also shrinks R6, R8, R9.)
 
 ### R3 — Spec A interim window leaks all content to Members
-**Orgs:** A, C, D
-**Failure:** Spec A makes Members see all content View-only, and Admins can onboard Members via Settings > Users in that window. So onboarding an external Member before Spec B ships exposes every PII and salary dashboard. "Communicate it's transitional" does not prevent the leak.
-**Proposed fix:** Either (a) hold external-Member onboarding until Spec B ships (explicit released-together guidance), or (b) in the interim, scope Member content visibility to nothing/empty rather than all (accept the "logged-in, see-nothing" cliff for the short window), or (c) compress the gap between Spec A and Spec B to near-zero for orgs with sensitive data.
-**Decision needed:** Pick the interim posture; if (a), state it as a hard rollout rule.
+- **Orgs:** A, C, D
+- **Failure:** Spec A makes Members see all content View-only, and Admins can onboard Members via Settings > Users in that window. So onboarding an external Member before Spec B ships exposes every PII and salary dashboard. "Communicate it's transitional" does not prevent the leak.
+- **Proposed fix:** Either (a) hold external-Member onboarding until Spec B ships (explicit released-together guidance), or (b) in the interim, scope Member content visibility to nothing/empty rather than all (accept the "logged-in, see-nothing" cliff for the short window), or (c) compress the gap between Spec A and Spec B to near-zero for orgs with sensitive data.
+- **Decision needed:** Pick the interim posture; if (a), state it as a hard rollout rule.
 
 ---
 
 ## Serious
 
 ### R4 — Groups are an unconsented access side-channel
-**Orgs:** C, E
-**Failure:** Groups are org-wide and any Analyst+ can create them *and edit any group's membership*. A resource owner shares the salary chart with the "Leadership" group, trusting its roster. Later any Analyst adds a person to "Leadership" → that person sees salary, with no involvement from the chart owner. This breaks the "every grant is explicit, owner controls the audience, auditable" promise — membership is mutated by third parties.
-**Proposed fix:** **Restricted groups** (admin-managed membership) for sensitive groups, or at minimum: only the group creator + Admin manage membership (Spec B §9 already says creator+Admin can manage — but "any Analyst+ can add existing members" in the carried-over model contradicts this; lock it to creator+Admin), and surface a "membership changed" signal to owners of resources shared with that group. Long-term: IdP/SSO-synced groups (industry norm).
-**Decision needed:** Confirm group-membership management is creator+Admin only, and whether restricted groups move into V1.
+- **Orgs:** C, E
+- **Failure:** Groups are org-wide and any Analyst+ can create them *and edit any group's membership*. A resource owner shares the salary chart with the "Leadership" group, trusting its roster. Later any Analyst adds a person to "Leadership" → that person sees salary, with no involvement from the chart owner. This breaks the "every grant is explicit, owner controls the audience, auditable" promise — membership is mutated by third parties.
+- **Proposed fix:** **Restricted groups** (admin-managed membership) for sensitive groups, or at minimum: only the group creator + Admin manage membership (Spec B §9 already says creator+Admin can manage — but "any Analyst+ can add existing members" in the carried-over model contradicts this; lock it to creator+Admin), and surface a "membership changed" signal to owners of resources shared with that group. Long-term: IdP/SSO-synced groups (industry norm).
+- **Decision needed:** Confirm group-membership management is creator+Admin only, and whether restricted groups move into V1.
 
 ### R5 — Alerts are a data-exfiltration channel
-**Orgs:** C
-**Failure:** Alert recipients get "notifications with trigger context" but no resource access. The trigger context *is* the sensitive value (e.g., "District X beneficiary count = 412"). Any Analyst+ can create an alert and set arbitrary users/groups as recipients. So sensitive metric values can be piped to people with no access to the underlying KPI/metric — access control bypassed via notifications.
-**Proposed fix:** Either (a) recipients must already have View on the alert's trigger source (KPI/Metric), or (b) trigger context is scrubbed to "a threshold was crossed" (no value) for recipients without access, with the value visible only on click-through (which enforces access). Default to (a) for sensitive orgs.
-**Decision needed:** Confirm recipient-gating rule.
+- **Orgs:** C
+- **Failure:** Alert recipients get "notifications with trigger context" but no resource access. The trigger context *is* the sensitive value (e.g., "District X beneficiary count = 412"). Any Analyst+ can create an alert and set arbitrary users/groups as recipients. So sensitive metric values can be piped to people with no access to the underlying KPI/metric — access control bypassed via notifications.
+- **Proposed fix:** Either (a) recipients must already have View on the alert's trigger source (KPI/Metric), or (b) trigger context is scrubbed to "a threshold was crossed" (no value) for recipients without access, with the value visible only on click-through (which enforces access). Default to (a) for sensitive orgs.
+- **Decision needed:** Confirm recipient-gating rule.
 
 ### R6 — Public links + default-on global + Edit-for-all = anyone can publish PII to the open web
-**Orgs:** C
-**Failure:** "Allow public sharing" defaults ON; under the factory floor everyone has Edit; Edit lets you toggle a public link. So in a default org, any user can expose a beneficiary dashboard at an anonymous URL. The only gate is an Admin proactively turning the global off.
-**Proposed fix:** Default the org global **OFF**; require **owner or Admin** (not generic Edit) to toggle a public link; add an explicit confirm step naming the resource's sensitivity. Largely neutralized if R2 (View default) also lands.
-**Decision needed:** Confirm public-sharing global defaults OFF and link-toggle requires owner/Admin.
+- **Orgs:** C
+- **Failure:** "Allow public sharing" defaults ON; under the factory floor everyone has Edit; Edit lets you toggle a public link. So in a default org, any user can expose a beneficiary dashboard at an anonymous URL. The only gate is an Admin proactively turning the global off.
+- **Proposed fix:** Default the org global **OFF**; require **owner or Admin** (not generic Edit) to toggle a public link; add an explicit confirm step naming the resource's sensitivity. Largely neutralized if R2 (View default) also lands.
+- **Decision needed:** Confirm public-sharing global defaults OFF and link-toggle requires owner/Admin.
 
 ### R7 — Single-plane model: "data access" isn't separable from "content access," so chart/metric privacy is partly illusory
-**Orgs:** C, E
-**Failure:** Two symptoms of the same root: (i) the documented Editor-to-Editor gap — any Analyst+ can rebuild a Private chart from the warehouse; (ii) a Private metric still computes inside any shared chart, so chart-viewers see its output regardless of the metric's floor ("references ≠ shares"). The model controls *content visibility* but not *data visibility*; they're treated as one plane. Every mature comparator separates these (see Appendix).
-**Proposed fix:** Model the **data plane** as first-class now even if enforcement (RLS/column masking) is deferred: keep the `dataset_access_rules` stub, and — critically — **stop implying that chart/metric floors deliver data privacy.** Position V1 honestly (Spec B §17.2 already does this; make sure the taxonomy doesn't oversell metric-level control). Since Dalgo runs on Superset, evaluate exposing **Superset's native row-level security** rather than building from scratch (see Appendix).
-**Decision needed:** Confirm V1 positioning and whether Superset RLS is the V-next path.
+- **Orgs:** C, E
+- **Failure:** Two symptoms of the same root: (i) the documented Editor-to-Editor gap — any Analyst+ can rebuild a Private chart from the warehouse; (ii) a Private metric still computes inside any shared chart, so chart-viewers see its output regardless of the metric's floor ("references ≠ shares"). The model controls *content visibility* but not *data visibility*; they're treated as one plane. Every mature comparator separates these (see Appendix).
+- **Proposed fix:** Model the **data plane** as first-class now even if enforcement (RLS/column masking) is deferred: keep the `dataset_access_rules` stub, and — critically — **stop implying that chart/metric floors deliver data privacy.** Position V1 honestly (Spec B §17.2 already does this; make sure the taxonomy doesn't oversell metric-level control). Since Dalgo runs on Superset, evaluate exposing **Superset's native row-level security** rather than building from scratch (see Appendix).
+- **Decision needed:** Confirm V1 positioning and whether Superset RLS is the V-next path.
 
 ### R8 — Request-access approver = any Edit-holder → rubber-stamp under open default
-**Orgs:** A, C
-**Failure:** Approvers are owner + any Edit-holder + Admin. Under the factory-open floor, everyone has Edit, so everyone can approve access requests — access control becomes a rubber stamp by arbitrary Members. Even under stricter floors, "any Edit-holder approves" may include people the owner never intended as gatekeepers.
-**Proposed fix:** Approval = **owner + Admin** (+ explicitly designated delegates), not raw Edit. Shrinks automatically if R2 lands.
-**Decision needed:** Confirm approver scope (this was already flagged as Spec B open question §17.1.6).
+- **Orgs:** A, C
+- **Failure:** Approvers are owner + any Edit-holder + Admin. Under the factory-open floor, everyone has Edit, so everyone can approve access requests — access control becomes a rubber stamp by arbitrary Members. Even under stricter floors, "any Edit-holder approves" may include people the owner never intended as gatekeepers.
+- **Proposed fix:** Approval = **owner + Admin** (+ explicitly designated delegates), not raw Edit. Shrinks automatically if R2 lands.
+- **Decision needed:** Confirm approver scope (this was already flagged as Spec B open question §17.1.6).
 
 ---
 
 ## Watch
 
 ### R9 — User hard-delete vs. owned resources is undefined
-**Orgs:** all (staff turnover)
-**Failure:** Spec A ships hard delete of users; ownership is owner-bound. Deleting a departing staffer could orphan or cascade-delete their dashboards.
-**Proposed fix:** On user delete, reassign owned resources to the oldest active Admin (reuse the migration fallback rule) with a notice; never cascade-delete content on user delete.
+- **Orgs:** all (staff turnover)
+- **Failure:** Spec A ships hard delete of users; ownership is owner-bound. Deleting a departing staffer could orphan or cascade-delete their dashboards.
+- **Proposed fix:** On user delete, reassign owned resources to the oldest active Admin (reuse the migration fallback rule) with a notice; never cascade-delete content on user delete.
 
 ### R10 — Migration auto-extend explodes chart share lists
-**Orgs:** D, E (many dashboards × large groups)
-**Failure:** The one-time auto-extend writes every consumer onto every inner chart's direct-share list. 20 dashboards × 10 charts × a 30-person group = thousands of rows on day one; "Manage shares" becomes unusable; permization/perf hit.
-**Proposed fix:** Extend at **group granularity** (add the group, not each member) so one row covers the group; load-test the resolver and the Manage-shares view against the largest existing org before migration.
+- **Orgs:** D, E (many dashboards × large groups)
+- **Failure:** The one-time auto-extend writes every consumer onto every inner chart's direct-share list. 20 dashboards × 10 charts × a 30-person group = thousands of rows on day one; "Manage shares" becomes unusable; permization/perf hit.
+- **Proposed fix:** Extend at **group granularity** (add the group, not each member) so one row covers the group; load-test the resolver and the Manage-shares view against the largest existing org before migration.
 
 ### R11 — No RLS → funder/program separation requires dashboard duplication
-**Orgs:** D, E
-**Failure:** "Each funder sees only their program" or "program teams siloed on shared data" can't be done on one dashboard; editors maintain parallel duplicates. For funder-driven orgs (a large share of the base) this is ongoing toil.
-**Proposed fix:** Commit a rough RLS sequencing target (Superset RLS is in-stack). Until then, document the duplication pattern and size the editor burden.
+- **Orgs:** D, E
+- **Failure:** "Each funder sees only their program" or "program teams siloed on shared data" can't be done on one dashboard; editors maintain parallel duplicates. For funder-driven orgs (a large share of the base) this is ongoing toil.
+- **Proposed fix:** Commit a rough RLS sequencing target (Superset RLS is in-stack). Until then, document the duplication pattern and size the editor burden.
 
 ### R12 — 30-day pending-invite expiry is a hard platform constant
-**Orgs:** field-heavy NGOs, low connectivity
-**Failure:** Field staff on personal emails with intermittent access may miss a fixed 31-day window; not per-org configurable.
-**Proposed fix:** Keep 30 days as default but consider per-org override, or a one-click re-invite from the pending list. Low priority.
+- **Orgs:** field-heavy NGOs, low connectivity
+- **Failure:** Field staff on personal emails with intermittent access may miss a fixed 31-day window; not per-org configurable.
+- **Proposed fix:** Keep 30 days as default but consider per-org override, or a one-click re-invite from the pending list. Low priority.
 
 ---
 
