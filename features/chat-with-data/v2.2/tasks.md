@@ -34,12 +34,21 @@ REPL run the exact production graph topology with approval off.
 
 ## H3 — Frontend: highlighted approval card
 
-- [ ] useChatWithData: approval_request state + approval_response send
-- [ ] ApprovalCard.tsx: prominent styling, Approve/Cancel, collapse after decision
-- [ ] input disabled while pending
-- [ ] tests
+- [x] useChatWithData: approval state on the message + pendingApproval + respondToApproval
+- [x] ApprovalCard.tsx: accent border + ring highlight, Approve/Cancel, collapses to
+      "Chart approved ✓ / Chart declined" after the decision
+- [x] composer disabled + placeholder swap while pending (page + drawer wired)
+- [x] tests: reducer approval events; ApprovalCard render/actions/collapse (1548 total green)
 
 ## H4 — Polish + docs
 
-- [ ] core/ai/CLAUDE.md: approval seam + approval=False convention
-- [ ] reconnect-while-pending limitation documented
+- [x] core/ai/CLAUDE.md: approval seam (one dict entry), require_approval convention,
+      py3.11 requirement, WS event addition
+- [x] reconnect-while-pending limitation: documented here — a pending card is lost on
+      reload (checkpoint keeps the turn paused; user re-asks). Fine for v1.
+
+## Extra finds during execution
+
+- [x] py3.11 enum-format bug in mention emails: `f"{comment.target_type}"` renders
+      "CommentTargetType.CHART" on 3.11 → broken deep links. Fixed with .value
+      normalization in mention_service. (Found by the full suite under the new pin.)
