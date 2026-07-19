@@ -52,3 +52,12 @@ REPL run the exact production graph topology with approval off.
 - [x] py3.11 enum-format bug in mention emails: `f"{comment.target_type}"` renders
       "CommentTargetType.CHART" on 3.11 → broken deep links. Fixed with .value
       normalization in mention_service. (Found by the full suite under the new pin.)
+
+## REVERTED (2026-07-19)
+
+User asked to revert. Both branches force-pushed back: DDP_backend
+38c3c636 → 04c1b15b, webapp_v2 1bc38c14 → 945f0da6. The complete,
+tested implementation survives as dangling commits — restore with
+`git cherry-pick 38c3c636` (backend) / `git cherry-pick 1bc38c14`
+(frontend) before local gc prunes them (~2 weeks), or re-execute this
+plan. Note: any restore re-requires the Python 3.11 pin.
