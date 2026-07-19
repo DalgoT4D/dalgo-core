@@ -68,8 +68,11 @@ The revert left the venv on py3.11; live chat broke (Anthropic 400:
 thinking block missing 'thinking'). Root cause: our LOCKED langchain
 versions have a py3.11-ONLY streaming chunk-aggregation bug — thinking
 deltas aren't merged (signature survives, text dropped). Streaming only:
-ainvoke paths (evals, repl one-shots) unaffected, which is why evals
-looked green. Proven by same-lock A/B: 3.10 streams fine, 3.11 fails.
+ainvoke paths (evals, one-shot llm_calls) unaffected, which is why evals
+looked green. CORRECTION: the REPL streams too (astream) — it would have
+reproduced this in one command and is the cheapest live streaming smoke
+test before any interpreter/langchain bump. Proven by same-lock A/B:
+3.10 streams fine, 3.11 fails.
 Fixed by restoring the venv to 3.10 + pm2 restart of django-backend-asgi.
 
 ⚠ Consequence for restoring HITL: the py3.11 pin alone is NOT enough —
