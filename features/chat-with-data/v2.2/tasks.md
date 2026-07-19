@@ -61,3 +61,18 @@ tested implementation survives as dangling commits — restore with
 `git cherry-pick 38c3c636` (backend) / `git cherry-pick 1bc38c14`
 (frontend) before local gc prunes them (~2 weeks), or re-execute this
 plan. Note: any restore re-requires the Python 3.11 pin.
+
+## Post-revert incident (2026-07-19)
+
+The revert left the venv on py3.11; live chat broke (Anthropic 400:
+thinking block missing 'thinking'). Root cause: our LOCKED langchain
+versions have a py3.11-ONLY streaming chunk-aggregation bug — thinking
+deltas aren't merged (signature survives, text dropped). Streaming only:
+ainvoke paths (evals, repl one-shots) unaffected, which is why evals
+looked green. Proven by same-lock A/B: 3.10 streams fine, 3.11 fails.
+Fixed by restoring the venv to 3.10 + pm2 restart of django-backend-asgi.
+
+⚠ Consequence for restoring HITL: the py3.11 pin alone is NOT enough —
+3.11 requires upgrading langchain/langchain-anthropic to a version whose
+streaming aggregation works on 3.11, verified against a live streamed
+turn with thinking blocks, BEFORE the pin ships.
