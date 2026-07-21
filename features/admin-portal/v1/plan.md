@@ -1,4 +1,4 @@
-# Implementation Plan — Admin Portal v1 (Week 1: Org Onboarding + User Management)
+# Implementation Plan — Admin Portal v1 (all four features)
 
 **Status:** Draft v1 — for engineering review
 **Spec:** `features/admin-portal/v1/spec.md`
@@ -16,7 +16,16 @@
 
 **What we're building:** An in-app `/admin` section, visible only to platform admins, where the Dalgo ops team onboards orgs and manages the users inside any org — no engineer, no database console.
 
-**Week 1 build target (this plan):** Org Onboarding + user management. The spec's other three features (Broadcast Notifications, Feature Flags, Airbyte/Pipelines viewer) are **Later** and are not planned here.
+**Scope of this plan:** all four v1 features, as four tracks.
+
+| Track | Feature | Status |
+|---|---|---|
+| **A** | Org Onboarding + user management | **Shipped** (M1–M4). One scoped change outstanding: entry & landing — §9. |
+| **B** | Broadcast Notifications | Planned — §10 |
+| **C** | Feature Flags per Org | Planned — §11 |
+| **D** | Airbyte & Pipelines (read-only) | Planned — §12 |
+
+Tracks B, C, and D are independent of one another and can be sequenced in any order. All three depend on Track A's shipped admin shell and platform-admin guard.
 
 **Services affected:**
 
@@ -53,9 +62,9 @@ Primary entities changed: **Organization** and **OrgUser** (from `docs/domain-ma
 | **ReportSnapshot** | 1 | `created_by` SET_NULL — orphaned, not deleted | **In scope (note)** | Safe; just note the inconsistency. |
 | **Login / auth (all app surfaces)** | 1 | Deactivating an org or a per-org user must block access | **In scope** | Enforced at JWT permission-load. See §5. |
 | Warehouse, Source, Transform, Pipeline, Data Quality | 2 | Torn down by org **delete** cascade | **Deferred** | Only relevant to permanent delete, which is deferred. |
-| Notification | 1 | Broadcast notifications feature | **Deferred** | Spec "Later." Not built in v1. |
-| Feature flags / OrgPreferences | 1 | Feature-flag toggles feature | **Deferred** | Spec "Later." |
-| Airbyte connection status / Prefect run history | 2 | Airbyte & Pipelines viewer | **Deferred** | Spec "Later" (read-only). |
+| Notification, NotificationRecipient | 1 | Broadcast notifications | **In scope — Track B** | New admin authoring path + persisted audience. Existing consumption surface unchanged. See §10. |
+| OrgFeatureFlag | 1 | Feature-flag toggles | **In scope — Track C** | Model already exists; adds a write path only. **Not** OrgPreferences or OrgPlans — see §11.2. |
+| Airbyte connection status / Prefect run history | 2 | Airbyte & Pipelines viewer | **In scope — Track D** | Read-only, org-parameterized reads. Two live side-effect hazards — see §12.3. |
 | Share link, Metric, KPI, Explore, Alert | 2+ | — | **Not affected** | Metric/KPI models don't exist in this repo. Others are downstream of content this feature doesn't render; the portal manages user/org records, not their data. |
 
 > **The rule:** The portal manages **records** (orgs, users, invites), not an NGO's **data** (dashboards' contents, warehouse rows).
@@ -347,7 +356,9 @@ Each milestone is independently shippable and reviewable as one PR.
   - [ ] Tests: per-org deactivate isolation; removal cascade + count; admin invite cap skip.
 - **Acceptance:** Meera invites a user to Akshara, changes their role, deactivates them in Akshara only, removes another user after seeing the deletion warning, and cancels a pending invite.
 
-> **Deferred (later slices, not this plan):** permanent org delete + cascade dialog; Broadcast Notifications; Feature Flags per org; Airbyte & Pipelines viewer; in-portal management of who is a platform admin.
+> **Track A (M1–M4) is shipped.** Outstanding Track A work: entry & landing (§9).
+> **Tracks B, C, D** are planned in §10–§12 — mutually independent, sequenced by team priority.
+> **Still deferred, not planned in v1:** permanent org delete + cascade dialog; in-portal management of who is a platform admin; backend enforcement of feature flags (§11.1).
 
 ---
 
@@ -372,6 +383,230 @@ Each milestone is independently shippable and reviewable as one PR.
 | **Remove-user deletes dashboards/charts** (CASCADE kept). | Counted warning + explicit confirm. Revisit switching `created_by` to SET_NULL in a later slice. |
 | **Deactivation enforcement missed** would let a deactivated org keep working via API. | Enforce at permission-load, not UI; explicit test. |
 | **Spec drift:** spec still lists permanent delete as Week 1. | Update `spec.md` Story 7 / Flow F to mark permanent delete deferred (recommended follow-up). |
+
+---
+
+## 9. Track A change — entry & landing
+
+**This is a change to shipped code, not a new feature.** M1–M4 are live: `AdminGuard`, `AdminLayout`, `useAdminPortal`, the nav link, and the org-detail tabs all exist. This track modifies three existing files and generalizes one existing endpoint.
+
+### 9.1 Problem
+
+A Super Admin lands on the normal app on every sign-in and must click "Admin Portal" each time. Login hardcodes the destination (`app/login/page.tsx:63`), as does the root route (`app/page.tsx`). Nothing consults `is_platform_admin`, and `AuthGuard` captures no return URL (`components/auth-guard.tsx:90`), so a deep link into `/admin` bounces through login and lands on the normal app.
+
+### 9.2 Approach — generalize the existing resolver
+
+Dalgo already resolves where a user should land (research §9). We extend that from *which dashboard* to *which section*, rather than adding a parallel mechanism.
+
+```
+sign-in
+  → AuthGuard: authentication + org selection resolve   (unchanged)
+  → landing resolution: which SECTION?                  (extended)
+       explicit destination requested?  → honor it, stop
+       recorded preference = admin      → /admin
+       recorded preference = app        → normal app landing
+       none                             → normal app landing
+  → within the normal app, existing dashboard-level landing resolution runs as today
+```
+
+> **The rule:** section resolution sits *above* the existing dashboard resolution and never replaces it. An admin resolved into the normal app still gets their personal landing dashboard.
+> **Why it matters:** it keeps one mechanism. Two independent "where should this user land" systems would eventually disagree.
+
+**Persistence:** the preference is stored server-side alongside the existing landing preference on `OrgUser`, and is written when the user crosses sections via "Admin Portal" or "Back to Dalgo" — no separate setting. Deliberately **not** localStorage: `authStore.logout()` calls `localStorage.clear()` (`stores/authStore.ts:94`), so a client-side preference would reset on explicit logout but survive token expiry (research §9).
+
+**Care required — shared endpoint.** `GET /api/dashboards/landing-page/resolve` is consumed today by `/impact` (`app/impact/page.tsx:19-62`). Generalizing it must be **additive**: existing response fields keep their meaning, the section field is additive, and `/impact` behavior is unchanged when the caller is not a platform admin. Existing resolver tests must pass untouched.
+
+### 9.3 Code changes
+
+| File | Change |
+|---|---|
+| `dashboard_native_api.py:599` (resolver) | Additive: return the resolved section alongside the existing dashboard fields |
+| `models/org_user.py` | Additive field for the section preference, defaulting to "app"; migration backfills existing rows to the default (so current behavior is preserved for everyone) |
+| new: set-section endpoint | Records the section on crossing; platform-admin only |
+| `components/auth-guard.tsx` | After auth + org selection resolve, apply section resolution — honoring an explicit destination first |
+| `components/client-layout.tsx:58` | Unchanged routing branch; consumes the canonical admin accessor |
+| `app/login/page.tsx:63`, `app/page.tsx` | Stop hardcoding the destination; defer to resolution |
+| `hooks/api/usePermissions.ts:20`, `components/admin/AdminGuard.tsx:37` | **Canonicalize** `is_platform_admin` to one accessor (research §10.2) |
+
+### 9.4 Acceptance criteria
+
+- [ ] A Super Admin whose last section was the portal signs in and lands on `/admin` without clicking through.
+- [ ] A Super Admin whose last section was the normal app lands on the normal app, with their existing personal landing dashboard resolution intact.
+- [ ] A Super Admin with no recorded preference (first-ever sign-in) lands on the normal app.
+- [ ] A deep link to any page — in either section — lands on that page; resolution does not override it. Explicitly covered: a shared dashboard link followed by a portal-preferring admin.
+- [ ] Crossing sections via "Admin Portal" / "Back to Dalgo" updates the preference; the next sign-in reflects it.
+- [ ] A non-admin is unaffected: same landing behavior as before this change, verified against the existing `/impact` tests.
+- [ ] The admin shell never flashes before admin status is known, and no redirect is issued and then undone.
+- [ ] `is_platform_admin` is read through exactly one accessor; a test asserts no second read path exists.
+
+### 9.5 Risks
+
+| Risk | Mitigation |
+|---|---|
+| **AuthGuard timing.** Resolving before `currentOrg` is set fires against a half-hydrated store (`auth-guard.tsx:152-154`) — the most likely way this breaks. Symptom is intermittent and environment-dependent: a wrong-section flash, or a redirect that undoes itself. | Resolution runs only after auth **and** org selection resolve. Explicit test for the slow-`/currentuserv2` case; assert no navigation occurs while resolving. |
+| **Shared-endpoint regression.** The resolver is on the critical path for every user's `/impact`, not just admins. | Additive-only change; existing resolver tests must pass unmodified; non-admin behavior asserted unchanged. |
+| **Deep links silently swallowed.** Easy to introduce, since login already discards return URLs today. | Dedicated test: deep link → login → original destination, for both sections. |
+| **Preference set on a section the user can no longer reach** (admin flag revoked while preference = admin). | Resolution falls back to the normal app whenever the user is not currently a platform admin; the stored value is advisory, never authoritative. |
+
+---
+
+## 10. Track B — Broadcast Notifications
+
+**Prerequisite (blocking): notification fan-out does not scale.** `create_notification()` loops recipients with a per-recipient `OrgUser.objects.get()` (`notifications_functions.py:142-148`) and enqueues **one Celery task per recipient** when scheduled (`:88-92`). An "all users" broadcast means thousands of synchronous SES calls inside the HTTP request, or thousands of queued tasks. **Track B depends on this being fixed first and does not attempt to fix it inline** — batching / single fan-out task / `bulk_create`, tracked as its own item.
+
+*(A pre-existing authorization gap on the current notifications endpoints is tracked separately and is not a dependency of this track.)*
+
+### 10.1 HLD
+
+```
+/admin/notifications  →  GET/POST /api/v1/admin/notifications/…   ← new, @platform_admin_required
+                              │
+                              ├─ reuses get_recipients()  (all three scopes already implemented)
+                              ├─ reuses create_notification() fan-out  ← after the prerequisite lands
+                              └─ writes persisted audience/scope       ← new column
+                                        │
+                       existing end-user surface (page, bell, unread count) — UNCHANGED
+```
+
+> **The rule:** the broadcast feature adds an *authoring* surface only. Delivery and consumption already work.
+
+### 10.2 Scope
+
+**Reuse unchanged:** `Notification` + `NotificationRecipient`; `get_recipients()` audience resolution including role and superset filters; SES email and Discord delivery; Celery ETA scheduling and revocation; the entire end-user consumption surface.
+
+**Build:**
+1. Admin-gated endpoints under `/api/v1/admin/notifications/` — create, list/history with org + author + sent/scheduled filters, cancel scheduled, delivery report.
+2. `email_subject` on the create payload — currently unreachable over HTTP.
+3. Persisted audience/scope on `Notification` — today audience is resolved to recipient IDs and discarded, so history cannot show what a broadcast targeted.
+4. Server-derived author — replace the client-supplied `author` string with the authenticated actor.
+5. A recipient-count preview endpoint — `get_recipients()` exists but is not exposed read-only; admins should see reach before sending.
+6. Compose UI: audience selector (all users / all orgs / one org / role filter), org typeahead, message editor, urgent toggle, subject, schedule picker, confirm-with-count.
+7. Delivery report UI — aggregate read-rate; the existing `/recipients` returns an unpaginated `{username, read_status}` list with no aggregation.
+
+**Explicitly out:** recurrence (no field exists; Celery Beat + RedBeat and the alerts-dispatcher pattern at `tasks.py:1272` are the path if it's ever wanted); rich-text/HTML email (`send_html_message` exists at `awsses.py:56` but the notification path is plain-text); per-user targeting beyond the existing three scopes.
+
+### 10.3 Blast radius
+
+| Surface | Hop | Status |
+|---|---|---|
+| `Notification` | 0 | Additive columns (scope, author FK) |
+| `NotificationRecipient` | 0 | Unchanged shape; volume rises sharply — see prerequisite |
+| End-user notifications page / bell | 1 | **Unchanged** — broadcasts appear through the existing path |
+| SES send volume | 1 | Materially increased. Bounce/complaint rate is an account-level reputation risk |
+| Discord webhooks | 1 | Fires once per distinct org (`notifications_functions.py:150-158`) |
+| Celery broker | 1 | Scheduled sends currently held as broker ETAs, not re-derivable from the DB if flushed |
+
+### 10.4 Open questions
+
+| # | Question | Default if unanswered |
+|---|---|---|
+| 1 | Does a broadcast respect `UserPreferences.enable_email_notifications` opt-out, or can urgent override it? | Respect opt-out always; in-app is the guaranteed channel |
+| 2 | Should scheduled sends move from broker ETAs to a DB-derived dispatcher (mirroring `dispatch_due_alerts`)? | Yes — survives a broker flush |
+| 3 | Is an org-scoped broadcast visible to a Super Admin who is not a member of that org? | Yes — consistent with the portal's cross-org model |
+| 4 | Retention: do broadcasts age out? | No auto-deletion in v1 |
+
+---
+
+## 11. Track C — Feature Flags per Org
+
+**Smallest of the three.** `OrgFeatureFlag` already exists with global/per-org override semantics, constraints, and tests (research §11.2). No new model. The read path already works end-to-end, so a toggle takes effect in-product with **no new gating code**.
+
+### 11.1 Scope boundary — read this before implementing
+
+> **A flag set to OFF hides UI. It does not disable the API.**
+>
+> There are **zero** production call sites for `is_feature_flag_enabled` — flags gate frontend rendering only. A user who knows the URL, or who calls the API directly, retains full access to a feature that is "off" for their org.
+>
+> **Backend enforcement is explicitly NOT in this track.** Do not describe, demo, or document this feature as a security or access-control boundary. It is a rollout and visibility tool. If "off" must mean "unavailable," that is separate work touching every gated endpoint, and it must be scoped and planned on its own.
+
+### 11.2 HLD
+
+```
+/admin/feature-flags        ─┐
+/admin/organizations/{id}   ─┴─→ GET/PUT/DELETE /api/v1/admin/…/flags   ← new write path
+   (Flags tab)                          │                                  @platform_admin_required
+                                        ▼
+                          OrgFeatureFlag  (org=NULL → global default,
+                                           org=<id> → override)          ← EXISTS, unchanged
+                                        │
+                     GET /api/organizations/flags → useFeatureFlags → 5 components   ← EXISTS, unchanged
+```
+
+**Do not conflate** with `OrgPreferences` (consent record with approver + date), `OrgPlans.features` JSON (commercial plan gating), or `Org.viz_url` (Superset provisioning). Three separate governance models; folding them together would be a mistake.
+
+### 11.3 Build
+
+1. `GET/PUT/DELETE /api/v1/admin/orgs/{org_id}/flags` + a global variant, under `@platform_admin_required`, validating `flag_name` against the registry.
+2. **Serve the flag catalog.** `FEATURE_FLAGS` (`feature_flags.py:4-12`) is hardcoded in Python and hand-duplicated as a TS enum (`useFeatureFlags.ts:5-13`). Expose it so the two cannot drift.
+3. **Tri-state (inherit / on / off)** — requires a delete path that does not exist: `disable_feature_flag` writes an explicit `False` row rather than deleting (`feature_flags.py:54-62`), so an override can never currently be cleared back to inheriting global.
+4. `/admin/feature-flags` page (global defaults + per-org matrix) and a Flags tab on org detail. The nav item exists but is disabled and points at a 404 (`AdminLayout.tsx:22`).
+5. Audit fields — `OrgFeatureFlag` has no `created_at`/`updated_at`/`changed_by`. Additive columns on the existing model, if "who turned this on" is wanted.
+6. Fix or document `is_feature_flag_enabled(flag, org)`, which returns `None` with no global fallback (`:65-71`) — different semantics from the endpoint's merge, and a trap for anyone who later adds enforcement.
+
+### 11.4 Open questions
+
+| # | Question | Default if unanswered |
+|---|---|---|
+| 1 | Is up-to-5-minute propagation acceptable (`dedupingInterval`, `useFeatureFlags.ts:36`)? | Yes; revisit if ops finds it confusing |
+| 2 | Tri-state, or simple on/off per org? | Tri-state — the model supports it and inherit-vs-explicit-off is a real distinction |
+| 3 | Audit fields now or later? | Now — additive and cheap; retrofitting history is not possible |
+| 4 | Can a Super Admin flip a **global** default from the portal, or org overrides only? | Org overrides only in v1; global stays CLI-only, as a blast-radius guard |
+
+---
+
+## 12. Track D — Airbyte & Pipelines (read-only)
+
+### 12.1 HLD
+
+```
+/admin/organizations/{id}  →  GET /api/v1/admin/orgs/{org_id}/connections   ← new routes
+      (Airbyte + Pipelines tabs)     .../pipelines                             @platform_admin_required
+                                     .../pipelines/{deployment_id}/runs
+                                            │
+                          delegates to ALREADY org-parameterized services
+                          (get_connections(org), PipelineService.get_pipelines(org), …)
+                                            │  ← with cleanup side-effects DISABLED (§12.3)
+                          data: live Airbyte + live Prefect + our AirbyteJob / PrefectFlowRun tables
+```
+
+**Why new routes are structurally required:** `request.orguser` is resolved from `x-dalgo-org` filtered to the caller's own OrgUser rows (`auth.py:160-164`). A platform admin who is not a member of the target org **cannot** reach it via the header. Org-id-in-URL is the only option — the same conclusion Track A reached.
+
+### 12.2 Scope
+
+**Reuse:** the eight already-`(org, …)`-parameterized service functions (research §11.3). The API layer is a thin `request.orguser.org` shim over them, so each admin route is ~5 lines — the move `admin_api.py:305, 340, 425` already made.
+
+**Frontend — reuse presentational only:** `SyncStatusCell`, `ConnectionRow`, `LogsTable`, `LogCard`. **Do not reuse** `ConnectionsList`, `PipelineList`, `PipelineRunHistory`, `PipelineOverview` — each owns its fetching and polls every 3s indefinitely while anything is locked; `ConnectionsList` runs a second manual poll loop on top (`connections-list.tsx:54-95`). New `useAdminOrgConnections(orgId)` / `useAdminOrgPipelines(orgId)` hooks with `refreshInterval: 0`.
+
+### 12.3 Two hazards that must be handled first
+
+> **Hazard 1 — "read-only" is not read-only.** `get_connections(org)` fires `delete_airbyte_connections.delay(...)` for connections missing or deprecated in Airbyte (`airbytehelpers.py:532-536`); `get_one_connection` does the same (`:553-555`). **An Airbyte outage while an admin browses an org would schedule real connection deletions in that org.** The admin read path must suppress cleanup — a `cleanup=False` parameter or a separate read function. This is the single most important item in this track.
+
+> **Hazard 2 — it crashes on exactly the orgs admins look at.** `warehouse = OrgWarehouse.objects.filter(org=org).first()` (`:389`) is dereferenced unguarded as `warehouse.name` (`:489`). Today's single-org UI never exercises this; a cross-org admin list **will** hit orgs mid-onboarding with no warehouse. Guard before shipping.
+
+### 12.4 Cost — the reason this is read-only and paginated
+
+No caching or retry on either client; 30s default timeouts (`airbyte_service.py:33-86`, `prefect_service.py:43-60`).
+
+| Read | Cost |
+|---|---|
+| Connections list | 1 live Airbyte round-trip + ORM. **Unpaginated** |
+| Pipelines list | 1 live Prefect call + ORM. **Unpaginated** |
+| Sync history | DB-only (`AirbyteJob`), paginated — cheap |
+| Flow-run history | **N+1 external fan-out** — 1 Prefect graph call per run **plus** 1 Airbyte call per airbyte task per run (`pipeline_api.py:287-298`). ~40 sequential HTTP calls for 10 runs × 3 connections |
+| Legacy history endpoint | Unbounded log recursion (`prefect_service.py:669-689`) — **do not use** |
+
+Mitigations: no polling on admin routes; paginate the run view and cap page size; prefer the DB-backed v1 flow-run path (pure ORM, `prefect_service.py:483-532`); treat external failure as a partial-render empty state, never a page error.
+
+**Freshness caveat to surface in the UI:** `PrefectFlowRun` is webhook-written plus a 6-hourly reconcile (`tasks.py:1278-1282`); `AirbyteJob` is webhook-written plus a daily 2-day-window job (`:1300-1304`). If a webhook is missed, admin views can lag by hours. Label the data's provenance rather than implying real-time.
+
+### 12.5 Open questions
+
+| # | Question | Default if unanswered |
+|---|---|---|
+| 1 | Is a fleet-wide view ("all failing syncs across all orgs") in scope, or strictly per-org? | Per-org only. Fleet-wide needs joins through `OrgTask.connection_id` / `OrgDataFlowv1.deployment_id` — neither table has an `org` column — plus an index review |
+| 2 | Do admins need sync **log lines** (live Airbyte, slow), or is status + history enough? | Status + history; logs behind an explicit click |
+| 3 | Should the AI log-summary feature be available in the portal? | No in v1 — it polls a Celery task every 3s |
+| 4 | Show a "data as of" timestamp given webhook lag? | Yes |
 
 ---
 

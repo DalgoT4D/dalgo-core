@@ -176,3 +176,126 @@ Validation: backend = pytest (guard rejects non-platform-admin with 403; org-sco
 - `is_demo` appears to always evaluate False after the `is_demo`/`type` column removal (enums `OrgType` vs `OrgPlanType` never share a value). Seen at `user_org_api.py:124`, `airbyte_api.py:59+`.
 - `ddpui/core/orguserfunctions.py:94` still calls `Org.objects.filter(type=OrgType.DEMO)`, but `Org` no longer has a `type` field → would raise `FieldError` if reached (dead demo-signup path).
 - `DELETE /users/invitations/delete/{id}` (`user_org_api.py:519`) has no org scoping — any caller with the permission can cancel any org's invitation by id. The admin portal should not rely on this loose behavior; its own cancel endpoint should scope by org.
+
+---
+
+## 9. Landing resolution — the pattern the admin redirect extends
+
+Dalgo already resolves "where should this user land" server-side. The admin/normal-app choice extends this rather than introducing a second mechanism.
+
+| Piece | Where | What it does |
+|---|---|---|
+| `OrgUser.landing_dashboard` | `ddpui/models/org_user.py:90` (migration `0136_add_landing_page_fields`) | Per-(user, org) FK holding a personal landing preference |
+| Resolver endpoint | `GET /api/dashboards/landing-page/resolve` — `dashboard_native_api.py:599` | Returns `{dashboard_id, dashboard_title, dashboard_type, source}` where `source ∈ personal \| org_default \| none` |
+| Set / remove | `dashboard_native_api.py:500, 522` | Writes and clears the personal preference |
+| Surfaced on login | `user_org_api.py:145` | `landing_dashboard_id` rides along on `/currentuserv2` |
+| Client | `hooks/api/useLandingPage.ts` → `app/impact/page.tsx:19-62` | `/impact` is the landing-resolution screen; falls back to a blank state when `source: 'none'` |
+
+> **Why it matters:** the three-tier shape — personal preference, then a default, then a none-fallback — is exactly the shape the admin landing decision needs. Generalizing the existing resolver from *which dashboard* to *which section* keeps one code path.
+
+**Rejected alternative — client-side "last section" in localStorage.** `authStore.logout()` calls `localStorage.clear()` (`stores/authStore.ts:94`). A localStorage-backed preference would therefore reset on explicit logout but survive token expiry — two different behaviors for what users experience as "signing in again." Server-side persistence avoids this.
+
+---
+
+## 10. Two implementation constraints for the admin redirect
+
+**10.1 — AuthGuard / org-selection timing coupling.** `/admin` renders *inside* `AuthGuard` (`components/client-layout.tsx:58-70`), and `AuthGuard` returns `null` until `currentOrg` is set (`components/auth-guard.tsx:152-154`). Org selection itself resolves asynchronously from `/currentuserv2` plus `localStorage.selectedOrg` (`auth-guard.tsx:36-59`).
+
+> **The rule:** landing resolution must run *after* authentication and org selection have both resolved — not on login submit, and not on first render.
+> **Why it matters:** resolving early either fires against a half-hydrated store, or flashes the wrong shell and then corrects itself. `AdminGuard` already documents this hazard for the admin shell specifically (`components/admin/AdminGuard.tsx:25-29`).
+
+Backend corollary: `CustomJwtAuthMiddleware` resolves `request.orguser` from `x-dalgo-org` filtered to the caller's own OrgUser rows (`ddpui/auth.py:160-164`), and 401s when none match (`:235`). **A platform admin with zero org memberships cannot use the API at all** — so every Super Admin is necessarily a member of at least one active org, and the "admin who is also a regular org member" case is the norm, not an edge case.
+
+**10.2 — `is_platform_admin` is read two different ways.** Two surfaces derive Super Admin status independently:
+
+| Surface | Reads | Row used |
+|---|---|---|
+| Nav link | `useUserPermissions()` → `getCurrentOrgUser()` — `hooks/api/usePermissions.ts:20` | The **selected org's** OrgUser row |
+| AdminGuard | `data[0].is_platform_admin` from the `/currentuserv2` SWR cache — `components/admin/AdminGuard.tsx:37` | The **first** OrgUser row |
+
+These agree today only by construction: the flag lives on `UserAttributes` (`ddpui/models/org_user.py:31`), is global per-User, and the backend stamps the same value onto every row in the response (`user_org_api.py:94-96`). Nothing enforces that they stay in sync.
+
+> **Why it matters:** adding landing resolution would introduce a *third* read. Canonicalize to one accessor first, so the entry link, the guard, and the redirect can never disagree about who is an admin.
+
+---
+
+## 11. Reuse survey for the three remaining features
+
+### 11.1 Broadcast Notifications — infrastructure exists, admin authoring does not
+
+| Exists and reusable | Where |
+|---|---|
+| `Notification` + `NotificationRecipient` (read-tracking join) | `ddpui/models/notifications.py:5, 17` |
+| Audience resolution — `ALL_USERS`, `ALL_ORG_USERS`, `SINGLE_USER`, plus role and superset filters | `core/notifications/notifications_functions.py:25-71`; enum at `schemas/notifications_api_schemas.py:8-16` |
+| Fan-out, SES email, Discord, Celery ETA scheduling + revocation | `notifications_functions.py:84-103, 150-158, 367-370`; `utils/awsses.py:26`; `celeryworkers/moretasks.py:19-34` |
+| Entire end-user surface (page, bell, unread count, preferences) | `app/notifications/page.tsx`; `components/header.tsx:158-172`; `hooks/api/useNotifications.ts` |
+
+**Net-new:** admin-gated authoring endpoints; `email_subject` on the create payload (currently unreachable over HTTP); a persisted audience/scope on `Notification` (audience is resolved to recipient IDs at create time and discarded, so history cannot show who a broadcast targeted); compose UI; delivery/read-rate reporting; edit-or-cancel for scheduled broadcasts.
+
+**Scale prerequisite.** `create_notification()` loops recipients with an `OrgUser.objects.get()` each (`notifications_functions.py:142-148`) and, when scheduled, enqueues **one Celery task per recipient** (`:88-92`). A genuine "all users" broadcast means thousands of synchronous SES calls inside the HTTP request, or thousands of queued tasks. Tracked as a prerequisite — see plan.md Track B.
+
+**Recurrence** does not exist. Celery Beat + RedBeat is already in use (`ddpui/celery.py:61`) with an alerts-dispatcher precedent (`celeryworkers/tasks.py:1272`) worth mirroring if recurrence is ever wanted.
+
+> **Note:** a pre-existing authorization gap on the current notifications endpoints is being tracked separately from this feature and is not a dependency of Track B.
+
+### 11.2 Feature Flags — the model already exists
+
+`OrgFeatureFlag` — `ddpui/models/org.py:344-375` (migrations `0138_orgfeatureflag`, `0139_add_orgfeatureflag_uniqueness_constraints`):
+
+```python
+org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)  # null = GLOBAL flag
+flag_name = models.CharField(max_length=100)
+flag_value = models.BooleanField()
+```
+
+Global-vs-per-org override is first-class and tested: `org=NULL` rows are defaults, org rows override, merged by `get_all_feature_flags_for_org` (`utils/feature_flags.py:74-103`; tests `tests/utils/test_feature_flags.py:49-73`). Read path is complete end-to-end — `GET /api/organizations/flags` (`user_org_api.py:563-574`) → `useFeatureFlags` (`hooks/api/useFeatureFlags.ts:33-41`) → five consumer components. **No new model is needed, and an admin toggle takes effect with no new gating code.**
+
+**The gap: there is no HTTP write path.** The only mutator is `management/commands/manage_feature_flags.py` — a shell on the box, exactly the problem the portal exists to remove.
+
+Four traps for the implementer:
+- `disable_feature_flag` writes an explicit `False` row rather than deleting (`feature_flags.py:54-62`) — there is no way to clear an override back to inheriting global. A tri-state UI needs a delete path that does not exist.
+- `is_feature_flag_enabled(flag, org)` does an exact lookup and returns `None` with **no** global fallback (`:65-71`) — different semantics from the endpoint's merge.
+- The flag catalog is hardcoded twice: `FEATURE_FLAGS` (`feature_flags.py:4-12`) and a hand-maintained TS enum (`useFeatureFlags.ts:5-13`). It will drift unless served.
+- `useFeatureFlags` sets `dedupingInterval: 5 * 60 * 1000` (`:36`), so a toggle can take up to five minutes to reach the affected org's users.
+
+**Do not conflate** with `OrgPreferences` (consent record with approver + date, `models/org_preferences.py:7-23`), `OrgPlans.features` JSON (commercial plan gating, `models/org_plans.py:19-52`), or `Org.viz_url` (Superset provisioning). Three different governance models.
+
+**No backend enforcement exists.** Grep finds zero production call sites for `is_feature_flag_enabled` — flags gate UI only.
+
+### 11.3 Airbyte & Pipelines — service layer is already org-parameterized
+
+Eight service functions already take `org` as an argument, with the API layer a thin `request.orguser.org` shim over them:
+
+| Function | Where |
+|---|---|
+| `get_connections(org)` | `ddpairbyte/airbytehelpers.py:312` |
+| `get_one_connection(org, connection_id)` | `:541` |
+| `get_sync_job_history_for_connection(org, connection_id, limit, offset)` | `:676` |
+| `get_job_info_for_connection(org, connection_id)` | `:652` |
+| `get_schema_changes(org)` / `get_warehouses(org)` | `:1017` / `:886` |
+| `PipelineService.get_pipelines(org)` | `core/orchestrate/pipeline_service.py:356` |
+| `PipelineService.get_pipeline_details(org, deployment_id)` | `:425` |
+
+Swapping `request.orguser.org` for an `org_id`-in-URL lookup under `@platform_admin_required` is ~5 lines per endpoint — the same move `admin_api.py:305, 340, 425` already made for `orguserfunctions`.
+
+**Two landmines that must be handled before any read-only viewer ships:**
+
+> **1 — `get_connections` is not read-only.** It fires `delete_airbyte_connections.delay(...)` for connections missing or deprecated in Airbyte (`airbytehelpers.py:532-536`); `get_one_connection` does the same (`:553-555`). An Airbyte outage while an admin browses an org would **schedule real connection deletions in that org.** A read path needs cleanup suppressed.
+
+> **2 — it will crash on the orgs admins most need to look at.** `warehouse = OrgWarehouse.objects.filter(org=org).first()` (`:389`) is dereferenced unguarded as `warehouse.name` (`:489`). Today's single-org UI never hits this; a cross-org list *will* hit orgs mid-onboarding that have no warehouse yet.
+
+**Where the data lives** (mixed, and it matters for cost):
+
+| Data | Source |
+|---|---|
+| Connection list, status, detail | **Live Airbyte** |
+| Sync history table | **Our DB** — `AirbyteJob` (`models/airbyte.py:37`) |
+| Sync log lines | **Live Airbyte** |
+| Pipeline flow-run history | **Our DB** — `PrefectFlowRun` (`models/flow_runs.py:8`), v1 path is pure ORM |
+| Deployment active flag, task graph, run logs | **Live Prefect** |
+
+Neither `AirbyteJob` nor `PrefectFlowRun` has an `org` column — org is reached via `OrgTask.connection_id` and `OrgDataFlowv1.deployment_id` respectively. Any fleet-wide aggregation needs those joins and an index check.
+
+**Cost profile.** No caching or retry on either client (`airbyte_service.py:33-86`, 30s default timeout; `prefect_service.py:43-60`). `GET /v1/connections` and `GET v1/flows/` are unpaginated. Run history is an **N+1 external fan-out** — one Prefect graph call per run *plus* one Airbyte call per airbyte task per run (`pipeline_api.py:287-298`), roughly 40 sequential HTTP calls for 10 runs × 3 connections. The legacy history endpoint recurses logs unboundedly (`prefect_service.py:669-689`).
+
+**Frontend reuse seam.** Presentational and safe to reuse: `SyncStatusCell`, `ConnectionRow`, `LogsTable`, `LogCard` (props-only). **Not** reusable: `ConnectionsList`, `PipelineList`, `PipelineRunHistory`, `PipelineOverview` — each owns its fetching and polls every 3s indefinitely while anything is locked (`hooks/api/useConnections.ts:15-21`; `usePipelines.ts:28-32, 293-304`), and `ConnectionsList` runs a second manual poll loop on top (`connections-list.tsx:54-95`). An admin browsing many orgs would otherwise keep live Airbyte round-trips alive across route transitions.

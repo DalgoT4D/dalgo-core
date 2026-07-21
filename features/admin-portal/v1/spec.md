@@ -23,13 +23,13 @@ v1 is the cross-org admin portal defined by four features. Only Super Admins (Da
 | Feature | What it does | Sequencing |
 |---|---|---|
 | **Org Onboarding** | Create, edit, deactivate/reactivate orgs (permanent delete deferred). Invite users, change roles, deactivate users, remove users from an org, and cancel pending invitations. | **Week 1 — build target** |
-| **Broadcast Notifications** | Send platform-wide or org-scoped notifications to all users. | Later |
-| **Feature Flags per Org** | Toggle features ON/OFF per org without a code change. | Later |
-| **Airbyte & Pipelines** | View connection status, sync logs, and pipeline run history per org. Read-only. | Later |
+| **Broadcast Notifications** | Send platform-wide or org-scoped notifications to all users. | Planned — Track B |
+| **Feature Flags per Org** | Toggle features ON/OFF per org without a code change. | Planned — Track C |
+| **Airbyte & Pipelines** | View connection status, sync logs, and pipeline run history per org. Read-only. | Planned — Track D |
 
 Across all four, two cross-cutting requirements hold from day one:
 
-- **Admin entry point** — an "Admin Portal" link that appears in the app **only** for Super Admins, leading to a protected `/admin` section. Entering it replaces the normal app navigation with the admin sidebar.
+- **Admin entry point** — a Super Admin is returned to whichever section they last used (admin portal or normal app) once login and org selection resolve. An "Admin Portal" link, visible **only** to Super Admins, remains available to switch sections at any time. A direct or deep link always wins over the resolved landing section. See [Entry & landing](#entry--landing).
 - **Two-layer access protection** — access is enforced in the UI **and** on the server, not UI-only (see [Access model](#access-model)).
 
 ### What's out of scope for v1
@@ -96,12 +96,21 @@ Paths through the product, independent of who walks them. All flows below are fo
 ### Flow A — Enter the admin portal
 
 ```
-Super Admin is signed into the normal Dalgo app
-  -> the "Admin Portal" link is visible in the app sidebar (only because is_platform_admin = True)
-  -> click it -> land on /admin
-  -> the normal app navigation is fully replaced by the admin sidebar (Home, Organizations, Notifications, Feature Flags)
+Super Admin signs in
+  -> authentication and org selection resolve
+  -> the app resolves their landing section:
+       last-used section was admin      -> /admin
+       last-used section was normal app -> the normal app landing page
+       no recorded preference (first-ever login) -> the normal app landing page
+  -> the sidebar for that section renders (admin sidebar, or the normal app nav)
+  -> the "Admin Portal" link stays available in the app sidebar to switch across at any time;
+     "Back to Dalgo" does the reverse from inside the portal
 ```
-**Denied path:** anyone who is not a Super Admin never sees the link; if they reach an `/admin` URL directly (typed, bookmarked, shared) they are redirected out in the UI and refused by the server.
+**Direct links win.** Arriving at a specific URL — typed, bookmarked, or shared — lands there. The resolved landing section applies only when no destination was requested, so a shared dashboard link never gets swallowed by the redirect.
+
+**Switching sections updates the preference.** Using the "Admin Portal" link or "Back to Dalgo" records that section as the new last-used one, so the next sign-in returns there. There is no separate setting to manage.
+
+**Denied path:** anyone who is not a Super Admin never sees the link, is never resolved into the admin section, and if they reach an `/admin` URL directly they are redirected out in the UI and refused by the server.
 
 ### Flow B — Dashboard at a glance
 
@@ -167,6 +176,7 @@ Two layers protect the portal, and both are required — the plan calls them out
 |---|---|---|
 | **AdminGuard** | Front end — wraps all `/admin/*` pages | Checks `is_platform_admin`. If not a Super Admin, redirects to `/`. The "Admin Portal" entry link is conditionally rendered, so non-admins never see it. |
 | **API check** | Back end — every admin request | Checks `is_platform_admin`. If not a Super Admin, returns **403**. |
+| **One source of truth** | Front end | Every surface that branches on Super Admin status — the entry link, the guard, and landing resolution — reads `is_platform_admin` from a single canonical accessor. No surface re-derives it independently. |
 
 The key requirement: access is **not** UI-only hiding. A non–Super Admin who bypasses the UI is still refused by the server.
 
@@ -183,8 +193,13 @@ All stories are for the **Super Admin** persona and cover the Week 1 build targe
 
 **Acceptance criteria:**
 - [ ] The "Admin Portal" sidebar link appears only when `is_platform_admin = True`; every other user sees no link or hint of it.
-- [ ] Opening the portal takes me to `/admin` and replaces the normal app navigation with the admin sidebar (Home, Organizations, Notifications, Feature Flags).
+- [ ] After signing in, I am returned to the section I used last — the admin portal if that's where I was, the normal app if that's where I was — without clicking through the app first.
+- [ ] On my first-ever sign-in, with no recorded preference, I land on the normal app.
+- [ ] Following a direct link to a specific page takes me to that page, whichever section it belongs to; the landing resolution does not override it.
+- [ ] Switching sections via "Admin Portal" or "Back to Dalgo" changes where I land next time, with no separate setting to configure.
+- [ ] Entering the portal replaces the normal app navigation with the admin sidebar (Home, Organizations, Notifications, Feature Flags).
 - [ ] A non–Super Admin who navigates directly to any `/admin` URL is redirected away in the UI (AdminGuard) **and** refused by the server with a 403 — access is denied on the backend, not merely hidden.
+- [ ] I am never resolved into the admin section before it is known that I am a Super Admin — no flash of the admin shell, and no redirect that has to be undone.
 
 ### Dashboard
 
@@ -281,9 +296,22 @@ All stories are for the **Super Admin** persona and cover the Week 1 build targe
 | **Change Role dialog** | Role dropdown; Cancel / Confirm. | Default, confirming, success, error. |
 | **Delete Org dialog** | Deferred — later slice. Warning icon + org name + cascade list of what will also be deleted (users, Airbyte connections, pipeline runs); Cancel / Delete Permanently. | Deferred |
 
-### Navigation transition (entry behavior)
+### Entry & landing
 
-The standard Dalgo app sidebar (Impact, KPIs, Charts, Dashboard, Data, Settings) shows a **"👑 Admin Portal"** link at the bottom — only for `is_platform_admin` accounts. Clicking it **fully replaces** the global app navigation with the admin sidebar (Home, Organizations, Notifications, Feature Flags). The entry point is restricted to Super Admin accounts; regular users never see the link.
+A Super Admin moves between two sections of one app: the normal Dalgo app and the admin portal. Which one they land on after signing in is **resolved, not clicked**.
+
+| Situation | Where they land |
+|---|---|
+| Last used the admin portal | `/admin` |
+| Last used the normal app | The normal app landing page |
+| First-ever sign-in, no preference recorded | The normal app landing page |
+| Arrived via a direct or deep link | That exact page — resolution does not apply |
+
+> **The rule:** Landing resolution decides where a Super Admin goes when they haven't asked for anywhere in particular. It never overrides an explicit destination.
+> **Example:** Arjun worked in the portal yesterday, so signing in today lands him on `/admin`. When a colleague sends him a link to a dashboard, that link opens the dashboard — not the portal.
+> **Why it matters:** Every Super Admin is also a real member of at least one org and may legitimately use the normal app. An always-redirect would make the product they support harder to reach than the tool they administer, and would silently swallow shared links.
+
+The standard Dalgo app sidebar (Impact, KPIs, Charts, Dashboard, Data, Settings) shows an **"Admin Portal"** link — only for `is_platform_admin` accounts. It remains the way to cross between sections in either direction, and using it updates which section is remembered. Regular users never see the link and are never resolved into the admin section.
 
 ---
 
