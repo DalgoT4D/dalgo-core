@@ -110,6 +110,9 @@ CLAUDE.md before working in it. Progress is tracked in
 
 ## Skills (evaluation lenses — available at any stage)
 
+- **sandbox** — `/sandbox` spins up an isolated local env for a new feature: worktrees
+  on a branch off main, dedicated DB with fresh migrations, own redis, unique ports
+  (`scripts/sandbox.sh create|list|destroy`)
 - **design-review** — UX + NGO user lens on any UI component or screen
 - **backend-architecture** — patterns and templates for Django/Ninja layer architecture
 - **frontend-architecture** — patterns for Next.js components, hooks, and state
