@@ -12,7 +12,7 @@
 
 **Builds on:** Spec A (the 3-role system) — lives on the **`feature/rbac` branch**, PRs still open (DDP_backend [#1414](https://github.com/DalgoT4D/DDP_backend/pull/1414), webapp_v2 [#331](https://github.com/DalgoT4D/webapp_v2/pull/331)). This work stacks on that branch, not on main.
 
-⚠️ Both spec documents **still need the Q0 amendment** (charts are not independently shareable — see §8).
+✅ The write-spec carries the **Q0 amendment** (v1.1, 2026-07-07 — charts are not independently shareable). Spec B remains unamended by design (historical vision doc).
 
 ---
 
@@ -33,7 +33,7 @@
 | **Audience** | The "who" half of General access: `private` \| `admins` \| `analysts_plus` \| `all_users`. | `all_users` = every member of the org. |
 | **Level** | The "what" half: `view` or `edit`. | View = look; Edit = change, re-share. |
 | **Grant** | One row saying "this person / group / tier gets View-or-Edit on this one resource". Stored in the `ResourceShare` table. | "The Funders group → View on Field Performance." |
-| **Principal** | Whoever a grant points at: a user, a group, or an audience tier. (Kept open — Layer 3 adds "attribute" principals like `region = North`.) | The Funders group is the principal in the grant above. |
+| **Principal** | Whoever a grant points at. In v1: a **user** or a **group**. The model's shape also admits `audience` and (Layer 3) `attribute` principals — schema-ready, behavior deferred (§1.1). | The Funders group is the principal in the grant above. |
 | **Owner** | The one person with full control (edit, delete, transfer). A new column, separate from `created_by` (who made it — a historical fact that never changes). | Priya created it, then transferred it — Sarah is now `owner`; `created_by` still says Priya. |
 | **Resolver** | The one read-only function that answers "can this viewer view/edit this resource?" Every list, page, tile, and write-guard asks it. | See the decision ladder in §4.4. |
 | **rtype** | The resource-type string in URLs and the grants table: `dashboard`, `report`, `alert`, `metric`, `kpi`. | `PUT /api/access/dashboard/42/general` |
@@ -85,6 +85,7 @@ One share modal does sharing + inviting in one place. Groups, public links (Dash
 | Public links | Dashboards + Reports only, under one Admin global |
 | Metric/KPI | General-access only (no share modal; access-requests allowed) |
 | Notifications | Reuse the existing `Notification` model |
+| Audience grants (2026-07-08) | **Schema-ready, behavior deferred.** The open principal model stays (Layer 3 contract), but v1 creates and matches only `user` and `group` principals — no endpoint accepts `audience`, the resolver ignores such rows. Enabling later = one resolver clause + endpoint validation, no schema change. |
 
 ### 1.2 Where we are (the `feature/rbac` baseline — research §1, §4)
 
@@ -211,6 +212,55 @@ ddpui/api/groups_api.py  # front door for group CRUD (group models live in the o
 
 ### 4.1 New tables
 
+**Entity relationship diagram** — the 4 new tables, the new columns on existing models, and how they connect. "Soft link" = the column stores a type name + stringified id (`"dashboard"`, `"42"`) instead of a real FK — the deliberate Layer 2/3 trade-off explained under the `ResourceShare` shape choices below.
+
+```
+┌──────────────────────────────────── Org ────────────────────────────────────┐
+│   every table below carries an org FK — hard multi-tenant isolation          │
+│   OrgPreferences (1:1): + default_general_audience, default_general_level,   │
+│                          + allow_public_sharing (the kill switch)            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  RESOURCES (existing models, new columns)              PEOPLE
+┌─────────────────────────────────┐             ┌────────────────────┐
+│ Dashboard │ ReportSnapshot │    │             │      OrgUser       │
+│ Metric    │ KPI  │ Alert       │◄────owner────│  (existing)        │
+│  + general_audience             │  (SET_NULL)  └──┬──────────────┬──┘
+│  + general_level                │                 │              │
+│  + owner (FK OrgUser)           │        requester│       member │ N:M via
+│  (created_by: CASCADE→SET_NULL) │                 │              ▼
+├─────────────────────────────────┤                 │   ┌──────────────────┐
+│ Chart: + owner ONLY             │                 │   │ UserGroupMember  │
+│ (no general_*, no grants —      │                 │   │  orguser FK OR   │
+│  rides along with dashboards)   │                 │   │  pending_email   │
+└───────────────┬─────────────────┘                 │   └────────┬─────────┘
+                │                                   │            │ N:1
+                │ soft link:                        │   ┌────────▼─────────┐
+                │ (resource_type, resource_id)      │   │    UserGroup     │
+                │  — no FK, string pk               │   │ unique(org,name) │
+                ▼                                   │   └────────┬─────────┘
+┌─────────────────────────────────┐                 │            │
+│         ResourceShare           │                 │            │
+│  resource_type  + resource_id ──┼── points at any resource     │
+│  principal_type: user|group|…  ─┼── points at OrgUser ─────────┤
+│  principal_id / principal_value │        or UserGroup ─────────┘
+│  permission: view | edit        │        (soft link too)
+│  status: active | pending       │
+│  pending_email (invite flow)    │
+└─────────────────────────────────┘
+                ▲
+                │ approving a request INSERTS a grant here
+┌───────────────┴─────────────────┐
+│         AccessRequest           │
+│  resource_type + resource_id    │
+│  requester FK OrgUser           │
+│  requested_permission, note     │
+│  status, decided_by, expires_at │
+└─────────────────────────────────┘
+```
+
+Reading the diagram: `general_audience`/`general_level` live as **columns on the resource** (every resource has exactly one General-access setting — that's a column, and list queries check it with zero joins), while explicit shares are **rows in `ResourceShare`** (a resource can have many). The resolver (§4.4) combines both plus the owner/admin override, best answer wins.
+
 ```python
 class ResourceShare(models.Model):                 # one grant
     org             = FK(Org, CASCADE)
@@ -226,7 +276,7 @@ class ResourceShare(models.Model):                 # one grant
     # indexes: (resource_type, resource_id), (principal_type, principal_id), (org, status)
 ```
 
-Shape choices (all Layer 2/3 contracts — see roadmap §"five implications"): CharField(255) `resource_id`, generic `principal_value`, open `principal_type`. `audience`-type grants are valid (e.g. "grant Analysts+ Edit on this one dashboard"). No `via_container` — coverage shares don't exist in the dashboards-as-unit model.
+Shape choices (all Layer 2/3 contracts — see roadmap §"five implications"): CharField(255) `resource_id`, generic `principal_value`, open `principal_type`. **`audience`-type grants are schema-valid but behavior-deferred** (2026-07-08 decision, §1.1): no v1 endpoint creates them and the resolver does not match them — the endpoint rejects `principal_type="audience"` with a 400, and a test pins that a manually-inserted audience row grants nothing. No `via_container` — coverage shares don't exist in the dashboards-as-unit model.
 
 **`UserGroup`** (`org`, `name`, `created_by`; unique (org, name)) + **`UserGroupMember`** (`orguser`/`pending_email`, status) — in the **org app**, so Layers 2–3 import groups without grant machinery.
 **`AccessRequest`** (`org`, rtype, resource_id, requester, requested_permission, note, status, decided_by, expires_at).
@@ -271,8 +321,9 @@ Add `can_share_reports`, `can_share_alerts`, `can_share_metrics`, `can_share_kpi
 2. Owner? (owner_id, falling back to created_by) → Edit
 3. General access admits viewer's role tier?     → the resource's general_level
 4. Grant rows matching the viewer?               → best level among them
-   (her user id, her groups' ids, her audience tier — all via ONE
-    principal_match_q(viewer) predicate, shared with the list filter)
+   (her user id, her groups' ids — via ONE principal_match_q(viewer)
+    predicate, shared with the list filter; audience rows are NOT
+    matched in v1 — deferred, §1.1)
 5. Take the highest level steps 3–4 produced;
    viewer is a Member?                           → cap at View
 6. Nothing matched, or role is null/legacy?      → no access (default-deny, never a 500)
@@ -348,6 +399,7 @@ Notes: `ROLE_RANK` derives from role slugs, deliberately ≠ `Role.level`. All r
 | Null/legacy roles | resolver default-denies, never 500s |
 | Transfer | owner/Admin only; same-org active user; no reclaim; `created_by` SET_NULL so transfers survive creator deletion |
 | Injection / PII | ORM-only; length-bounded strings; no new PII (pending emails are already stored by Invitation today) |
+| Chart-tile payloads (added during build, 2026-07-11) | Context-admitted viewers (Members on dashboard tiles) can only reference columns from the saved chart's config — a column-set guard 403s anything else. **A chart's saved filters (`extra_config.filters`) are NOT a confidentiality boundary:** a context viewer can re-query displayed columns with the saved WHERE clause dropped or altered (row-set widening within displayed columns). Example: a tile shows counts of `beneficiaries WHERE status=active`; a Member can also get counts for `status=suspended` — but can never read `phone_number` if the chart doesn't display it. Row-level policy belongs to Layer 2/3 at the `run_chart_query` seam. Do not use saved chart filters to hide sensitive rows. |
 
 ---
 
@@ -357,7 +409,7 @@ Notes: `ROLE_RANK` derives from role slugs, deliberately ≠ `Role.level`. All r
 
 | Area | What we prove |
 |---|---|
-| Resolver truth table | owner / admin / general / user-grant / group-grant / audience-grant / Member-cap / private / null-role / legacy-slug — every cell of the ladder in §4.4 |
+| Resolver truth table | owner / admin / general / user-grant / group-grant / Member-cap / private / null-role / legacy-slug — every cell of the ladder in §4.4 — **plus:** a manually-inserted `audience` grant row grants nothing (deferred behavior stays off), and the grants endpoint 400s on `principal_type="audience"` |
 | Shareable-types contract | every registered rtype satisfies the contract (string pk, `general_*`, owner accessor); every capability flag is honored by the endpoints (grant on a `grants=False` rtype → 400, not 500) |
 | List scoping | all five lists show exactly the admitted resources, **one query each** (query-count asserted) |
 | Chart context | Member with dashboard-View gets tile data with `dashboard_id`; 403 without; wrong-dashboard id → 403; charts absent from Member's world |
@@ -436,7 +488,7 @@ M1–M4 are the core viewer flow (ship together to `feature/rbac`'s successor br
 
 ## 8. Open Questions & Risks
 
-**Q0 — spec amendment (PM sign-off pending):** the spec still describes chart-level sharing (Flow 3 embed warning, broadening warnings, "lock a chart to Private" story, §Scope's "Member with an Edit floor can re-share"). The 2026-07-02 decisions delete all of that; the spec needs its Q0 rewrite before `/engineering/validate-spec` runs against it.
+**Q0 — spec amendment: ✅ RESOLVED (2026-07-07).** The write-spec is amended in place (v1.1, amendment note at top): charts not shareable (Flow 3 rewritten, warning modals deleted), "floor" → "General access", Member View-cap made explicit, kill-switch semantics written into the public-links rule and Admin story. `/engineering/validate-spec` can now run against it. [Spec B](./access-control-spec-B-resource-sharing-2026-06-02.md) is deliberately unamended — historical vision doc only.
 
 **Open:**
 1. **Q1 — Reports share UI unification:** replace `ReportShareMenu` with the extended `ShareModal` (recommended, M5) or keep the dropdown and add a "Manage access" item? Plan assumes unify.
@@ -458,3 +510,228 @@ M1–M4 are the core viewer flow (ship together to `feature/rbac`'s successor br
 Draft v1 saved. Review and tell me what to revise. When ready, run `/engineering/execute-plan features/access-control/resourcesharing/plan.md`.
 
 > **Post-build (M11):** stop and ask before the Playwright-MCP browser pass.
+
+---
+
+## 9. Architecture — as built (v1 + v1.1, recorded 2026-07-20)
+
+This section describes the system as it exists on `feature/resource-sharing`
+(backend PR #1433, webapp PR #347) — including the v1.1 additions (chart/KPI/metric
+sharing, coverage engine, warning modals). Where it disagrees with the planning
+sections above, this section wins.
+
+### 9.1 The three layers
+
+The system is three stacked layers, each answering a different question:
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Layer 1 — WHO ARE YOU            (identity & role)         │
+│   User ── OrgUser ── Role        "Priya is an Analyst      │
+│                                   in Test NGO"             │
+├────────────────────────────────────────────────────────────┤
+│ Layer 2 — WHAT FEATURES CAN      (role permissions/RBAC)   │
+│ YOUR ROLE USE                                              │
+│   Role ── RolePermission ── Permission                     │
+│   "Analysts hold can_share_dashboards, can_create_charts…" │
+├────────────────────────────────────────────────────────────┤
+│ Layer 3 — WHAT CAN YOU DO WITH   (resource sharing)        │
+│ THIS SPECIFIC RESOURCE                                     │
+│   per-role floors + grants + ownership + public links      │
+│   "Priya can EDIT dashboard 17, VIEW dashboard 20,         │
+│    can't see dashboard 13 at all"                          │
+└────────────────────────────────────────────────────────────┘
+```
+
+Layer 2 is coarse and org-wide ("may use the feature anywhere"). Layer 3 is
+fine-grained and per-resource ("on this one thing"). Almost every action must
+pass **both**: the permission slug opens the feature, the resolver decides the
+resource.
+
+### 9.2 Data model
+
+```
+auth_user ──< OrgUser >── Org                    (multi-tenant spine)
+                 │
+                 └── new_role ──> Role ──< RolePermission >── Permission
+                                  (admin/analyst/member,      (slugs:
+                                   ranked by level)            can_share_charts…)
+
+Every shareable resource (Dashboard, Report, Alert, Chart, Metric, KPI):
+    owner ──> OrgUser              who governs it
+    analyst_level  ∈ none|view|edit ┐ per-role GENERAL ACCESS floors
+    member_level   ∈ none|view|edit ┘ (admins never stored — always edit)
+
+resource_share (the grants table):        access_request:
+    org                                       org, resource_type, resource_id
+    resource_type + resource_id (soft ptr)    requester ──> OrgUser
+    principal_type user|group                 requested_permission view|edit
+    principal_id                              status pending|approved|declined|expired
+    permission view|edit   ← grant level      expires_at (30 days, celery sweep)
+    status active|pending|revoked
+    pending_email (invitee not signed up)
+
+OrgPreferences: default_analyst_level / default_member_level   (seeds new resources)
+                enable_public_sharing                          (org kill switch)
+Dashboard/Report: is_public + public_share_token               (anonymous links)
+UserGroup ──< membership >── OrgUser                           (grant targets)
+```
+
+The registry (`core/sharing/shareable_types.py`) — code, not DB — declares each
+rtype's capabilities: general access? grants? public links? requests? member
+sharing? + its share slug. Everything downstream reads this table instead of
+branching on rtype.
+
+| rtype | general access | grants | public link | requests |
+|---|---|---|---|---|
+| dashboard | ✓ | ✓ | ✓ | ✓ |
+| report | ✓ | ✓ | ✓ | ✓ |
+| alert | ✓ | ✓ | — | ✓ |
+| chart | ✓ | ✓ | — | ✓ (member excluded) |
+| metric / kpi | ✓ | ✓ | — | ✓ |
+
+### 9.3 Read path — "can Priya see this?"
+
+Single source of truth: `access_resolver.effective_permission()`. Every gate,
+list, and export goes through it. Nothing else re-derives permissions.
+
+```
+request → @has_permission(view slug)     Layer 2: role may use feature
+        → resolver:                      Layer 3:
+            same org?          no → None (404/403)
+            admin/super-admin? ──────► "edit"   (never stored, computed)
+            owner?             ──────► "edit"
+            otherwise, MAX of:
+               direct user grant          resource_share
+               any group grant            resource_share via memberships
+               role's general floor       analyst_level / member_level
+            (member + chart rtype ────► None — member sharing deferred)
+        → "edit" / "view" / None
+```
+
+- **Grant level** = the view/edit value on one grant row. Grants only ever
+  *raise* access above the role floor; removing a grant drops back to the
+  floor, never below it.
+- List pages use the same logic compiled into a queryset
+  (`accessible_filter`) — a narrowed resource silently disappears from lists
+  rather than 403ing on click.
+- **The one inheritance exception:** charts render *inside* any dashboard you
+  can view, even when you can't open them standalone (container context).
+  This is why a Member's tile CSV export works on a member-visible dashboard
+  whose charts are `member=none`.
+
+### 9.4 Write path — sharing something
+
+```
+Share modal SHARE
+  → @has_permission + registry slug check     (may you share this rtype at all)
+  → resolver == "edit" on THIS resource       (may you share this one)
+  → sharing_actions.upsert_grant():
+       principal role rules   Member principal on chart/kpi/metric → 400
+       invite role rules      Analyst/Admin invites are admin-only
+       ── dashboards only ──
+       coverage check         does this widen the dashboard past its
+                              inner charts? → requires_confirmation
+                              payload naming the under-covered charts
+  → write resource_share row → notify grantee (deep-link email)
+```
+
+The **coverage engine** (`core/sharing/coverage.py`, v1.1) exists because
+dashboards *contain* charts. Any widening move — adding a grant, raising a
+general level, enabling the public link, saving a new tile — is checked
+against every inner chart. The webapp turns `requires_confirmation` into the
+warning dialogs: **Extend** (raise the charts to match — requires Edit on each
+chart, re-validated server-side) or **Proceed** (charts stay inline-visible
+only). `update_dashboard` validates new tiles itself, so the warning cannot be
+bypassed by saving the layout directly.
+
+### 9.5 The other flows
+
+- **Request access** — a resolver-`None` wall renders the request screen, not
+  a bare 403. A request row (view or edit, including View→Edit upgrades) goes
+  to the owner, who approves / downgrades / declines from the notification.
+  Approval writes a grant *for that one requester* — org policy never moves.
+  Requests expire in 30 days via a daily celery sweep. Members requesting
+  charts get the permanent inline answer ("request the dashboard instead").
+- **Public links** — dashboards and reports only. `is_public` + unguessable
+  token, behind the org-wide `enable_public_sharing` kill switch that
+  dead-ends every existing link at once. Public endpoints serve only charts
+  belonging to that dashboard.
+- **Ownership** — owner ≈ admin *for that resource*: full control, decides
+  requests, can transfer to an existing grantee. Ownership outranks role: a
+  Member owner can approve requests despite holding no share slug.
+- **Defaults** — new resources seed `analyst_level`/`member_level` from org
+  preferences (view/view out of the box; charts clamp member to none).
+  Existing charts were migrated `analyst=edit` to preserve day-one behavior.
+
+### 9.6 Who enforces what, where
+
+| Rule | Lives in |
+|---|---|
+| role → feature slugs | `@has_permission` decorator, seeds `002/003` |
+| rtype capabilities + share slugs | `core/sharing/shareable_types.py` |
+| effective access (the merge) | `core/sharing/access_resolver.py` |
+| all writes: grants, general, transfer, public, bulk | `core/sharing/sharing_actions.py` |
+| dashboard↔chart coverage + warnings | `core/sharing/coverage.py`, `chart_access.py` |
+| request lifecycle | `core/sharing/access_requests.py` |
+| endpoint guards / kill switch / emails | `gates.py`, `public_sharing_gate.py`, `deep_links.py` |
+| UI mirror (hide buttons only) | webapp `lib/rbac.tsx`, `components/sharing/*` |
+
+### 9.7 Design principles
+
+1. **One resolver** — permission logic lives in `access_resolver.py` and
+   nowhere else; every surface calls it.
+2. **Registry-driven** — capabilities are data (`shareable_types.py`), not
+   per-rtype if/else.
+3. **Grants only raise** — the role floor is the minimum; exceptions stack on
+   top; highest wins.
+4. **Admins computed, never stored** — no admin grant rows exist; the
+   resolver short-circuits on role rank.
+5. **Backend is the enforcement** — the webapp hides what you can't do, but
+   every rule is re-checked server-side.
+
+---
+
+## 10. Target architecture — permission-FK grants + decorator gates (v1.2, PLANNED)
+
+§9 above is what runs today. The approved evolution is `v1.2/plan.md`
+(2026-07-22 design of record — an earlier "level actions" draft was
+considered and superseded; see `v1.2/design-review-2026-07-21.md`).
+
+### 10.1 The model: flat sources, one pool, one check
+
+Role slugs answer ① — "may you use this area of the app" (`@has_permission`,
+untouched). Per resource, the peer sources — none outranks another — are:
+
+```
+grant rows (FK → Permission, + implied)
+   ∪  floors (mapped rtype×level → slug)  ∪  owner/admin
+   =  POOL(user, resource)   →   required slug ∈ pool ?  (the only gate)
+```
+
+(Amended during the dashboard pilot: the draft also pooled role slugs, but
+that hands every Member `can_view_dashboards` on every dashboard, erasing
+floors and list scoping — the role's per-resource contribution is the floor
+columns. See `v1.2/plan.md` §3.3.)
+
+Consequence (deliberate, spec-original §4): a Member granted Edit on
+dashboard 2 edits dashboard 2 — role does not cap content function. The
+resolver's silent Member grant-cap is removed.
+
+**Status: LIVE for dashboards** (pilot, 2026-07-22 — registry flag
+`member_edit_grants`, decorators on `dashboard_native_api`; other rtypes
+unchanged, see `v1.2/tasks.md`).
+
+### 10.2 What changes
+
+| area | change |
+|---|---|
+| `resource_grant` (renamed) | `permission` varchar → `permission_id` FK → Permission (PROTECT); backfilled in-place inside the still-unmerged migrations |
+| `permission` | + `implies_id` self-FK (edit → view, per rtype) |
+| `access_request` | `requested_permission_id` FK |
+| endpoints | three stacked decorators — `@has_permission` (untouched) + `@extract_resource` + `@has_resource_permission`; bodies carry zero access code; route-audit CI test makes gates unforgettable |
+| floors, registry, groups, public links | unchanged |
+
+Full detail, milestones (M1 schema must land before PRs #1433/#347 merge),
+rollout guards, and the one open product decision (Member re-share):
+`v1.2/plan.md`.
