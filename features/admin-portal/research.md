@@ -5,7 +5,21 @@
 
 **Acronyms:** JWT (the signed login token) · claim (a named field inside the token) · cookie (a value the browser stores per host and re-sends) · host-only cookie (bound to the exact host that set it, no `domain=`) · FK (foreign key) · CRUD (create, read, update, delete) · N+1 (one query that fans out into many) · PII (personally identifiable information).
 
-> This is a **fresh read** of DDP_backend and webapp_v2 as of 2026-07-22. Every file/line below was re-verified today. It covers the five surfaces the portal touches: the existing admin portal, the auth system (for the independent admin session), notifications, feature flags, and the Airbyte/pipeline read paths — plus the frontend shell. Pre-existing bugs found along the way are listed at the end and are **not** fixed here.
+> ### ⚠️ Read this first — the direction this research supported was reversed
+>
+> This research was written on 2026-07-22 to support an **independent admin session**: a second login cookie for the portal, separate from the normal product. **That design was built and then deliberately reversed on 2026-07-26.** The portal now uses the **shared** product session, with `@platform_admin_required` on every admin route as the only access boundary.
+>
+> **What is still accurate:** everything below describes the **normal product's** auth system, notifications, feature flags, and Airbyte/pipeline code as it existed on 2026-07-22. §2 in particular — how `POST /api/v2/login/` sets cookies, how `CustomJwtAuthMiddleware` reads them, how claims are minted and survive refresh, where `is_platform_admin` lives — remains correct background, and the portal now relies on exactly that machinery.
+>
+> **What to ignore:** any sentence implying a *second* session was or should be built. `AdminJwtAuthMiddleware`, an `admin_access_token` cookie, a `session="admin"` claim, and `JWT_ADMIN_*` lifetimes were all created and then deleted (`eca9865f`). They do not exist in the codebase.
+>
+> **Two things changed in the shared code since this was written**, both in `eca9865f`:
+> - §2.2's note that `CustomJwtAuthMiddleware` reads the cookie name "by literal name at `:115`" is now a class attribute (`cookie_name`). Behaviour is unchanged.
+> - A wrong password used to surface as a **500** (DRF's `AuthenticationFailed` falling through Ninja's catch-all handler). It now returns **401** via a new `drf_authentication_failed_handler` in `ddpui/routes.py`.
+>
+> See `plan.md` §3.2 for why the reversal happened. Nothing else below was re-verified after 2026-07-22.
+
+> This is a **fresh read** of DDP_backend and webapp_v2 as of 2026-07-22. Every file/line below was re-verified that day. It covers the five surfaces the portal touches: the existing admin portal, the auth system, notifications, feature flags, and the Airbyte/pipeline read paths — plus the frontend shell. Pre-existing bugs found along the way are listed at the end and are **not** fixed here.
 
 ---
 
@@ -28,7 +42,9 @@ Organization onboarding and user management are built and merged, backend and fr
 
 ---
 
-## 2. Auth system — the load-bearing surface for the independent admin session
+## 2. Auth system — the normal product's login, which the portal now shares
+
+> **Heads-up:** this section was written to justify building a second, admin-only session. It no longer implies that. Read it as an accurate description of the **one** session Dalgo has — the portal reuses it unchanged.
 
 ### 2.1 How login and cookies work today
 
