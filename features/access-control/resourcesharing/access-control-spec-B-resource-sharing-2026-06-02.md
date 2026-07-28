@@ -569,3 +569,13 @@ Format: *As a [role], I want [goal] so that [reason].* Acceptance notes point to
 14. **Set the org's default posture.**
     *As an Admin, I want to set the org-wide default floor so that new resources start at the visibility my org expects.*
     - Org default uses the same two-axis picker; factory default is All users / View; changes don't retroactively alter existing resources (§5.2).
+
+
+**Updates to spec to be incorporated**
+- Edit on parent (Dashboard) results in edit on child (Charts and KPIs)
+- Removing edit on parent (dashboard) reuults in removal of edit on child (charts and dashboards) = inform the user of this
+- Move alerts under data
+- - members cannot see metrics and alerts
+  - members can access metrics from chart creation or edit (if they are given relevant permission)
+  - Analysts can CRU all metrics and alerts, admin can crud on all metrics and alerts
+- Permissions page will need an extra column of fixed permissions for metrics and alerts- admin- Full access, analysts edit access, member no access
