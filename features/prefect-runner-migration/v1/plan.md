@@ -51,7 +51,7 @@ Use `git mv` so history follows. Then:
 ```
 `prefect-dbt==0.7.24` stays (its `dbt-core>=1.7.0` constraint has no upper bound — the explicit pin is what stops it from resolving to latest). Run `uv sync` to regenerate `uv.lock`.
 
-**`prefect-proxy/docker/Dockerfile.job-runner`** (new path) — line 39 currently pip-installs `prefect-dbt[bigquery,postgres]==${PREFECT_DBT_VERSION}`, which pulls whatever `dbt-core` is latest at build time. Pin explicitly + drop the extras (redundant with the explicit adapter pins):
+**`prefect-proxy/docker/Dockerfile.job-runner`** (new path) — pin `dbt-core` + adapters explicitly and drop the three per-version venv builds. `PrefectDbtRunner` uses the base env's dbt directly, so the multi-venv layout is dead weight. Result: image is dramatically lighter (~40 lines vs 83) — no `python3-venv`/`build-essential`/`curl` apt installs, no `DBT_VENV` env, no `COPY dbt-*/` lines, no `python3 -m venv` steps. The pip install block becomes:
 ```dockerfile
 RUN pip install --no-cache-dir \
     "prefect==${PREFECT_VERSION}" \
@@ -63,7 +63,9 @@ RUN pip install --no-cache-dir \
     "dbt-bigquery==1.10.3"
 ```
 
-Leave the per-version venvs (`/home/ddp/dbt/venv`, `venv-1.9.8`, `venv-1.10.19`), `requirements_dbt.txt`, and `elementary-data==0.15.1` alone — retirement is a follow-up after v1 lands.
+The `dbt-1.8.7/`, `dbt-1.9.8/`, `dbt-1.10.19/` subdirs at `prefect-proxy/docker/` remain (Django-side local dev still bootstraps its own venv from `dbt-1.10.19/pyproject.toml` per `DDP_backend/README.md`) — the Dockerfile just doesn't COPY them anymore.
+
+`requirements_dbt.txt` at `prefect-proxy/` root and `elementary-data==0.15.1` stay untouched for now — Elementary orgs still on the old flow use it.
 
 ### Step 3: Sanity-check the lock
 
@@ -82,12 +84,18 @@ print('prefect-dbt:', m.version('prefect-dbt'))
 ```
 Expect exactly `1.10.19 / 1.10.2 / 1.10.3 / 0.7.24`.
 
-Image — same check inside the built runner image:
+Image — same check inside the built runner image. EKS is ARM, so build for `linux/arm64`:
 ```bash
-docker build -f prefect-proxy/docker/Dockerfile.job-runner -t dalgo-runner:test prefect-proxy/docker
-docker run --rm dalgo-runner:test python -c "import dbt.version; print(dbt.version.__version__)"
+cd prefect-proxy/docker
+docker build --platform linux/arm64 -f Dockerfile.job-runner -t dalgo-runner:test .
+docker run --rm --platform linux/arm64 dalgo-runner:test python -c "
+import dbt.version, importlib.metadata as m
+print('dbt-core:     ', dbt.version.__version__)
+print('dbt-postgres: ', m.version('dbt-postgres'))
+print('dbt-bigquery: ', m.version('dbt-bigquery'))
+"
 ```
-Expect `1.10.19`.
+Expect `1.10.19 / 1.10.2 / 1.10.3`. Also build `--platform linux/amd64` if you want a local x86 test image.
 
 If either version drifts, the pin isn't taking — fix before continuing.
 
@@ -275,7 +283,7 @@ One source of truth per warehouse. Runner reads one block and has everything it 
 - **Client dbt-project bumps to 1.10.19** — every org's dbt project must be validated and bumped to compile cleanly against `dbt-core==1.10.19` before their deployment entrypoint gets flipped. Owned outside this plan but blocks per-org cutover. Coordinate with client onboarding.
 - **argv splitter** — the runner does `shlex.split(cmd)[1:]` on each stored command. Grep production `Task.command` values + `OrgTask.parameters` once to confirm no unusual shell metacharacters or `--vars '{...}'`-style quoting confuses `shlex.split`.
 - **SSL cert on postgres** — cert content travels inside the Secret block's `extras` (e.g. `extras.sslrootcert_content`). `dbtjob_v2_runner` writes it to disk next to `profiles.yml` at flow-run start and points the `sslrootcert` field in the profile dict at that path. Confirm today's field name (`sslrootcert_content`) is what backend actually stores.
-- **Retire the multi-venv `Dockerfile.prefect-job-runner` layout** *(follow-up, not v1)* — once all orgs are on `1.10.19` and Django's manifest generation is switched to use the base env's dbt, remove the `venv`, `venv-1.9.8`, `venv-1.10.19` builds and the corresponding `COPY dbt-1.*/` steps. Not blocking for v1 rollout.
+- **Django-side manifest generation still uses per-org venvs on disk.** `DbtProjectManager.run_dbt_command` shells out to `$DBT_VENV/<orgdbt.dbt_venv>/bin/dbt` from the Django container. Once every org is on `1.10.19` and Django's manifest path also uses the base env's dbt (via `PrefectDbtRunner` or a plain subprocess), the `dbt-1.8.7/` and `dbt-1.9.8/` subdirs under `prefect-proxy/docker/` can be deleted too. Not blocking for v1.
 - **Elementary compatibility** — Elementary orgs stay on the old CLI-block path for v1 (per Section 4). When they migrate later:
   - Pin `elementary-data==0.22.0`. Verified: installs cleanly alongside `dbt-core==1.10.19` + `dbt-postgres==1.10.2` + `dbt-bigquery==1.10.3` (no pip resolver conflicts), and `edr` CLI + `elementary.monitor.cli` module import + run. Elementary's declared `dbt-core<2.0.0,>=0.20` bound at `0.22.0` is loose, but the install/import combo works.
   - **Still needs one round of runtime validation** — run `edr send-report` end-to-end against a real 1.10.19-generated dbt project before shipping.
