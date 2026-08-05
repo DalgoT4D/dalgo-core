@@ -132,38 +132,55 @@ A per-resource toggle available on **Dashboards and Reports only** (Charts and K
 
 ## Metrics & Alerts Governance
 
-Metrics and Alerts live under the **Data** section in the sidebar (not Visualisations). They are governed by **role only** — no per-resource floor or direct shares.
+Metrics and Alerts live under the **Data** section in the sidebar (not Visualisations). They are governed by **role only** — no per-resource floor or direct shares. Metrics and Alerts have deliberately different governance models.
 
-### Permission matrix (fixed, not configurable)
+### Metrics
 
-| Role | Metrics | Alerts |
-|---|---|---|
-| **Admin** | Full access (CRUD) | Full access (CRUD) |
-| **Analyst** | Create, Read, Update; Delete if owner | Create, Read, Update; Delete if owner |
-| **Member** | View | View |
+Metrics are shared canonical definitions — **no ownership concept**. Nobody "owns" a metric; any Analyst can create, edit, or delete any metric (referential guardrail prevents deleting one that is in use).
+
+| Role | Access |
+|---|---|
+| **Admin** | CRUD all metrics |
+| **Analyst** | CRUD — create, read, update, delete any metric |
+| **Member** | View metric list; use metrics inline in the chart builder (see below) |
+
+**Referential guardrail:** a metric cannot be deleted until it is unlinked from all resources.
+
+**Edit blast-radius warning:** editing a metric updates every chart and KPI that uses it simultaneously. Before saving an edit, the system must surface the impact: *"This metric is used in N resources. Saving will update all of them."*
 
 ### Member access to metrics
 
-Members can view the Metrics and Alerts pages (read-only). If a Member has Edit on a chart (via direct share or cascade), they can select from existing library metrics when building or editing that chart. They cannot create new metrics or save inline calculations to the metric library — role-based permissions prevent it.
+Members can view the Metrics list page (read-only). If a Member has Edit on a chart (via direct share or cascade), they can:
+- Select from existing **library metrics** when building or editing that chart.
+- Build **inline** (chart-scoped) metric calculations in the chart builder.
+
+Members cannot save or promote an inline calculation to the metric library — that is an Analyst+ action.
 
 ### KPI rule
 
-A KPI must be backed by a **library metric**. Members can view KPIs they have access to but cannot create new KPIs (which would require selecting or creating a library metric — an Analyst+ action).
+A KPI must be backed by a **library metric**. Members can view KPIs they have access to but cannot create new KPIs (which would require a library metric — an Analyst+ action).
 
 ### Alerts
 
-Alerts are creator-owned. An Analyst creates an alert on a KPI or Metric they have access to. The alert has a **recipient list** (users/groups) who receive notifications when the alert fires. Recipient status grants no additional access to the underlying KPI or Metric.
+Alerts are **creator-owned personal automation** with a recipient list. An Analyst creates an alert on a KPI or Metric; the alert fires notifications to a recipient list when the trigger condition is met.
 
-- **Ownership is transferable** — an Admin can transfer an alert to another Analyst.
-- **Alert visibility** is tied to the trigger source: anyone who can access the source KPI/Metric can view the alert config. If the trigger source becomes restricted, the alert drops to creator + Admin visibility only.
+| Role | Access |
+|---|---|
+| **Admin** | CRUD all alerts; transfer ownership |
+| **Analyst** | Create alerts on accessible sources; read any alert on accessible sources; edit and delete **only their own** alerts |
+| **Member** | Cannot create alerts; can view alert config on accessible sources; can be a recipient |
+
+Rules:
+- **Trigger source:** a KPI or a Metric.
+- **Ownership is transferable** — the owner or an Admin can transfer ownership to another Analyst.
+- **View (config):** anyone who can access the trigger source (including a Member) can view the alert config. Creator always sees it. **Sensitive-source lock:** if the trigger source becomes restricted, the alert drops to creator + Admin visibility only.
+- **Edit and Delete:** owner + Admin only (chosen over "any analyst with access" to prevent ambiguity over who can modify shared automation).
+- **Recipient list is a separate axis.** Receiving alert notifications ≠ any config right. Members can be recipients regardless of edit rights. Managing the recipient list is an edit action — owner/Admin only.
+- **Two entry points:** a **bell-in-context** on a KPI/chart to create an alert in context, plus a **manage/list page under Data** ("alerts I own or receive").
 
 ### Interim state (until Spec C)
 
-Until Spec C (table-level access grants) ships, access to Metrics & Alerts is governed by role only — no dataset gating. The effective permission model is:
-
-- **Admin** — full CRUD
-- **Analyst** — Create, Read, Update; Delete if owner
-- **Member** — View
+Until Spec C (table-level access grants) ships, access to Metrics & Alerts is governed by role only — no dataset gating. Admins and Analysts see all metrics and alerts regardless of underlying dataset access.
 
 This is an accepted, time-boxed gap. Communicate at launch.
 
@@ -237,8 +254,6 @@ Share "Field Performance Dashboard"
 - **Default permission** = View; owner or editor can switch to Edit.
 - **Re-sharing is limited to the owner and Edit-holders.** View-holders cannot open the share modal to add others. An Edit-holder can share at View or Edit (never above their own level). A View-holder who wants to give a colleague access must ask the owner or an Edit-holder to do it.
 - **Revoking a share** — an ✕ next to each entry in the "People with access" list removes that direct share immediately.
-
-> ⚠️ **Open item (PM to confirm):** If a user holds Edit on a resource only via cascade (Edit on a parent dashboard, no direct chart grant), can they re-share that chart from its share modal? Current position: yes — effective Edit is Edit regardless of source.
 
 ### Ownership transfer
 
