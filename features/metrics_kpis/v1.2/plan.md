@@ -1,6 +1,6 @@
 # KPI v1.2 — Inline Metric Creation & KPI Wizard — Implementation Plan
 
-**Status:** Draft v1  
+**Status:** Implemented — committed `04321de9` on `feature/inline-metric`  
 **Date:** 2026-08-05  
 **Parent version:** [`features/metrics_kpis/v1.1/plan.md`](../v1.1/plan.md)  
 **Domain map:** [`docs/domain-map.md`](../../../docs/domain-map.md)
@@ -29,7 +29,7 @@ The pattern for inline metric creation mirrors the chart builder's `MetricAccord
 | 2 | KPI Setup | KPI name, target value, direction, time column, time grain |
 | 3 | Thresholds & Display | RAG thresholds, program tags, KPI type, number formatting |
 
-**Edit mode** opens at Step 2 (Step 1 is hidden entirely). The locked fields — `metric_id` (Step 1, hidden), `time_dimension_column` and `time_grain` (Step 2) — remain `disabled` exactly as they are today. The amber warning banner ("Metric, time column, and time grain cannot be changed after creation") moves to the top of Step 2 so it is immediately visible when the edit dialog opens.
+**Edit mode** opens at Step 2. The StepIndicator is still shown — Step 1 appears as "done" (teal circle) since the metric is already locked. The step 1 form content is not rendered; only steps 2 and 3 are navigable. The locked fields — `time_dimension_column` and `time_grain` (Step 2) — remain `disabled`. The amber warning banner ("Metric, time column, and time grain cannot be changed after creation") appears at the top of Step 2.
 
 **Current → new field mapping:**
 
@@ -91,17 +91,29 @@ When Continue is clicked in "Select existing" mode: same as today — validate `
 - Stateless. Props: `control`, `register`, `watch`, `errors`, `existingTags`.
 - Fields: RAG threshold grid (green/amber/red), program tags, KPI type buttons, `NumberFormatSection`, prefix/suffix `DebouncedInput` pair.
 
-### Modified file
+### Additional new file — `webapp_v2/components/kpis/`
+
+**`kpi-form-types.ts`**
+- Extracted `KPIFormData` interface here to avoid a circular import between `kpi-form.tsx` and the step components (which each need the type but were importing from `kpi-form.tsx`).
+
+### Modified files
 
 **`webapp_v2/components/kpis/kpi-form.tsx`**
 - Change `step` state from `1 | 2` to `1 | 2 | 3`.
-- Add a `StepIndicator` (same `StepBlock` + connecting-line pattern from `AlertWizardModal.tsx` lines 155–220) with labels `{ 1: 'Metric', 2: 'KPI Setup', 3: 'Thresholds & Display' }`.
+- Add a `StepIndicator` with two rows (circles + connectors top row, labels bottom row) for equal-length connectors regardless of label length. Labels: `{ 1: 'Metric', 2: 'KPI Setup', 3: 'Thresholds & Display' }`.
+- **StepIndicator shown in both create and edit modes** (original plan said hide for edit). In edit mode, step 1 renders as "done" (teal filled circle) since the metric is locked — this keeps the UI consistent.
 - Replace inline JSX sections with the three new step components.
-- Edit mode: `setStep(2)` on open (same as today); hide the `StepIndicator` for edit since step 1 is inaccessible.
+- Edit mode: `setStep(2)` on open (same as before).
 - Footer buttons:
   - Step 1: Cancel + Continue (calls `KpiMetricStep.handleContinue()`)
-  - Step 2: Cancel + Back + Continue
+  - Step 2: Cancel + Back + Continue (Back hidden in edit mode)
   - Step 3: Cancel + Back + Create KPI / Save KPI
+- `continuing` boolean state prevents double-click on Step 1 Continue while metric creation is in flight.
+- Step 2 Continue calls `trigger(['name', 'target_value', 'direction', 'time_dimension_column'])` for field-level validation before advancing.
+- `inlineCreatedMetric` fallback scoped by id: `metrics.find(m => m.id === metricId) ?? (inlineCreatedMetric?.id === metricId ? inlineCreatedMetric : undefined)` — prevents stale metric data bleeding in if the user changes their selection.
+
+**`webapp_v2/constants/analytics.ts`**
+- Added `KPI_WIZARD_STEP_VIEWED: 'kpi:wizard_step_viewed'`.
 
 ---
 
@@ -127,7 +139,10 @@ When Continue is clicked in "Select existing" mode: same as today — validate `
 ### selectedMetric fallback for Step 2
 `dateColumns` in Step 2 is derived from `useTableColumns(selectedMetric?.schema_name, selectedMetric?.table_name)` where `selectedMetric = metrics.find(m => m.id === metricId)`. After creating an inline metric, `mutateMetrics()` triggers an async re-fetch — so `selectedMetric` may be `undefined` briefly when Step 2 first renders.
 
-Fix: store the newly created `Metric` object (returned from `POST /api/metrics/`) in a local `useState<Metric | null>` in `kpi-form.tsx`. Use it as a fallback: `const selectedMetric = metrics.find(m => m.id === metricId) ?? inlineCreatedMetric`.
+Fix: store the newly created `Metric` object (returned from `POST /api/metrics/`) in a local `useState<Metric | null>` in `kpi-form.tsx`. Fallback is id-scoped: `metrics.find(m => m.id === metricId) ?? (inlineCreatedMetric?.id === metricId ? inlineCreatedMetric : undefined)`. The id scope prevents stale data if the user navigates back and picks a different metric.
+
+### SWR cache invalidation for inline metric creation
+`MetricPicker` (inside `KpiMetricStep`) fetches with `pageSize=100`; the parent uses `pageSize=50`. These are different SWR cache keys, so a targeted `mutateMetrics()` won't refresh the MetricPicker list. Solution: `useSWRConfig().mutate(key => typeof key === 'string' && key.startsWith('/api/metrics/'))` to invalidate all metrics cache keys globally.
 
 ### MetricPicker "Create metric" footer link
 `MetricPicker` currently renders a "Create metric →" link to `/metrics?create=true` in its footer (line 69 of `MetricPicker.tsx`). This is redundant when used inside the KPI wizard (users can create inline instead). Add a `hideCreateLink?: boolean` prop to `MetricPicker` and pass it as true from `KpiMetricStep`.
@@ -136,7 +151,10 @@ Fix: store the newly created `Metric` object (returned from `POST /api/metrics/`
 Current `kpi-form.tsx` uses `max-w-lg`. Step 1 in "Create new" mode includes `DatasetSelector` + mode tabs + column/expression fields — denser than the current Step 1. Bump the `DialogContent` to `max-w-xl` to avoid cramped layout.
 
 ### Back navigation from Step 2
-When the user clicks Back from Step 2 (regardless of whether the metric was created inline or selected from the list), Step 1 should always show in **"Select existing" mode** with the current `metric_id` pre-selected. The metric already exists in the backend at that point — "Create new" mode doesn't make sense on Back.
+When the user clicks Back from Step 2, Step 1 always shows in **"Select existing" mode** with the current `metric_id` pre-selected. The metric already exists in the backend at that point — "Create new" mode doesn't make sense on Back. This works automatically because `KpiMetricStep` initialises in `select` mode and the `metricId` prop carries the existing selection.
+
+### Threshold validation
+The original form had no min/max validation on the green/amber threshold inputs — just `register('green_threshold_pct')` with no rules. The new `KpiThresholdsStep` preserves this exactly (`thresholdRules = {}`). An intermediate version added `min: 0, max: 100` validation (CodeRabbit suggestion), but it was reverted to keep behaviour identical to the old form.
 
 ### `KpiMetricStep.handleContinue` exposure
 Use `useImperativeHandle` + `forwardRef` so the parent (`kpi-form.tsx`) can call `await stepRef.current.handleContinue()` from the footer Continue button without prop-drilling callbacks through render.
