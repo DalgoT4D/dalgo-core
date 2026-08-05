@@ -139,12 +139,12 @@ Metrics and Alerts live under the **Data** section in the sidebar (not Visualisa
 | Role | Metrics | Alerts |
 |---|---|---|
 | **Admin** | Full access (CRUD) | Full access (CRUD) |
-| **Analyst** | Create, Read, Update (no delete) | Create, Read, Update (no delete) |
-| **Member** | No access to Metrics/Alerts pages | No access to Metrics/Alerts pages |
+| **Analyst** | Create, Read, Update; Delete if owner | Create, Read, Update; Delete if owner |
+| **Member** | View | View |
 
 ### Member access to metrics
 
-Members cannot navigate to the Metrics list or create standalone metrics. However, if a Member has Edit on a chart (via direct share or cascade), they can access and use metrics **inline within the chart builder** — selecting from existing library metrics to build or edit a chart. They cannot save new metrics to the metric library.
+Members can view the Metrics and Alerts pages (read-only). If a Member has Edit on a chart (via direct share or cascade), they can select from existing library metrics when building or editing that chart. They cannot create new metrics or save inline calculations to the metric library — role-based permissions prevent it.
 
 ### KPI rule
 
@@ -156,6 +156,16 @@ Alerts are creator-owned. An Analyst creates an alert on a KPI or Metric they ha
 
 - **Ownership is transferable** — an Admin can transfer an alert to another Analyst.
 - **Alert visibility** is tied to the trigger source: anyone who can access the source KPI/Metric can view the alert config. If the trigger source becomes restricted, the alert drops to creator + Admin visibility only.
+
+### Interim state (until Spec C)
+
+Until Spec C (table-level access grants) ships, access to Metrics & Alerts is governed by role only — no dataset gating. The effective permission model is:
+
+- **Admin** — full CRUD
+- **Analyst** — Create, Read, Update; Delete if owner
+- **Member** — View
+
+This is an accepted, time-boxed gap. Communicate at launch.
 
 ---
 
@@ -220,6 +230,7 @@ Share "Field Performance Dashboard"
 
 ### Behaviors
 
+- **Dashboard sharing** — when sharing a Dashboard, the modal displays: *"All inner charts and KPIs will inherit this permission."*
 - **Matched emails / names** — existing users or groups get the chosen permission immediately on Share.
 - **Unmatched emails** — flagged inline as external; invited as Member on accept; share applied on accept; shown as **pending** until then.
 - **Bulk paste** — comma- or newline-separated emails accepted in one paste.
