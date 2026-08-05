@@ -75,7 +75,7 @@ Passwords, API keys, git access tokens, warehouse credentials, and public share 
 
 - **Coverage** — percentage of the events listed in §5.1 that have a working audit log call wired in.
 - **Time-to-answer** — Dalgo's team can answer "who did X" questions via a direct database query, without needing to add new logging or reconstruct events from other sources.
-- **Zero secret leakage** — no password, token, or credential ever appears in an audit log's `field_changes` field, verified through code review and tests.
+- **Zero secret leakage** — no password, token, or credential ever appears in an audit log's `resource_fields` field, verified through code review and tests.
 
 ---
 
