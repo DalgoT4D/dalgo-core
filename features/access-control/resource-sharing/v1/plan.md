@@ -149,19 +149,30 @@ Frontend impact (additive changes to existing files):
 - `webapp_v2/types/access.ts` — add `cascade_sources: CascadeSource[]` to `ShareRow`
 - `webapp_v2/components/ui/share-modal.tsx` — `cascade_sources.length > 0` → show "via Dashboard X"; disable level dropdown
 
+### Access control model — key constraints
+
+- **`ResourceShare` rows only hold `view` or `edit`.** `no_access` is an org-floor concept only (`OrgPreferences.default_analyst_level / default_member_level`). There is no per-resource explicit deny.
+- **Cascade is transparent to the access engine.** Cascade rows (`parent_id != NULL`) have the child resource's `rtype` (e.g. `rtype=chart`) and the same `principal_type/principal_id` as the parent dashboard share. `_grants_map("chart")` fetches them alongside direct chart grants in one query — it doesn't need to know about `parent_id` at all for the filter to work.
+- **`accessible_filter` and `get_user_access_map` need no changes for cascade.** They consume `_grants_map`'s output and the cascade rows flow through automatically.
+
 ### `_grants_map` fix in access_control.py
 
-Currently user rows overwrite each other (last write wins). With multiple cascade rows per resource, change to **take max across all rows** for the same `(principal_type, principal_id, resource_id)`:
+Currently user rows overwrite each other (last write wins). With cascade, a chart can appear in multiple dashboards shared to the same user at different levels — the last-fetched row wins, which is wrong. Fix: take max across all user rows.
 
 ```python
 # Before (wrong with cascade):
 user_levels[row.resource_id] = row.access_level
 
-# After:
+# After — take max:
 current = user_levels.get(row.resource_id)
 if current is None or LEVEL_RANK[row.access_level] > LEVEL_RANK[current]:
     user_levels[row.resource_id] = row.access_level
 ```
+
+Example: Chart C1 in Dashboard D1 (User X → edit) and Dashboard D2 (User X → view).
+`_grants_map("chart")` sees two rows for C1. Max = edit. ✓
+
+The group branch already takes max — no change needed there.
 
 ---
 
@@ -181,7 +192,7 @@ if current is None or LEVEL_RANK[row.access_level] > LEVEL_RANK[current]:
 
 #### 1c. Cascade — schema change + write-time materialization
 - **Migration**: add `parent` FK to `ResourceShare` (nullable, CASCADE)
-- **`_grants_map` fix**: change user-level assignment from overwrite to max
+- **`_grants_map` fix**: change user-level assignment from last-write-wins to max (handles a chart appearing in multiple shared dashboards); `accessible_filter` + `get_user_access_map` need no changes — they consume `_grants_map` output and cascade rows flow through automatically
 - **`resource_share.add_grants`**: after creating/updating a dashboard share, call `_inner_ids_from_dashboard` and create/update child rows for all chart/KPI IDs
 - **`resource_share.update_grant`**: after updating a dashboard share level, run `ResourceShare.objects.filter(parent=share).update(access_level=new_level)`
 - **`resource_share.remove_grant`**: DB CASCADE handles children — no extra code needed
@@ -198,13 +209,24 @@ def _require_edit_or_admin(orguser, resource, rtype, action):
 
 #### 1e. Apply accessible_filter to Chart and Report list APIs
 
-**Charts:**
-- `ddpui/core/charts/charts_service.py` — `list_charts`: add `orguser` param; apply `accessible_filter(orguser, ResourceType.CHART)`; annotate `access_level` via `get_user_access_map`
-- `ddpui/api/charts_api.py` — pass `orguser`; include `access_level` in `ChartResponse`
+**Pattern (already live on dashboards — replicate):**
+- `dashboard_native_api.py` line ~78: `levels = access_control.get_user_access_map(orguser, ResourceType.DASHBOARD, dashboards)` then `access_level=levels[d.pk]` on each response object.
+- Frontend: `dashboard.access_level === 'edit'` gates the edit button. List contains only items the user can see (backend filtered), so no frontend filtering is needed.
 
-**Reports:**
-- `ddpui/core/reports/report_service.py` — `list_snapshots`: add `orguser` param; apply `accessible_filter(orguser, ResourceType.REPORT)`; annotate `access_level`
-- `ddpui/api/report_api.py` — pass `orguser`; include `access_level` in `SnapshotResponse`
+**Charts — backend:**
+- `ddpui/core/charts/charts_service.py` — `list_charts`: add `orguser: OrgUser` param; apply `accessible_filter(orguser, ResourceType.CHART)` to the queryset
+- Annotate `access_level` via `get_user_access_map(orguser, ResourceType.CHART, charts)` → pass to response
+- `ddpui/api/charts_api.py` — pass `orguser` to `list_charts`; add `access_level: Optional[str]` to `ChartResponse`
+
+**Reports — backend:**
+- `ddpui/core/reports/report_service.py` — `list_snapshots`: same pattern — add `orguser`, apply `accessible_filter`, annotate via `get_user_access_map(orguser, ResourceType.REPORT, snapshots)`
+- `ddpui/api/report_api.py` — pass `orguser`; add `access_level: Optional[str]` to `SnapshotResponse`
+
+**Frontend (both):**
+- `webapp_v2/types/charts.ts` — add `access_level?: 'view' | 'edit'`
+- `webapp_v2/types/reports.ts` (or equivalent) — add `access_level?: 'view' | 'edit'`
+- `app/charts/page.tsx` — change edit/share button gating from `PERMISSIONS.CAN_EDIT_CHARTS` → `chart.access_level === 'edit'`
+- `app/reports/page.tsx` — same for the report edit/delete/share buttons
 
 #### 1f. Update `list_grants` + ShareRowSchema
 - Add `CascadeSourceSchema` and update `ShareRowSchema` with `cascade_sources`, `share_id: Optional[int]`
@@ -339,11 +361,11 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 - Floor only — Analyst gets "edit", Member gets "view"
 - Direct grant overrides floor upward; grant + floor takes max
 - Group grant — user in group gets group's level
-- Cascade — dashboard share propagates to inner chart
-- Cascade + direct view grant → Edit (max)
+- Cascade — dashboard share propagates edit to inner chart; chart absent from other shares gets it via cascade
+- Cascade max — chart in two dashboards (one edit, one view): effective = edit
+- Cascade + floor: Member (floor=no_access) with dashboard share → sees inner charts; Member without any share → filtered out
 - Admin → always "edit"
-- NO_ACCESS explicit grant with permissive floor → None (invisible)
-- `accessible_filter` with NO_ACCESS floor — only owned/shared resources visible
+- `accessible_filter` with NO_ACCESS floor — only owned/directly-granted/cascade-granted resources visible
 
 **Grants API integration tests:**
 - POST adds; GET lists; PATCH changes level; DELETE removes
