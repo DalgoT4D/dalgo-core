@@ -46,6 +46,8 @@ The resource sharing spec (features/access-control/resource-sharing/spec.md) is 
 8. **Request access** — no model, no API
 9. **Invitation promotion on acceptance** — ResourceShare rows with `invitation_id` are not updated when the invited user accepts (joins as OrgUser)
 10. **Orphan cleanup** — ResourceShare rows not deleted when a resource or group is deleted
+11. **Private toggle missing** — no `is_private` field on resource models; `accessible_filter` doesn't handle per-resource privacy override
+12. **Floor hierarchy not enforced** — no validation prevents Member floor being set above Analyst floor
 
 ### Frontend gaps
 1. **KPI sharing** — no ShareModal on the KPI page
@@ -55,6 +57,8 @@ The resource sharing spec (features/access-control/resource-sharing/spec.md) is 
 5. **Access requests section** — share modal doesn't show pending requests for the owner to approve/decline
 6. **Bulk Share** — charts and dashboards have bulk-delete but no bulk-share
 7. **Visual access badges** — resource list items don't display View/Edit/Owner badges
+8. **Private toggle** — not in share-modal.tsx
+9. **Floor hierarchy enforcement** — Roles tab doesn't disable Member floor options that exceed Analyst's current floor
 
 ---
 
@@ -149,19 +153,50 @@ Frontend impact (additive changes to existing files):
 - `webapp_v2/types/access.ts` — add `cascade_sources: CascadeSource[]` to `ShareRow`
 - `webapp_v2/components/ui/share-modal.tsx` — `cascade_sources.length > 0` → show "via Dashboard X"; disable level dropdown
 
+### Access control model — key constraints
+
+- **`ResourceShare` rows only hold `view` or `edit`.** `no_access` is an org-floor concept only (`OrgPreferences.default_analyst_level / default_member_level`). There is no per-resource explicit deny.
+- **Cascade is transparent to the access engine.** Cascade rows (`parent_id != NULL`) have the child resource's `rtype` (e.g. `rtype=chart`) and the same `principal_type/principal_id` as the parent dashboard share. `_grants_map("chart")` fetches them alongside direct chart grants in one query — it doesn't need to know about `parent_id` at all for the filter to work.
+- **`accessible_filter` and `get_user_access_map` need no changes for cascade.** They consume `_grants_map`'s output and the cascade rows flow through automatically.
+- **Private toggle (`is_private`)** — a per-resource boolean that overrides the org floor downward. When `is_private=True`, the resource is invisible to role-floor-based access; only the owner (`created_by`) and users/groups with an explicit grant can see it. `accessible_filter` must account for this (see 1g below).
+
+### `accessible_filter` update for Private toggle
+
+```python
+owned_or_granted = Q(created_by=orguser) | Q(id__in=allowed_ids)
+
+if _org_floor(orguser) == AccessLevel.NO_ACCESS:
+    return owned_or_granted
+else:
+    # Private resources bypass the floor — only accessible via owner or explicit grant
+    private_ids = list(entry["model"].objects.filter(org=orguser.org, is_private=True).values_list("pk", flat=True))
+    return owned_or_granted | ~Q(id__in=private_ids)
+```
+
+- Private resource + no grant + permissive floor → excluded (`id__in=private_ids`) ✓
+- Private resource + explicit grant → included via `owned_or_granted` ✓
+- Private resource + owner → included via `created_by` ✓
+- Non-private resource + permissive floor → `~Q(id__in=private_ids)` includes it ✓
+- Floor = NO_ACCESS (any resource) → only `owned_or_granted` ✓
+
 ### `_grants_map` fix in access_control.py
 
-Currently user rows overwrite each other (last write wins). With multiple cascade rows per resource, change to **take max across all rows** for the same `(principal_type, principal_id, resource_id)`:
+Currently user rows overwrite each other (last write wins). With cascade, a chart can appear in multiple dashboards shared to the same user at different levels — the last-fetched row wins, which is wrong. Fix: take max across all user rows.
 
 ```python
 # Before (wrong with cascade):
 user_levels[row.resource_id] = row.access_level
 
-# After:
+# After — take max:
 current = user_levels.get(row.resource_id)
 if current is None or LEVEL_RANK[row.access_level] > LEVEL_RANK[current]:
     user_levels[row.resource_id] = row.access_level
 ```
+
+Example: Chart C1 in Dashboard D1 (User X → edit) and Dashboard D2 (User X → view).
+`_grants_map("chart")` sees two rows for C1. Max = edit. ✓
+
+The group branch already takes max — no change needed there.
 
 ---
 
@@ -181,7 +216,7 @@ if current is None or LEVEL_RANK[row.access_level] > LEVEL_RANK[current]:
 
 #### 1c. Cascade — schema change + write-time materialization
 - **Migration**: add `parent` FK to `ResourceShare` (nullable, CASCADE)
-- **`_grants_map` fix**: change user-level assignment from overwrite to max
+- **`_grants_map` fix**: change user-level assignment from last-write-wins to max (handles a chart appearing in multiple shared dashboards); `accessible_filter` + `get_user_access_map` need no changes — they consume `_grants_map` output and cascade rows flow through automatically
 - **`resource_share.add_grants`**: after creating/updating a dashboard share, call `_inner_ids_from_dashboard` and create/update child rows for all chart/KPI IDs
 - **`resource_share.update_grant`**: after updating a dashboard share level, run `ResourceShare.objects.filter(parent=share).update(access_level=new_level)`
 - **`resource_share.remove_grant`**: DB CASCADE handles children — no extra code needed
@@ -198,17 +233,37 @@ def _require_edit_or_admin(orguser, resource, rtype, action):
 
 #### 1e. Apply accessible_filter to Chart and Report list APIs
 
-**Charts:**
-- `ddpui/core/charts/charts_service.py` — `list_charts`: add `orguser` param; apply `accessible_filter(orguser, ResourceType.CHART)`; annotate `access_level` via `get_user_access_map`
-- `ddpui/api/charts_api.py` — pass `orguser`; include `access_level` in `ChartResponse`
+**Pattern (already live on dashboards — replicate):**
+- `dashboard_native_api.py` line ~78: `levels = access_control.get_user_access_map(orguser, ResourceType.DASHBOARD, dashboards)` then `access_level=levels[d.pk]` on each response object.
+- Frontend: `dashboard.access_level === 'edit'` gates the edit button. List contains only items the user can see (backend filtered), so no frontend filtering is needed.
 
-**Reports:**
-- `ddpui/core/reports/report_service.py` — `list_snapshots`: add `orguser` param; apply `accessible_filter(orguser, ResourceType.REPORT)`; annotate `access_level`
-- `ddpui/api/report_api.py` — pass `orguser`; include `access_level` in `SnapshotResponse`
+**Charts — backend:**
+- `ddpui/core/charts/charts_service.py` — `list_charts`: add `orguser: OrgUser` param; apply `accessible_filter(orguser, ResourceType.CHART)` to the queryset
+- Annotate `access_level` via `get_user_access_map(orguser, ResourceType.CHART, charts)` → pass to response
+- `ddpui/api/charts_api.py` — pass `orguser` to `list_charts`; add `access_level: Optional[str]` to `ChartResponse`
+
+**Reports — backend:**
+- `ddpui/core/reports/report_service.py` — `list_snapshots`: same pattern — add `orguser`, apply `accessible_filter`, annotate via `get_user_access_map(orguser, ResourceType.REPORT, snapshots)`
+- `ddpui/api/report_api.py` — pass `orguser`; add `access_level: Optional[str]` to `SnapshotResponse`
+
+**Frontend (both):**
+- `webapp_v2/types/charts.ts` — add `access_level?: 'view' | 'edit'`
+- `webapp_v2/types/reports.ts` (or equivalent) — add `access_level?: 'view' | 'edit'`
+- `app/charts/page.tsx` — change edit/share button gating from `PERMISSIONS.CAN_EDIT_CHARTS` → `chart.access_level === 'edit'`
+- `app/reports/page.tsx` — same for the report edit/delete/share buttons
 
 #### 1f. Update `list_grants` + ShareRowSchema
 - Add `CascadeSourceSchema` and update `ShareRowSchema` with `cascade_sources`, `share_id: Optional[int]`
 - Rewrite `list_grants` in `resource_share.py` to group by principal, compute effective max, populate `cascade_sources` (resolve parent row → Dashboard title)
+
+#### 1g. Private toggle — backend
+- Add `is_private = models.BooleanField(default=False)` to `Dashboard`, `Chart`, `Report`, `KPI` models + one migration covering all four
+- Update `accessible_filter` in `access_control.py` with the Private toggle logic (see above)
+- Add `PATCH /api/access/{rtype}/{resource_id}/private` endpoint in `access_api.py` — body `{ "is_private": bool }`; requires owner or Edit; updates the model field. When setting `is_private=True`, also clear the resource's public share token (`public_share_token=None, is_public=False`) so existing public links are immediately revoked.
+- `get_user_access` also needs updating: when `is_private=True` and user is not owner/admin/grantee, return `None` (invisible)
+
+#### 1h. Floor hierarchy enforcement — backend
+- In `org_preferences_api.py` (the PUT handler for floor settings): validate that `default_member_level` rank ≤ `default_analyst_level` rank using `LEVEL_RANK`; return 400 if violated
 
 ---
 
@@ -237,7 +292,7 @@ Body: `{ "to_orguser_id": int }`
 Logic (`ddpui/core/access/ownership.py`):
 1. Verify caller is current owner or Admin
 2. Fetch `to_orguser` — must be same org
-3. Check recipient's org floor = Edit (read `OrgPreferences` for their role)
+3. Check recipient has effective Edit on the resource: `get_user_access(to_orguser, rtype, resource.pk) == AccessLevel.EDIT` — a Member with a direct Edit share qualifies; return 400 if not
 4. `resource.created_by = to_orguser; resource.save()`
 5. Old owner's ResourceShare rows untouched — effective access recalculates automatically
 
@@ -292,6 +347,16 @@ OrgUserGroupMember.objects.filter(invitation=invitation).update(
 - Add `ShareModal` to the KPI page with `rtype="kpi"` (needs M1 backend)
 - File: relevant KPI detail/list component under `app/kpis/`
 
+**Private toggle in share modal (`components/ui/share-modal.tsx`):**
+- Add Private toggle UI (needs M1g backend)
+- On toggle: call `PATCH /api/access/{rtype}/{resource_id}/private`
+- When on: show indicator that resource is private (floor bypassed)
+- Requires owner or Edit to toggle
+
+**Floor hierarchy enforcement (`components/settings/access/RolesTab.tsx`):**
+- When Admin changes Member floor, disable options whose rank exceeds Analyst's current floor
+- Mirror the backend validation (1h) in the UI so the constraint is obvious
+
 ---
 
 ### M7 — Ownership transfer UI (frontend)
@@ -339,11 +404,11 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 - Floor only — Analyst gets "edit", Member gets "view"
 - Direct grant overrides floor upward; grant + floor takes max
 - Group grant — user in group gets group's level
-- Cascade — dashboard share propagates to inner chart
-- Cascade + direct view grant → Edit (max)
+- Cascade — dashboard share propagates edit to inner chart; chart absent from other shares gets it via cascade
+- Cascade max — chart in two dashboards (one edit, one view): effective = edit
+- Cascade + floor: Member (floor=no_access) with dashboard share → sees inner charts; Member without any share → filtered out
 - Admin → always "edit"
-- NO_ACCESS explicit grant with permissive floor → None (invisible)
-- `accessible_filter` with NO_ACCESS floor — only owned/shared resources visible
+- `accessible_filter` with NO_ACCESS floor — only owned/directly-granted/cascade-granted resources visible
 
 **Grants API integration tests:**
 - POST adds; GET lists; PATCH changes level; DELETE removes
@@ -354,8 +419,9 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 - User also has direct Edit on one chart → that chart excluded
 
 **Ownership transfer tests:**
-- Owner → Analyst (Edit floor): succeeds
-- Owner → Member (View floor): 400 blocked
+- Owner → Analyst (Edit floor on resource): succeeds
+- Owner → Member with direct Edit share on resource: succeeds
+- Owner → Member with no Edit share: 400 blocked
 - Non-owner: 403
 
 **Request access tests:**
@@ -367,12 +433,15 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 ## Verification checklist (end-to-end)
 
 1. **Floor**: Analyst floor = No Access → can't see dashboards. Floor = Edit → sees all.
-2. **Direct share**: Share dashboard with Member (floor = No Access). Member sees dashboard + inner charts; unshared Member sees nothing.
-3. **Cascade - edit**: Share dashboard at Edit. Recipient can open inner charts from /charts and edit them.
-4. **Cascade removal warning**: Remove Edit from dashboard grant → dialog lists affected inner charts before applying.
-5. **KPI sharing**: KPI share modal opens; grants work; KPI appears in recipient's KPI list.
-6. **Ownership transfer**: Transfer dashboard → old owner drops to floor; new owner manages shares.
-7. **Request access**: No-access Member opens link → request form → submits → owner sees in share modal → approves → Member gains access.
-8. **Bulk share**: Select 5 dashboards → Share → applied to all; 2 without Edit skipped with count shown.
-9. **Public link toggle off**: Turning off org toggle makes all existing public links inaccessible immediately.
-10. **Invitation promotion**: External email invited via share modal → accepts → ResourceShare row promoted to new OrgUser (no longer pending).
+2. **Direct share**: Share dashboard with Member (floor = No Access). Member sees dashboard + inner charts (in /charts); unshared Member sees nothing.
+3. **Cascade - view**: Share dashboard at View. Recipient sees inner charts in /charts as view-only (no edit button).
+4. **Cascade - edit**: Share dashboard at Edit. Recipient sees inner charts in /charts with full edit access.
+5. **Cascade removal warning**: Remove Edit from dashboard grant → dialog lists affected inner charts before applying.
+6. **Private toggle**: Toggle a dashboard Private. Member with View floor can no longer see it. Direct-share Member still can.
+7. **KPI sharing**: KPI share modal opens; grants work; KPI appears in recipient's KPI list.
+8. **Ownership transfer to Member**: Give Member a direct Edit share on a dashboard → transfer ownership to them → succeeds.
+9. **Request access**: No-access Member opens link → request form → submits → owner sees in share modal → approves → Member gains access.
+10. **Bulk share**: Select 5 dashboards → Share → applied to all; 2 without Edit skipped with count shown.
+11. **Floor hierarchy**: Try setting Member floor above Analyst → Roles tab blocks it; API returns 400.
+12. **Public link toggle off**: Turning off org toggle makes all existing public links inaccessible immediately.
+13. **Invitation promotion**: External email invited via share modal → accepts → ResourceShare row promoted to new OrgUser (no longer pending).
