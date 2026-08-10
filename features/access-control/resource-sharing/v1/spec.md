@@ -32,7 +32,6 @@ For dashboards specifically, direct shares **cascade automatically** to all inne
 
 - Dataset-level gating for Metrics and Alerts (Spec C — table-level access grants)
 - Row-level security and column masking on datasets
-- Per-resource floor overrides (restricting a specific resource requires adjusting the org floor)
 - Audit log of who viewed / shared
 - Time-bound / expiring access
 - Sharing on Data infrastructure (Ingest, Transform, Orchestrate, Warehouse) — stays role-gated
@@ -44,7 +43,7 @@ For dashboards specifically, direct shares **cascade automatically** to all inne
 
 - **Admin** (e.g. M&E Lead) — governs all resources, sets org-wide defaults, onboards staff.
 - **Analyst** (e.g. M&E Officer) — creates dashboards, charts, reports; shares with consumers; manages groups.
-- **Member** (e.g. program staff, funder, field partner) — consumes content shared with them; does not build.
+- **Member** (e.g. program staff, funder, field partner) — consumes content by default; can also create charts and KPIs from existing library metrics. Creating resources is a role permission, independent of the org floor — Members can always create regardless of floor settings. Editing a specific existing resource requires a direct Edit share on that resource.
 
 Org shape to design for: 1–5 editors, 30+ consumers, PII common in the data.
 
@@ -69,24 +68,25 @@ Org shape to design for: 1–5 editors, 30+ consumers, PII common in the data.
 
 The Admin sets a default resource permission for each role in **Settings > Access > Roles tab**. This floor applies to every resource in the org.
 
-| Role | Metrics & Alerts *(fixed)* | Resources *(configurable)* | Factory default (Resources) |
-|---|---|---|---|
-| Admin | Full access | All access (fixed) | All access |
-| Analyst | Edit (CRU) | No access / View / Edit | Edit |
-| Member | No access | No access / View / Edit | View |
+| Role | Metrics *(fixed)* | Alerts *(fixed)* | Resources *(configurable)* | Factory default (Resources) |
+|---|---|---|---|---|
+| Admin | CRUD all | CRUD all + transfer | All access (fixed) | All access |
+| Analyst | CRUD any (referential guardrail on delete) | Create on accessible sources; read any; edit/delete own only | No access / View / Edit | Edit |
+| Member | View all; use inline in chart builder | View config; be a recipient | No access / View / Edit | View |
 
-Metrics & Alerts permissions are **fixed** — they cannot be changed by the Admin. Resources permissions are **configurable** via the 3-way toggle.
+Metrics and Alerts permissions are **fixed** — they cannot be changed by the Admin. Resources permissions are **configurable** via the 3-way toggle.
 
 - Changing the floor affects all resources immediately.
-- There is no per-resource floor override. To make specific resources inaccessible to a role, set the org floor to **No access** for that role, then use direct shares to grant access back on the resources that should remain visible.
+- Setting a role's floor to **No access** removes that role's baseline everywhere; per-resource access is then granted by direct shares.
+- The floor cannot invert the role hierarchy: **Member floor ≤ Analyst floor ≤ Admin (always Edit)**. The Roles tab blocks any change that would set Member above Analyst.
 
 ### Direct shares
 
 On top of the org floor, owners and editors can grant specific users or groups **View** or **Edit** on individual resources.
 
-- Direct shares are **additive** — effective access is the max of the org floor and all direct grants.
+- Direct shares override the floor **upward** on a per-resource basis — even when the role's floor is No access, a direct share grants access on that specific resource.
+- Effective permission = max(floor, direct shares).
 - Removing a direct share removes only that grant; the org floor and other direct shares remain.
-- A direct share cannot lower access below the org floor. Effective permission = max(floor, direct shares).
 
 ### Cascade: Dashboard → Charts / KPIs
 
@@ -94,24 +94,24 @@ When a user or group is granted View or Edit on a **Dashboard**, that same permi
 
 - **Adding a share is silent and immediate** — no warnings, no prompts.
 - Cascade is **direct-share only** — the org floor already applies to all resources equally, so only explicit direct shares on a dashboard propagate down.
-- **View cascade** — the user sees the chart rendered inside the dashboard but the chart does not appear in their standalone `/charts` list.
-- **Edit cascade** — the user gets full edit access to the chart, including via the standalone `/charts` list.
+- **View cascade** — the chart appears in the user's `/charts` list as view-only and renders inside the dashboard.
+- **Edit cascade** — the chart appears in the user's `/charts` list with full edit access.
 - Cascade is **one level only**: Dashboard → its direct Charts/KPIs. Reports are fully independent (see Resource Taxonomy).
 - To change a user's access on a chart that came via cascade, change their share on the parent dashboard. The chart's share modal will show "Edit/View via Dashboard X" for cascaded permissions and block direct changes — directing the user to the dashboard instead.
 
-**Removing Edit from a dashboard warns before applying.** When an Edit grant is removed from a Dashboard (a user, group, or the dashboard's Edit floor is downgraded), the system shows a confirmation: *"Removing Edit for [User/Group] on this dashboard will also remove their Edit access on [N] inner charts: [Chart A, Chart B, ...]. Continue?"* The user confirms before the change takes effect. If those users/groups retain Edit via another dashboard containing the same charts, that path is preserved — the warning reflects the net change only.
+**Removing Edit from a dashboard warns before applying.** When a user or group's Edit share on the dashboard is removed or downgraded, the system shows a confirmation: *"Removing Edit for [User/Group] on this dashboard will also remove their Edit access on [N] inner charts: [Chart A, Chart B, ...]. Continue?"* The user confirms before the change takes effect. If those users/groups retain Edit via another dashboard containing the same charts, that path is preserved — the warning reflects the net change only.
 
 ### Effective permission resolution
 
 ```
 EffectivePermission(user, resource) =
+    Admin → full access always
     max across:
-      — Org floor for user's role
+      — Org floor for user's role  [skipped if resource is Private]
       — Direct grants to the user on this resource
       — Direct grants to any group the user belongs to on this resource
       — Cascaded grants from any dashboard that contains this resource
-      — Admin governance override (always full access on every resource)
-    If none → no access
+    If none → no access (resource is invisible)
 ```
 
 The share modal shows the **resolved effective permission** per user/group — not the breakdown of which path contributed.
@@ -158,7 +158,7 @@ Members cannot save or promote an inline calculation to the metric library — t
 
 ### KPI rule
 
-A KPI must be backed by a **library metric**. Members can view KPIs they have access to but cannot create new KPIs (which would require a library metric — an Analyst+ action).
+A KPI must be backed by a **library metric**. Members can create KPIs from existing library metrics.
 
 ### Alerts
 
@@ -176,13 +176,11 @@ Rules:
 - **View (config):** anyone who can access the trigger source (including a Member) can view the alert config. Creator always sees it. **Sensitive-source lock:** if the trigger source becomes restricted, the alert drops to creator + Admin visibility only.
 - **Edit and Delete:** owner + Admin only (chosen over "any analyst with access" to prevent ambiguity over who can modify shared automation).
 - **Recipient list is a separate axis.** Receiving alert notifications ≠ any config right. Members can be recipients regardless of edit rights. Managing the recipient list is an edit action — owner/Admin only.
-- **Two entry points:** a **bell-in-context** on a KPI/chart to create an alert in context, plus a **manage/list page under Data** ("alerts I own or receive").
+- **Two entry points:** a **bell-in-context** on a KPI or Metric to create an alert in context, plus a **manage/list page under Data** ("alerts I own or receive").
 
-### Interim state (until Spec C)
+### Dataset access scope
 
-Until Spec C (table-level access grants) ships, access to Metrics & Alerts is governed by role only — no dataset gating. Admins and Analysts see all metrics and alerts regardless of underlying dataset access.
-
-This is an accepted, time-boxed gap. Communicate at launch.
+Access to Metrics & Alerts is governed by role only — no dataset gating. Admins and Analysts see all metrics and alerts. Members see all metrics and alerts read-only.
 
 ---
 
@@ -191,7 +189,7 @@ This is an accepted, time-boxed gap. Communicate at launch.
 | Resource | Cascade | Public link | Notes |
 |---|---|---|---|
 | **Dashboard** | Source — direct shares cascade to inner Charts/KPIs | Yes | |
-| **Chart** | Target — receives cascaded shares from parent Dashboards | No | View cascade = inline only; Edit cascade = standalone + `/charts` entry |
+| **Chart** | Target — receives cascaded shares from parent Dashboards | No | Both View and Edit cascade surface the chart in `/charts`; Edit cascade additionally grants edit access |
 | **KPI** | Target — same as Chart | No | Must be backed by a library metric (when Metrics ship) |
 | **Report** | None | Yes | Frozen point-in-time snapshot of one Dashboard. Own permissions, fully independent. Even if source charts/KPIs are deleted, the Report still loads. Report-Edit = regenerate snapshot, edit executive summary, moderate comments — not edit the source dashboard or charts. When creating a Report, the user only sees Dashboards they have access to. |
 
@@ -200,7 +198,7 @@ This is an accepted, time-boxed gap. Communicate at launch.
 ## Groups
 
 - **Analyst+ can create** a group. Members cannot.
-- Creator manages membership, rename, and delete. Admins override on all groups.
+- Only the group's **creator and Admins** can edit (membership, rename) or delete a group. Other Analysts may use groups they can see — share resources with them — but cannot edit them. The ⋮ Edit/Delete actions appear only for creator/Admin.
 - Groups are org-wide and reusable across resources.
 - **Group-list visibility by role:** Admin sees all groups; Analyst sees groups they created or belong to; Member sees only groups they belong to.
 - Name-collision warning on create to prevent duplicate group names.
@@ -239,6 +237,9 @@ Share "Field Performance Dashboard"
 │   priya@ngo.org    Admin           Owner          │
 │   Field Staff (group)              Edit           │
 ├──────────────────────────────────────────────────┤
+│ 🔒 Private                                        │
+│    Only shared users/groups can see this  [ toggle ] │
+├──────────────────────────────────────────────────┤
 │ 🔗 Public sharing                                 │
 │    Anyone with the link can view    [ toggle ]    │
 └──────────────────────────────────────────────────┘
@@ -254,6 +255,7 @@ Share "Field Performance Dashboard"
 - **Default permission** = View; owner or editor can switch to Edit.
 - **Re-sharing is limited to the owner and Edit-holders.** View-holders cannot open the share modal to add others. An Edit-holder can share at View or Edit (never above their own level). A View-holder who wants to give a colleague access must ask the owner or an Edit-holder to do it.
 - **Revoking a share** — an ✕ next to each entry in the "People with access" list removes that direct share immediately.
+- **Private toggle** — available on all access-controlled resources (Dashboards, Charts, KPIs, Reports). When on, the org floor is ignored for this resource — access is determined solely by grants (direct shares, cascade, or Admin). Anyone with a grant still has access; the floor no longer provides a baseline. This is the mechanism for making a single resource private without changing the org-wide floor. Requires ownership or Edit to toggle. **Turning Private on immediately disables any active public link on the resource; turning it off does not restore the public link — the owner must re-enable it manually.** The public sharing toggle is hidden while Private is on (and also hidden when the org disallows public sharing).
 
 ### Ownership transfer
 
@@ -261,7 +263,7 @@ Ownership transfer is available directly from the share modal — it is a third 
 
 **Rules:**
 - Only the **current owner or an Admin** can initiate a transfer.
-- Ownership can only be transferred to a user whose **role's org floor is Edit**. A Member whose floor is View or No access cannot receive ownership. (A Member whose floor is Edit can.)
+- Ownership can only be transferred to a user who holds **effective Edit** on the resource — via the role floor or a direct Edit share. A Member with a direct Edit share qualifies.
 - When the recipient becomes owner they receive full ownership rights (Edit + delete + share) regardless of their current share level on the resource.
 - The **previous owner's direct shares are not changed**. Their effective access after the transfer = max(org floor for their role, any existing direct share). If they had no direct share and their org floor is No access, they lose access entirely.
 - A **confirmation dialog is required** before the transfer applies: *"Transfer ownership of [Resource] to [Name]? You will lose owner status. Your access will revert to your role permissions or any direct share you hold."*
@@ -302,11 +304,11 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 
 **Chart in multiple dashboards.** If a user has Edit on Dashboard A (containing Chart C) and View on Dashboard B (also containing Chart C), their effective permission on Chart C = Edit (max). If their share on Dashboard A is removed, their effective permission on Chart C drops to View (from Dashboard B). The system recalculates on every share change.
 
-**Share level ceiling.** A user can only grant access up to their own effective permission level. A View-holder cannot share a resource at Edit, even if they can see the share modal.
+**Share level ceiling.** An effective View-holder cannot see the share modal at all (see Re-sharing). Edit-holders can share up to their own level, never above.
 
 **Derived Edit confers re-share rights.** If a user holds Edit on a chart only via cascade (from a parent dashboard, no direct chart grant), their effective Edit is full Edit — they can re-share that chart from its share modal.
 
-**Public link bypasses inner chart floors.** Anonymous viewers of a public dashboard see all inner charts regardless of those charts' floor or direct-share settings. Public links are frictionless external sharing — chart-level restrictions do not apply to anonymous viewers.
+**Public link bypasses inner chart access.** Anonymous viewers of a public dashboard see all inner charts regardless of those charts' access settings. Public links are frictionless external sharing — chart-level restrictions do not apply to anonymous viewers.
 
 **Org floor change is immediate.** Changing the org floor (e.g. Members from View to No access) affects all resources immediately. Direct shares are unaffected — users with a direct share keep access even after a floor tightening.
 
@@ -328,8 +330,8 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 | Surface | Description |
 |---|---|
 | **Settings > Access** | Single page with three tabs: **People** (user management, collapsed from the previous two-tab structure), **Groups** (group management), **Roles** (permission matrix with two columns — Metrics & Alerts fixed permissions and Resources configurable 3-way toggle; Allow public sharing org toggle). |
-| **Share modal** | Search people/groups/emails; per-share permission picker (View/Edit); pending state for external emails; People with access list; public sharing toggle (hidden if org disallows). |
-| **Resource list pages** | Floor/access badge per resource; multi-select with bulk Share action and skipped-count summary; "Shared with you" section for Members. |
+| **Share modal** | Search people/groups/emails; per-share permission picker (View/Edit); pending state for external emails; People with access list; Private toggle; public sharing toggle (hidden if org disallows or Private is on). |
+| **Resource list pages** | Main-app pages (Dashboards, Charts, Reports, KPIs) — not a Settings surface. Effective-access indicator per resource (e.g. View / Edit / Owner); multi-select with bulk Share action and skipped-count summary; "Shared with you" section for Members. All sharing is done via the resource share modal, opened from the resource page or the list. |
 | **Request-access screen** | Shown on access-denied for authenticated users; request View/Edit with note; routes to owner. States: form → submitted → decided (approved/declined). |
 | **Requests section** (in share modal) | Pending access requests with approve (pick level) / decline. |
 | **Groups (Settings > Access > Groups tab)** | Table: Group Name, member avatar stack, Created By, Created date, ⋮ actions (Edit Group / Delete Group). Create/Edit modal: group name + add people/emails + existing members list with ✕ per member. Scoped by role — Members only see groups they belong to. |
