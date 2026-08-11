@@ -260,7 +260,8 @@ def _require_edit_or_admin(orguser, resource, rtype, action):
 - Add `is_private = models.BooleanField(default=False)` to `Dashboard`, `Chart`, `Report`, `KPI` models + one migration covering all four
 - Update `accessible_filter` in `access_control.py` with the Private toggle logic (see above)
 - Add `PATCH /api/access/{rtype}/{resource_id}/private` endpoint in `access_api.py` — body `{ "is_private": bool }`; requires owner or Edit; updates the model field. When setting `is_private=True`, also clear the resource's public share token (`public_share_token=None, is_public=False`) so existing public links are immediately revoked.
-- `get_user_access` also needs updating: when `is_private=True` and user is not owner/admin/grantee, return `None` (invisible)
+- `get_user_access` also needs updating: when `is_private=True` and user is not owner/admin/grantee, skip the floor fallback and return `None` (invisible)
+- `get_user_access_map` also needs updating: for each resource, if `resource.is_private=True` and the user has no grant and is not the creator, skip the floor fallback and return `None` instead of the floor level
 
 #### 1h. Floor hierarchy enforcement — backend
 - In `org_preferences_api.py` (the PUT handler for floor settings): validate that `default_member_level` rank ≤ `default_analyst_level` rank using `LEVEL_RANK`; return 400 if violated
@@ -376,6 +377,10 @@ Add `transferOwnership(rtype, resourceId, toOrguserId)` to `hooks/api/useAccess.
 - Replace stub with proper screen + "Request Access" button → small modal (View/Edit radio + note + Submit)
 - After submit: show "Request sent" state
 - API: `POST /api/access/{rtype}/{resource_id}/request-access`
+
+**403 vs 404 on direct URL access:**
+- Resource detail endpoints (dashboard, chart, report, KPI) currently return 404 when the resource is invisible to the caller. Change to return **403** when the resource exists but the caller lacks access — this allows the frontend to show the request-access screen instead of a dead-end not-found page.
+- 404 is still correct when the resource genuinely doesn't exist (wrong ID, different org).
 
 **Requests section in share modal** (`components/ui/share-modal.tsx`):
 - Collapsible "Access Requests" section (owner/Edit-holders only)
