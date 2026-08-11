@@ -28,8 +28,7 @@
 
 ### Warehouse
 - [x] Wire warehouse connect
-- [x] Wire warehouse update
-- [x] Wire warehouse delete
+- [x] Wire warehouse delete (no dedicated update endpoint exists in the product)
 
 ### Data Sources & Connections (airbyte_api.py)
 - [x] Wire source create/update/delete
@@ -98,4 +97,6 @@
   - Fixed in: `dashboard_native_api.py`, `charts_api.py`, `metric_api.py`, `kpi_api.py`, `report_api.py`, `pipeline_api.py`, `airbyte_api.py`
 - [x] Show proper component IDs in dashboard resource_fields (e.g., "Chart ID 123 added to tab 'Tab 1'" instead of just "Chart")
 - [x] Ensure every resource's `resource_fields` is self-identifying (includes its own name/title) on every action, including delete and untouched fields on partial updates, across all resources — AUTH, Chart, Pipeline, KPI, Metric, Alert, ReportSnapshot/Comment, Warehouse/Airbyte, OrgUser/Org, dbt/Transformations, Dashboard
-- [x] Verify: full backend test suite (2167 passed, 0 regressions), `black --check .`, `manage.py check`
+- [x] Remove redundant `org.slug`/`org.name` from `resource_fields` across every call site — `AuditLog.org` is already a FK column, restating it inside the JSON blob was pure duplication with no other identity/column-level duplication found anywhere else in the ~85 call sites (checked in both directions: no call site restates `resource_id`, `resource_type`, `action`, `org`, `orguser`, or `orguser_email`)
+- [x] Eliminate delete-path double-fetch: every `delete_*` service method (KPI, Metric, Chart, Dashboard, Alert, ReportSnapshot, Comment, Pipeline, Warehouse) now returns the deleted resource's name/title directly, so the API layer no longer does its own separate fetch just to capture it for the audit log — see §4.2's updated dashboard-delete example
+- [x] Verify: full backend test suite (2287 passed, 0 regressions), `black --check .`, `manage.py check`

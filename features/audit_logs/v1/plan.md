@@ -244,21 +244,22 @@ Call pattern (example — dashboard delete, `api/dashboard_native_api.py`):
 @dashboard_router.delete("/{dashboard_id}")
 def delete_dashboard(request, dashboard_id: int):
     orguser = request.orguser
-    dashboard = get_dashboard_or_404(dashboard_id)
-    snapshot_name = dashboard.title
+    org = orguser.org
 
-    dashboard_service.delete_dashboard(orguser, dashboard_id)  # unchanged
+    dashboard_name = DashboardService.delete_dashboard(dashboard_id, org, orguser)
 
     create_audit_log(
-        org=orguser.org,
+        org=org,
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard_id),
         action=AuditLogAction.DELETE,
-        resource_fields={"title": snapshot_name},
+        resource_fields={"title": dashboard_name},
     )
     return {"success": True}
 ```
+
+**On every delete endpoint, the service returns the resource's name/title — the API layer never fetches the resource itself.** Earlier, a common pattern was for the API view to fetch the resource first (e.g. `get_dashboard_or_404`) purely to grab its name for the audit log, then call the service separately to actually delete it — two reads of the same row for one request. Every `delete_*` service method (KPI, Metric, Chart, Dashboard, Alert, ReportSnapshot, Comment, Pipeline, Warehouse) now returns the deleted resource's identifying name/title (or, for bulk/pipeline operations, adds it to the dict the service already returns) instead of a bare `True`/`{"success": 1}`, so the one fetch the service already needs to do (for the delete itself) is the only fetch — the API layer just reads the return value.
 
 This pattern is repeated at every in-scope endpoint listed in §2's Blast Radius table — roughly 60-70 call sites across `user_org_api.py`, `airbyte_api.py`, `pipeline_api.py`, `dbt_api.py`, `transform_api.py`, `dashboard_native_api.py`, `charts_api.py`, `metric_api.py`, `kpi_api.py`, `report_api.py`.
 
@@ -376,7 +377,7 @@ None in v1 — no `webapp_v2` changes. This is a backend-only implementation, pe
 - **Deliverable:** Warehouse, Data Sources/Connections, Pipelines, and the full dbt event list (Appendix A) are logged.
 - **Services:** DDP_backend
 - **Key tasks:**
-  - [x] Wire warehouse CUD — **done** (`wtype`/`name` logged, `airbyteConfig` credentials never logged). Update/remove not yet audited — no dedicated update/remove endpoints exist for Warehouse today beyond create; revisit if/when they're added.
+  - [x] Wire warehouse create/delete — **done** (`wtype`/`name` logged on create, `name` logged on delete; `airbyteConfig` credentials never logged). There is no dedicated warehouse-update endpoint in the product — only create and delete exist — so there's nothing to wire for "update."
   - [x] Wire `airbyte_api.py`: source/connection CUD, manual sync, reset, schema change — **done** (`config`/credentials never logged; Connection `streams` summarized to stream names via `_summarize_streams()`). See `test_airbyte_api.py` and `test_airbyte_api_v1.py` for audit-log-specific coverage.
   - [x] Wire `pipeline_api.py`: pipeline CUD, schedule toggle, manual trigger — **done** (connection IDs resolved via `ConnectionMeta` to real connection names, transform task UUIDs resolved to task labels). See `test_pipeline_api.py` for the audit-log-specific test coverage.
   - [x] Wire `dbt_api.py` + `transform_api.py`: all ~16 events from Appendix A — **done**. `put_switch_git_repo` logs `gitrepo_url`/`is_repo_managed_by_system` read back from the DB after the switch; `put_dbt_schema_v1` logs `default_schema` straight from the payload. See `test_dbt_api.py::test_put_switch_git_repo_creates_audit_log` / `::test_put_dbt_schema_v1_creates_audit_log` for the audit-log-specific coverage.
