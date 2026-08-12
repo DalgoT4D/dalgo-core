@@ -2,8 +2,8 @@
 
 Each section maps to one user story. Under each story:
 - **Journey** — who does what, in one sentence
-- **Backend test files** — where the tests live
-- **Test cases** — table of specific scenarios
+- **Backend tests** — Django unit/API tests (file reference + table of test cases); these are automated and run in CI
+- **Frontend behavior** — manual QA checklist; a human verifies these in the browser before marking the story done
 
 Test files:
 - `ddpui/tests/core/test_access_control.py` — unit tests for the access engine (no HTTP)
@@ -18,7 +18,9 @@ Test files:
 
 **Backend test files:** `test_access_api.py`, `test_access_control.py`
 
-### Floor hierarchy validation — `PUT /api/orgpreferences/`
+### Backend tests
+
+#### Floor hierarchy validation — `PUT /api/orgpreferences/`
 
 | ID | Scenario | Payload | Expected |
 |---|---|---|---|
@@ -29,9 +31,10 @@ Test files:
 | F05 | Invalid: Member=View, Analyst=No Access | `{member: "view", analyst: "no_access"}` | 400 |
 | F06 | Invalid: Member=Edit, Analyst=View | `{member: "edit", analyst: "view"}` | 400 |
 | F07 | Invalid: Member=Edit, Analyst=No Access | `{member: "edit", analyst: "no_access"}` | 400 |
-| F08 | Non-Admin caller cannot change floors | Analyst caller | 403 |
+| F08 | Non-Admin caller cannot change floors | Analyst caller, PUT | 403 |
+| F09 | Non-Admin caller cannot see floor settings | Analyst caller, GET | 403 |
 
-### Floor applied to resource access — `get_user_access`
+#### Floor applied to resource access — `get_user_access`
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
@@ -46,6 +49,19 @@ Test files:
 | Q04 | Floor change immediate for list endpoints | Members at View → No Access; call list endpoint | empty queryset |
 | Q05 | Member empty state — no shares, no ownership | floor=No Access, no grants | all list endpoints return `[]` |
 
+### Frontend behavior
+
+**Page: Settings > Access > Roles tab**
+
+| Scenario | Expected |
+|---|---|
+| Admin navigates to Settings > Access > Roles tab | Page loads; floor dropdowns and Allow Public Sharing toggle are visible and editable |
+| Analyst navigates to Settings > Access > Roles tab | Page is not accessible — tab is hidden or route returns 403 |
+| Member navigates to Settings > Access > Roles tab | Page is not accessible — tab is hidden or route returns 403 |
+| Admin sets Member floor to Edit while Analyst floor is View (Member > Analyst) | Save button is disabled; validation message shown explaining the constraint |
+| Admin sets valid floors (Member=View, Analyst=Edit) and saves | Success; dropdowns reflect saved values on page reload |
+| Admin changes Member floor from View to No Access and reloads the dashboard list as a Member | Dashboard list is empty — floor change takes effect immediately |
+
 ---
 
 ## Story 2: Analyst shares a dashboard with a user or group
@@ -54,7 +70,9 @@ Test files:
 
 **Backend test file:** `test_access_api.py`, `test_access_control.py`
 
-### Adding a grant — `POST /api/access/{rtype}/{resource_id}/grants`
+### Backend tests
+
+#### Adding a grant — `POST /api/access/{rtype}/{resource_id}/grants`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -69,7 +87,7 @@ Test files:
 | G09 | Grant with access_level=no_access is rejected | owner | 400 |
 | G10 | Duplicate grant for same user → updates existing row (upsert) | owner, user already has view | 200 |
 
-### Listing grants — `GET /api/access/{rtype}/{resource_id}/grants`
+#### Listing grants — `GET /api/access/{rtype}/{resource_id}/grants`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -77,7 +95,7 @@ Test files:
 | G15 | Pending invite appears in list with status=pending | owner | row with status=pending |
 | G16 | View-holder cannot list grants | view-holder | 403 |
 
-### Updating a grant — `PATCH /api/access/{rtype}/{resource_id}/grants/{grant_id}`
+#### Updating a grant — `PATCH /api/access/{rtype}/{resource_id}/grants/{grant_id}`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -86,7 +104,7 @@ Test files:
 | G20 | View-holder cannot update grant | view-holder | 403 |
 | G21 | PATCH non-existent grant | owner | 404 |
 
-### Removing a grant — `DELETE /api/access/{rtype}/{resource_id}/grants/{grant_id}`
+#### Removing a grant — `DELETE /api/access/{rtype}/{resource_id}/grants/{grant_id}`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -95,7 +113,7 @@ Test files:
 | G25 | View-holder cannot delete grant | view-holder | 403 |
 | G26 | Delete non-existent grant | owner | 404 |
 
-### Grant combines with org floor (effective = max)
+#### Grant combines with org floor (effective = max)
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
@@ -108,6 +126,15 @@ Test files:
 | B07 | User has View grant; group has Edit grant → max = Edit | user grant=view, group grant=edit | `"edit"` |
 | B08 | `get_user_access_map` batch result matches per-call results | 3 resources, mixed grants | map values == per-call values |
 
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User types a colleague's name in the share modal chip input | Autocomplete suggestions appear; selecting one adds a chip |
+| User selects permission level from the dropdown next to a chip before clicking Share | Picker shows View / Edit options; selection reflected on chip |
+| User clicks Remove on a grant row in the share modal | Grant row disappears; grantee loses access immediately |
+| User shares and then re-opens the share modal | Grant list refreshes and shows the new grantee |
+
 ---
 
 ## Story 3: Shared dashboard — inner charts/KPIs automatically accessible
@@ -116,7 +143,9 @@ Test files:
 
 **Backend test files:** `test_access_control.py`, `test_access_api.py`
 
-### Access engine — cascade resolution
+### Backend tests
+
+#### Access engine — cascade resolution
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
@@ -129,7 +158,7 @@ Test files:
 | C08 | Group dashboard share → cascade for group → chart accessible | group grant on dashboard | group member gets chart access |
 | C09 | `accessible_filter` with cascade grant includes the chart | cascade child row only, no direct chart grant | chart in queryset |
 
-### Cascade rows are materialized at write time
+#### Cascade rows are materialized at write time
 
 | ID | Scenario | Action | Expected |
 |---|---|---|---|
@@ -142,13 +171,27 @@ Test files:
 | G18 | PATCH dashboard share level → cascade children reflect new level | owner, parent share | all child rows.access_level updated |
 | G23 | Delete dashboard share → inner chart cascade rows auto-deleted | owner | chart inaccessible (floor=no_access) |
 
-### Grants list shows cascade context
+#### Grants list shows cascade context
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
 | G12 | Cascade-only user shown with share_id=None + cascade_sources | owner | share_id=None, cascade_sources=[{dashboard_id, title}] |
 | G13 | Direct grant + cascade on same chart → one merged row at max level | owner | share_id set, cascade_sources=[...], access_level=max |
 | G14 | Chart in two dashboards, sharing same user → two cascade sources listed | owner | cascade_sources has two entries |
+
+#### Blocking direct changes on cascade-derived access
+
+| ID | Scenario | Setup | Expected |
+|---|---|---|---|
+| Q13 | PATCH directly on a cascade row is rejected | Dashboard D1 has Charts A and B; User X has Edit on D1 (cascade → Edit rows on A and B, parent_id set); caller calls PATCH on Chart A's cascade row id | 400 — cascade rows are read-only; must change via parent dashboard share |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| After sharing a dashboard with a user, shared user opens /charts | Inner charts of that dashboard appear in the list with the same access level |
+| Owner opens Chart A share modal; User X's Edit came only from Dashboard D1 (no direct chart grant) | User X appears in the list at Edit; permission dropdown is disabled; tooltip says "access comes from a parent dashboard — update it there" |
+| Owner opens Chart A share modal, sees User X at Edit (cascade-derived), and tries to change to View | Change is blocked; message directs owner to update User X's access on Dashboard D1 instead |
 
 ---
 
@@ -158,11 +201,19 @@ Test files:
 
 **Backend test files:** `test_access_control.py`, `test_access_api.py`
 
+### Backend tests
+
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
 | C03 | Chart in two dashboards (Edit + View) → effective Edit | two child rows for same chart: edit and view | `"edit"` (max) |
 | H07 | Chart in two dashboards; one dashboard share deleted → still accessible via second | two dashboard shares; DELETE one parent | cascade from second dashboard remains |
 | G14 | Grants list shows two cascade sources for same user on same chart | chart in two dashboards, shared user | cascade_sources has two entries |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User has Edit via Dashboard A and View via Dashboard B on Chart C; opens /charts | Chart C appears with effective access Edit |
 
 ---
 
@@ -172,15 +223,24 @@ Test files:
 
 **Backend test file:** `test_access_control.py`
 
+### Backend tests
+
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
 | B01 | Edit grant on No Access floor → Edit | floor=no_access, user grant=edit | `"edit"` |
 | B03 | View grant on No Access floor → View | floor=no_access, user grant=view | `"view"` |
 | E01 | No floor, no grants, no ownership → empty queryset | — | no resources |
-| E02 | No floor, one direct grant → only that resource visible | one user grant | only granted resource |
+| E02 | No floor, one direct grant → only that resource visible | one user grant | only granted resource + its cascade children (inner charts/KPIs) |
 | E03 | No floor, owns resource → own resource returned | user is created_by | own resource visible |
 | E07 | No floor, cascade grant → cascade-granted chart returned | child row rtype=chart | chart in queryset |
 | Q11 | `accessible_filter` handles created_by=None (legacy row) without error | — | no exception |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| Member with No Access floor and no shares opens any list page | Page shows empty state — no resources listed |
+| After receiving a View share on one dashboard, Member opens list pages | Only that dashboard (and its inner charts) appear |
 
 ---
 
@@ -190,7 +250,9 @@ Test files:
 
 **Backend test files:** `test_access_control.py`, `test_access_api.py`
 
-### Private resource behavior in access engine
+### Backend tests
+
+#### Private resource behavior in access engine
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
@@ -207,7 +269,7 @@ Test files:
 | D11 | `accessible_filter`: private + owner → included | is_private=True, user is created_by | resource present |
 | D12 | `get_user_access_map`: private, no grant → None | is_private=True, no grant, floor=view | `map[resource.pk] == None` |
 
-### Private toggle API — `PATCH /api/access/{rtype}/{resource_id}/private`
+#### Private toggle API — `PATCH /api/access/{rtype}/{resource_id}/private`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -220,6 +282,12 @@ Test files:
 | I07 | Resource belongs to different org | owner, cross-org id | 404 |
 | I08 | Resource does not exist | owner | 404 |
 
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User enables Private toggle in share modal | Private toggle turns on; public link toggle becomes hidden |
+
 ---
 
 ## Story 7: Share via public link (Dashboard or Report)
@@ -227,6 +295,8 @@ Test files:
 **Journey:** Analyst turns on the public link toggle on a Dashboard; anyone with the link — including external funders not on Dalgo — can view the dashboard without logging in; the Admin can disable all public links org-wide with one toggle.
 
 **Backend test file:** `test_access_api.py`
+
+### Backend tests
 
 | ID | Scenario | Expected |
 |---|---|---|
@@ -241,6 +311,13 @@ Test files:
 | O09 | Enable public link when org disallows it (allow_public_sharing=False) | 400 |
 | Q03 | Public dashboard anonymous viewer sees inner charts even if chart floor=no_access | inner charts render |
 
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User enables public link toggle in share modal | Toggle turns on; copy-link button appears with the public URL |
+| Anonymous user opens the public link URL | Dashboard page renders without a login prompt |
+
 ---
 
 ## Story 8: Transfer ownership of a resource
@@ -250,6 +327,8 @@ Test files:
 **Backend test file:** `test_access_api.py`
 
 `POST /api/access/{rtype}/{resource_id}/transfer-ownership` — body `{"to_orguser_id": int}`
+
+### Backend tests
 
 | ID | Scenario | Actor → Recipient | Expected |
 |---|---|---|---|
@@ -265,26 +344,36 @@ Test files:
 | K10 | After transfer — old owner had no direct share → access reverts to floor | old owner, no direct share | effective access = floor level |
 | K11 | After transfer — old owner had direct Edit share → retains Edit | old owner, direct edit share exists | `"edit"` |
 
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| Owner or Admin opens permission dropdown next to a grantee in the share modal | "Transfer Ownership" option is present in the dropdown |
+| Non-owner Edit-holder opens permission dropdown next to a grantee | "Transfer Ownership" option is not present |
+| Owner selects "Transfer Ownership" and clicks confirm in the dialog | Ownership transfers; share modal updates to show the new owner |
+
 ---
 
 ## Story 9: Member requests access to a resource they can't see
 
-**Journey:** A program officer opens a dashboard link, has no access, sees the request-access screen, selects View, adds a note, and submits; the owner gets the request in the share modal and approves at View; the officer now has a direct share and can open the dashboard.
+**Journey:** A program officer opens a dashboard link, has no access, sees the request-access screen (which displays the owner's name so the officer knows who will receive the request), selects View, adds a note, and submits; the owner gets the request in the share modal and approves at View; the officer now has a direct share and can open the dashboard.
 
 **Backend test file:** `test_access_api.py`
 
-### Submitting a request — `POST /api/access/{rtype}/{resource_id}/request-access`
+### Backend tests
+
+#### Submitting a request — `POST /api/access/{rtype}/{resource_id}/request-access`
 
 | ID | Scenario | Requester state | Expected |
 |---|---|---|---|
-| L01 | No-access user requests View | floor=no_access, no grant | 201 |
-| L02 | No-access user requests Edit | floor=no_access | 201 |
+| L01 | User with no access requests View | user cannot currently see the resource (no floor access, no explicit share) | 201 — request created |
+| L02 | User with no access requests Edit | same as above, requests a higher permission level | 201 — request created |
 | L03 | User already has access (via floor) → rejected | floor=view | 409 |
 | L04 | Duplicate pending request → rejected | existing pending for same user + resource | 409 |
-| L05 | Resource does not exist | any user | 404 |
+| L05 | Resource does not exist — no request screen shown | any user; resource_id is invalid | 404 (frontend shows not-found page, never the request-access screen) |
 | L06 | Resource in different org | any user | 404 |
 
-### Owner views pending requests — `GET /api/access/{rtype}/{resource_id}/request-access`
+#### Owner views pending requests — `GET /api/access/{rtype}/{resource_id}/request-access`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
@@ -293,16 +382,25 @@ Test files:
 | L09 | View-holder cannot list requests | view-holder | 403 |
 | L10 | No pending requests | owner | 200, empty list |
 
-### Owner responds — `POST /api/access/{rtype}/{resource_id}/request-access/{req_id}/respond`
+#### Owner responds — `POST /api/access/{rtype}/{resource_id}/request-access/{req_id}/respond`
 
 | ID | Scenario | Actor | Expected |
 |---|---|---|---|
-| L11 | Owner approves at requested level | owner, decision=approved | 200; grant created at requested level; request.status=approved |
+| L11 | Owner approves at requested level | owner, decision=approved | 200; grant created at requested level; request.status=approved; requester notified via email + in-app notification |
 | L12 | Owner approves but downgrades (Edit request → grants View) | owner | 200; grant at View |
-| L13 | Owner declines | owner, decision=declined | 200; no grant; request.status=declined |
+| L13 | Owner declines | owner, decision=declined | 200; no grant; request.status=declined; requester notified via email + in-app notification |
 | L14 | Non-Edit-holder tries to respond | view-holder | 403 |
 | L15 | Respond to non-existent request | owner | 404 |
 | L16 | Respond to already-decided request | owner, request already approved | 400 or 409 |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User with no access opens a resource URL | No-access screen shown; owner's name is displayed; "Request Access" button is visible |
+| User clicks "Request Access" | Modal opens with a level picker (View / Edit) and a note text field |
+| User submits the request form | Button changes to "Request sent" confirmation state; form is no longer submittable |
+| Owner opens the share modal for that resource | "Access Requests" section is visible listing pending requests |
 
 ---
 
@@ -312,12 +410,21 @@ Test files:
 
 **Backend test files:** `test_orguserfunctions.py`, `test_access_control.py`, `test_access_api.py`
 
+### Backend tests
+
 | ID | File | Scenario | Expected |
 |---|---|---|---|
 | M01 | `test_orguserfunctions.py` | Pending ResourceShare (invitation_id set) — user accepts invite | principal_type=user, principal_id=new_orguser.id, invitation=None |
 | M02 | `test_orguserfunctions.py` | Pending OrgUserGroupMember (invitation_id set) — user accepts | orguser=new_orguser, invitation=None |
 | M03 | `test_access_control.py` | After promotion — user has effective access to shared resource | `get_user_access` returns granted level |
 | M04 | `test_access_api.py` | Invite not yet accepted — list_grants shows status=pending | row with status=pending visible |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User types an email not in the system into the share modal chip input | Modal flags the chip as external / pending invite |
+| User clicks Share with an external email chip | Invite email is sent; grants list shows that entry with status "pending" |
 
 ---
 
@@ -327,11 +434,13 @@ Test files:
 
 No backend tests. Frontend behavior only:
 
+### Frontend behavior
+
 | Scenario | Expected |
 |---|---|
-| User removes Edit share on a dashboard | Confirmation dialog shown: *"Removing or downgrading Edit on this dashboard will also affect Edit access on its inner charts and KPIs. Continue?"* |
+| User removes Edit share on a dashboard | Confirmation dialog shown: *"Removing or downgrading access on this dashboard will also affect access on its inner charts and KPIs. Continue?"* |
 | User downgrades Edit → View on a dashboard share | Same dialog shown |
-| User removes a View share on a dashboard | No dialog (only Edit removal triggers warning) |
+| User removes a View share on a dashboard | Same dialog shown (any removal or downgrade on a dashboard triggers the warning) |
 | User confirms dialog | Change applied |
 | User cancels dialog | No change applied |
 
@@ -343,7 +452,9 @@ No backend tests. Frontend behavior only:
 
 **Backend test files:** `test_access_control.py`, `test_access_api.py`
 
-### Group grants and effective access
+### Backend tests
+
+#### Group grants and effective access
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
@@ -352,13 +463,20 @@ No backend tests. Frontend behavior only:
 | C08 | Group dashboard share → cascade for group → chart accessible for group members | group grant on dashboard | group member gets chart access |
 | G03 | Owner adds grant for a group | owner | 201, principal_type=group |
 
-### Group management authorization
+#### Group management authorization
 
 | ID | Scenario | Expected |
 |---|---|---|
 | Q06 | Member cannot create a group | 403 on group create endpoint |
 | Q07 | Non-creator/non-Admin Analyst cannot edit another Analyst's group | 403 |
 | Q08 | Group visibility by role — Analyst sees own + member-of groups; Member sees only their own | list filtered per spec |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| Analyst opens group management UI | Create / edit / delete dialogs are accessible |
+| Member opens group management UI | Create group option is not present |
 
 ---
 
@@ -368,9 +486,18 @@ No backend tests. Frontend behavior only:
 
 **Backend test file:** `test_access_api.py`
 
+### Backend tests
+
 | ID | Scenario | Expected |
 |---|---|---|
 | Q09 | Actor has Edit on 3 of 5 selected resources → 3 succeed, 2 skipped; response includes skip count | 3 grants created; skip count = 2 |
+
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| User selects multiple resources in a list page and clicks Share | Share modal opens pre-loaded with the selected resources |
+| Bulk share completes with some resources skipped | Result banner shows "Shared X of Y — Z skipped: you don't have Edit on those" |
 
 ---
 
@@ -379,6 +506,8 @@ No backend tests. Frontend behavior only:
 **Journey:** Analyst deletes a Dashboard; all ResourceShare rows, AccessRequest rows, and cascade child rows for that dashboard are removed automatically; no orphaned grants remain in the database.
 
 **Backend test file:** `test_access_api.py`
+
+### Backend tests
 
 | ID | Scenario | Expected |
 |---|---|---|
@@ -397,6 +526,8 @@ No backend tests. Frontend behavior only:
 
 **Backend test file:** `test_access_api.py`
 
+### Backend tests
+
 | ID | Scenario | Expected |
 |---|---|---|
 | P01 | View-holder adds comment on Report | 201 |
@@ -406,6 +537,13 @@ No backend tests. Frontend behavior only:
 | P05 | Public-link (anonymous) viewer tries to comment | 401/403 |
 | P06 | No-access user tries to read or write comments | 403 |
 
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| View-holder opens a Report | Comment box is visible and submittable |
+| Anonymous user opens Report via public link | Comment box is absent |
+
 ---
 
 ## Story 16: Edge cases and explicit rule enforcement
@@ -414,12 +552,15 @@ No backend tests. Frontend behavior only:
 
 **Backend test files:** `test_access_control.py`, `test_access_api.py`
 
+### Backend tests
+
 | ID | Rule | Scenario | Expected |
 |---|---|---|---|
 | Q01 | Edit cascade does not confer delete | Cascade-Edit user calls DELETE on chart | 403 (only owner/Admin can delete) |
 | Q02 | Derived Edit (cascade only) confers re-share rights | Cascade-Edit user calls POST grants on chart | 201 |
-| Q03 | Public dashboard anonymous viewer sees inner charts | Public link, chart floor=no_access | inner charts render |
 | E04 | Floor=View → all non-private resources returned | multiple resources, none private | all returned |
 | E05 | Floor=View, one private → private excluded | one resource is_private=True | private excluded |
 | E06 | Admin → all resources returned including private | admin user | all returned |
 | Q11 | `accessible_filter` handles created_by=None (legacy row) without error | — | no exception |
+
+No frontend-specific behavior for these edge cases beyond what is covered in Story 3.

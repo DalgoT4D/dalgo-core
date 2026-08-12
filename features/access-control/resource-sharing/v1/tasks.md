@@ -7,14 +7,15 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 ## M1 — Access control engine (backend)
 
 - [x] **1a** Fix Analyst floor default → `AccessLevel.EDIT` in `OrgPreferences` + backfill migration
-- [ ] **1b** Add `KPI = "kpi"` to `ResourceType` enum (`models/resource_share.py`)
-- [ ] **1b** Add KPI to `RTYPES` in `shareable_types.py`
+- [x] **1b** Add `KPI = "kpi"` to `ResourceType` enum (`models/resource_share.py`)
+- [x] **1b** Add KPI to `RTYPES` in `shareable_types.py`
 - [x] **1c** Add `parent` self-FK (nullable, CASCADE) to `ResourceShare` + migration
-- [ ] **1c** Fix `_grants_map` in `access_control.py` — take max per (principal, resource), not last-write-wins
-- [ ] **1c** `resource_share.add_grants` — after dashboard share created, create child rows for inner charts/KPIs via `_inner_ids_from_dashboard`
-- [ ] **1c** `resource_share.update_grant` — after dashboard share level updated, propagate to child rows
-- [ ] **1c** Add `sync_cascade_rows(dashboard, old_tabs, new_tabs)` helper in `resource_share.py`
-- [ ] **1c** Hook `sync_cascade_rows` into dashboard update API (`dashboard_native_api.py`) wherever `tabs` is saved
+- [x] **1c** Fix `_grants_map` in `access_control.py` — `max_access_level` across all user + group rows; replace user-overrides-group with true max
+- [x] **1c** Add `max_access_level(*levels)` utility to `models/resource_share.py`; use in `_grants_map`, `get_user_access`, `get_user_access_map`
+- [x] **1c** Add `sync_dashboard_cascade(dashboard)` to `resource_share.py` — full sync of cascade children (create missing, update level, delete stale) for all direct shares on a dashboard
+- [x] **1c** `resource_share.add_grants` — call `sync_dashboard_cascade` after writing concrete dashboard shares
+- [x] **1c** `resource_share.update_grant` — call `sync_dashboard_cascade` when share is a dashboard share
+- [x] **1c** Hook `sync_dashboard_cascade` into `dashboard_native_api.py` wherever `tabs` is saved
 - [ ] **1d** Replace `_require_owner_or_admin` with `_require_edit_or_admin` on all grant endpoints (`access_api.py`)
 - [ ] **1e** `ChartService.list_charts` — add `orguser` param; apply `accessible_filter`; annotate `access_level` via `get_user_access_map`
 - [ ] **1e** `charts_api.py list_charts` — pass `orguser`; include `access_level` in `ChartResponse`
@@ -110,7 +111,6 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 
 - [ ] `ddpui/tests/core/test_access_control.py` — floor, direct grants, cascade max, admin override, accessible_filter with NO_ACCESS floor, Private toggle bypasses floor
 - [ ] `ddpui/tests/api/test_access_api.py` — grants CRUD, Edit-holder re-share, View-holder 403
-- [ ] Cascade impact API tests — affected charts/KPIs with no other Edit path; direct Edit excludes from warning
 - [ ] Ownership transfer tests — owner → Analyst (Edit floor) succeeds; owner → Member with direct Edit share succeeds; owner → Member with no Edit share → 400; non-owner → 403
 - [ ] Request access tests — no access → 201; already has access → 409; duplicate pending → 409; owner approves → grant created; declines → status updated
 - [ ] Private toggle tests — private resource invisible to floor-based access; explicit grantee still has access; turning private on clears public link

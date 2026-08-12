@@ -99,7 +99,7 @@ When a user or group is granted View or Edit on a **Dashboard**, that same permi
 - Cascade is **one level only**: Dashboard → its direct Charts/KPIs. Reports are fully independent (see Resource Taxonomy).
 - To change a user's access on a chart that came via cascade, change their share on the parent dashboard. The chart's share modal will show "Edit/View via Dashboard X" for cascaded permissions and block direct changes — directing the user to the dashboard instead.
 
-**Removing Edit from a dashboard warns before applying.** When a user or group's Edit share on a dashboard is removed or downgraded to View, the system shows a generic confirmation before applying: *"Removing or downgrading Edit on this dashboard will also affect Edit access on its inner charts and KPIs. Continue?"* The user confirms before the change takes effect.
+**Any removal or downgrade on a dashboard share warns before applying.** When a user or group's share on a dashboard is removed or downgraded (Edit → View, or View removed), the system shows a generic confirmation before applying: *"Removing or downgrading access on this dashboard will also affect access on its inner charts and KPIs. Continue?"* The user confirms before the change takes effect.
 
 ### Effective permission resolution
 
