@@ -123,7 +123,19 @@ Fix: loosen the Data parent (visible to all), push `DATA_SECTION_ROLES` onto eac
 
 ---
 
-## M11 — Tests (backend)
+## M11 — Floor label rebrand (frontend only)
+
+Rename the 3 floor options in `Settings > Access > Roles` — UI-only. Backend / API / DB continue to use `no_access` / `view` / `edit` internally.
+
+- [x] `no_access` → "Create only"
+- [x] `view` → "Create & View"
+- [x] `edit` → "Create & Edit"
+- [x] Update `LEVEL_LABEL` map in `components/settings/access/RolesTab.tsx`
+- [x] Update spec.md to use new labels while noting underlying levels unchanged
+
+---
+
+## M12 — Tests (backend)
 
 - [ ] `ddpui/tests/core/test_access_control.py` — floor, direct grants, cascade max, admin override, accessible_filter with NO_ACCESS floor, Private toggle bypasses floor
 - [ ] `ddpui/tests/api/test_access_api.py` — grants CRUD, Edit-holder re-share, View-holder 403

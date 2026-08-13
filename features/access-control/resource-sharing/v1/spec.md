@@ -70,21 +70,25 @@ The Admin sets a default resource permission for each role in **Settings > Acces
 
 | Role | Metrics *(fixed)* | Alerts *(fixed)* | Resources *(configurable)* | Factory default (Resources) |
 |---|---|---|---|---|
-| Admin | CRUD all | CRUD all + transfer | All access (fixed) | All access |
-| Analyst | CRUD any (referential guardrail on delete) | Create on accessible sources; read any; edit/delete own only | No access / View / Edit | Edit |
-| Member | View all; use inline in chart builder | View config; be a recipient | No access / View / Edit | View |
+| Admin | CRUD all | CRUD all + transfer | Full access (fixed) | Full access |
+| Analyst | CRUD any (referential guardrail on delete) | Create on accessible sources; read any; edit/delete own only | Create only / Create & View / Create & Edit | Create & Edit |
+| Member | View all; use inline in chart builder | View config; be a recipient | Create only / Create & View / Create & Edit | Create & View |
 
 Metrics and Alerts permissions are **fixed** — they cannot be changed by the Admin. Resources permissions are **configurable** via the 3-way toggle.
 
+The three floor options — **Create only**, **Create & View**, **Create & Edit** — describe what a role can do with *other users'* resources of a given type. The role can always create its own resources (that's a role-level permission, not a floor); the floor governs the baseline on everything else.
+
 - Changing the floor affects all resources immediately.
-- Setting a role's floor to **No access** removes that role's baseline everywhere; per-resource access is then granted by direct shares.
-- The floor cannot invert the role hierarchy: **Member floor ≤ Analyst floor ≤ Admin (always Edit)**. The Roles tab blocks any change that would set Member above Analyst.
+- Setting a role's floor to **Create only** removes that role's baseline access to other users' resources; per-resource access is then granted by direct shares.
+- The floor cannot invert the role hierarchy: **Member floor ≤ Analyst floor ≤ Admin (always full access)**. The Roles tab blocks any change that would set Member above Analyst.
+
+**Underlying levels (unchanged).** Backend, API, and DB continue to use `no_access` / `view` / `edit` internally. The UI labels — Create only, Create & View, Create & Edit — are a display-only rename in `Settings > Access > Roles`. All access-control logic, migration, and grant semantics stay the same.
 
 ### Direct shares
 
 On top of the org floor, owners and editors can grant specific users or groups **View** or **Edit** on individual resources.
 
-- Direct shares override the floor **upward** on a per-resource basis — even when the role's floor is No access, a direct share grants access on that specific resource.
+- Direct shares override the floor **upward** on a per-resource basis — even when the role's floor is Create only, a direct share grants access on that specific resource.
 - Effective permission = max(floor, direct shares).
 - Removing a direct share removes only that grant; the org floor and other direct shares remain.
 
@@ -265,7 +269,7 @@ Ownership transfer is available directly from the share modal — it is a third 
 - Only the **current owner or an Admin** can initiate a transfer.
 - Ownership can only be transferred to a user who holds **effective Edit** on the resource — via the role floor or a direct Edit share. A Member with a direct Edit share qualifies.
 - When the recipient becomes owner they receive full ownership rights (Edit + delete + share) regardless of their current share level on the resource.
-- The **previous owner's direct shares are not changed**. Their effective access after the transfer = max(org floor for their role, any existing direct share). If they had no direct share and their org floor is No access, they lose access entirely.
+- The **previous owner's direct shares are not changed**. Their effective access after the transfer = max(org floor for their role, any existing direct share). If they had no direct share and their org floor is Create only, they lose access entirely.
 - A **confirmation dialog is required** before the transfer applies: *"Transfer ownership of [Resource] to [Name]? You will lose owner status. Your access will revert to your role permissions or any direct share you hold."*
 
 ---
@@ -310,9 +314,9 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 
 **Public link bypasses inner chart access.** Anonymous viewers of a public dashboard see all inner charts regardless of those charts' access settings. Public links are frictionless external sharing — chart-level restrictions do not apply to anonymous viewers.
 
-**Org floor change is immediate.** Changing the org floor (e.g. Members from View to No access) affects all resources immediately. Direct shares are unaffected — users with a direct share keep access even after a floor tightening.
+**Org floor change is immediate.** Changing the org floor (e.g. Members from Create & View to Create only) affects all resources immediately. Direct shares are unaffected — users with a direct share keep access even after a floor tightening.
 
-**Member empty state.** If the org floor is No access for Members, Members who log in see blank list pages (no Dashboards, Charts, Reports) until explicitly shared on specific resources. If the floor is View, Members see all resources in read-only.
+**Member empty state.** If the org floor is Create only for Members, Members who log in see blank list pages (no Dashboards, Charts, Reports) until explicitly shared on specific resources. If the floor is Create & View, Members see all resources in read-only.
 
 ---
 
@@ -344,7 +348,7 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 | Today | After this feature |
 |---|---|
 | Dashboards/Reports have existing shares | Migrate 1:1 into direct shares. |
-| Charts have no sharing | Effective access from the org floor (factory: Analysts = Edit, Members = View). |
+| Charts have no sharing | Effective access from the org floor (factory: Analysts = Create & Edit, Members = Create & View). |
 | Interim "Members see all content" window (Spec A) | Narrows to org floor + direct shares. Members now see only what the floor admits + what's explicitly shared. Communicate before launch. |
 | Public links | Existing links preserved; gated going forward by the org "Allow public sharing" toggle (default on). |
 
@@ -366,7 +370,7 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 Analyst opens the Dashboard share modal, pastes 30 funder emails, sets permission to View, hits Share. Non-users receive invites as Members. Dashboard-View cascades to all inner charts — no separate chart-sharing needed. Funders see only this dashboard and its charts; the rest of the org's content is unaffected.
 
 **B. Restrict access to a sensitive area**
-M&E Lead wants Members to stop seeing all dashboards and only see what's explicitly shared. She sets the org floor: Members → No access. All Members immediately lose ambient access. She then opens the "Field Operations Dashboard" share modal and adds the Field Staff group at View. Field Staff now see only that dashboard (and its inner charts via cascade). All other Members see nothing until explicitly shared.
+M&E Lead wants Members to stop seeing all dashboards and only see what's explicitly shared. She sets the org floor: Members → Create only. All Members immediately lose ambient access. She then opens the "Field Operations Dashboard" share modal and adds the Field Staff group at View. Field Staff now see only that dashboard (and its inner charts via cascade). All other Members see nothing until explicitly shared.
 
 **C. Funder gets Edit on a dashboard — charts follow**
 Analyst shares "Donor Pipeline Dashboard" with Priya (a funder) at Edit. Priya immediately has Edit on the dashboard and, via cascade, on all its inner charts. Priya's `/charts` list now shows those charts as editable. To revoke, the Analyst removes Priya from the dashboard share — Priya loses Edit on all the inner charts simultaneously.
