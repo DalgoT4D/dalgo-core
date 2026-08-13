@@ -97,9 +97,9 @@ When a user or group is granted View or Edit on a **Dashboard**, that same permi
 - **View cascade** — the chart appears in the user's `/charts` list as view-only and renders inside the dashboard.
 - **Edit cascade** — the chart appears in the user's `/charts` list with full edit access.
 - Cascade is **one level only**: Dashboard → its direct Charts/KPIs. Reports are fully independent (see Resource Taxonomy).
-- To change a user's access on a chart that came via cascade, change their share on the parent dashboard. The chart's share modal will show "Edit/View via Dashboard X" for cascaded permissions and block direct changes — directing the user to the dashboard instead.
+- To change a user's access on a chart that came via cascade, change their share on the parent dashboard. The chart's share modal shows the effective access level normally (no visual indicator that it is cascade-derived). When an owner tries to change the level for a cascade-only principal, the frontend shows a message naming the source dashboard(s): *"Access on this chart is inherited from Dashboard X — go there to change it."*
 
-**Removing Edit from a dashboard warns before applying.** When a user or group's Edit share on the dashboard is removed or downgraded, the system shows a confirmation: *"Removing Edit for [User/Group] on this dashboard will also remove their Edit access on [N] inner charts: [Chart A, Chart B, ...]. Continue?"* The user confirms before the change takes effect. If those users/groups retain Edit via another dashboard containing the same charts, that path is preserved — the warning reflects the net change only.
+**Any removal or downgrade on a dashboard share warns before applying.** When a user or group's share on a dashboard is removed or downgraded (Edit → View, or View removed), the system shows a generic confirmation before applying: *"Removing or downgrading access on this dashboard will also affect access on its inner charts and KPIs. Continue?"* The user confirms before the change takes effect.
 
 ### Effective permission resolution
 
