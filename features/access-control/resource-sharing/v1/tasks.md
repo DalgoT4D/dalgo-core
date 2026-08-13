@@ -107,7 +107,23 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 
 ---
 
-## M10 — Tests (backend)
+## M10 — Nav restructure: Alerts + Metrics under Data (frontend)
+
+Per `spec.md` §"Metrics & Alerts Governance": Metrics and Alerts live under the **Data** section in the sidebar, and Members must see them read-only.
+
+Root cause: Data section had `visibleToRoles: DATA_SECTION_ROLES` (excludes Member). So Metrics was already invisible to Members despite the spec saying they should see it read-only; Alerts was top-level as a workaround.
+
+Fix: loosen the Data parent (visible to all), push `DATA_SECTION_ROLES` onto each staff-only child (Overview, Ingest, Transform, Orchestrate, Explore, Quality); Metrics + Alerts stay unrestricted.
+
+- [x] Move `Alerts` nav item into `Data.children` in `components/main-layout.tsx`
+- [x] Remove the top-level `Alerts` entry
+- [x] Drop `visibleToRoles` from Data parent
+- [x] Add `visibleToRoles: DATA_SECTION_ROLES` to each staff-only Data child
+- [x] Metrics + Alerts left unrestricted (backend `can_view_metrics` / `can_view_alerts` already granted to all 4 roles in the seed data — no seed change needed)
+
+---
+
+## M11 — Tests (backend)
 
 - [ ] `ddpui/tests/core/test_access_control.py` — floor, direct grants, cascade max, admin override, accessible_filter with NO_ACCESS floor, Private toggle bypasses floor
 - [ ] `ddpui/tests/api/test_access_api.py` — grants CRUD, Edit-holder re-share, View-holder 403
