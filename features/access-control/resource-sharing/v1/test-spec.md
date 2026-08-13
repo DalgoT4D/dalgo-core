@@ -190,8 +190,8 @@ Test files:
 | Scenario | Expected |
 |---|---|
 | After sharing a dashboard with a user, shared user opens /charts | Inner charts of that dashboard appear in the list with the same access level |
-| Owner opens Chart A share modal; User X's Edit came only from Dashboard D1 (no direct chart grant) | User X appears in the list at Edit; permission dropdown is disabled; tooltip says "access comes from a parent dashboard — update it there" |
-| Owner opens Chart A share modal, sees User X at Edit (cascade-derived), and tries to change to View | Change is blocked; message directs owner to update User X's access on Dashboard D1 instead |
+| Owner opens Chart A share modal; User X's Edit came only from Dashboard D1 (no direct chart grant) | User X appears in the list at Edit — dropdown looks normal, no visual indicator that access is cascade-derived |
+| Owner tries to change User X's level on Chart A (cascade-only, share_id=None) | Frontend intercepts — no API call made; message shown: "Access on this chart is inherited from Dashboard X — go there to change it" |
 
 ---
 
@@ -563,4 +563,9 @@ No backend tests. Frontend behavior only:
 | E06 | Admin → all resources returned including private | admin user | all returned |
 | Q11 | `accessible_filter` handles created_by=None (legacy row) without error | — | no exception |
 
-No frontend-specific behavior for these edge cases beyond what is covered in Story 3.
+### Frontend behavior
+
+| Scenario | Expected |
+|---|---|
+| Owner opens Chart A share modal, sees User X at Edit (cascade-only, share_id=None), tries to change to View | No API call; message shown naming the source dashboard(s): "Access is inherited from Dashboard X — go there to change it" |
+| User X has direct View on Chart A + inherited Edit from Dashboard D1 (effective=Edit, share_id set, cascade_sources=[D1]); owner tries to change to View | Blocked — cascade from D1 is still at Edit so downgrading the direct grant wouldn't lower the effective level; message: "User X also has Edit via Dashboard D1 — go there to change it first" |

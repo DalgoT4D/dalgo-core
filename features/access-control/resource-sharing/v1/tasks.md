@@ -16,24 +16,24 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] **1c** `resource_share.add_grants` — call `sync_dashboard_cascade` after writing concrete dashboard shares
 - [x] **1c** `resource_share.update_grant` — call `sync_dashboard_cascade` when share is a dashboard share
 - [x] **1c** Hook `sync_dashboard_cascade` into `dashboard_native_api.py` wherever `tabs` is saved
-- [ ] **1d** Replace `_require_owner_or_admin` with `_require_edit_or_admin` on all grant endpoints (`access_api.py`)
-- [ ] **1e** `ChartService.list_charts` — add `orguser` param; apply `accessible_filter`; annotate `access_level` via `get_user_access_map`
-- [ ] **1e** `charts_api.py list_charts` — pass `orguser`; include `access_level` in `ChartResponse`
-- [ ] **1e** `ReportService.list_snapshots` — add `orguser` param; apply `accessible_filter`; annotate `access_level`
-- [ ] **1e** `report_api.py list_snapshots` — pass `orguser`; include `access_level` in `SnapshotResponse`
-- [ ] **1e** `webapp_v2/types/charts.ts` — add `access_level?: 'view' | 'edit'`
-- [ ] **1e** `webapp_v2/types/reports.ts` — add `access_level?: 'view' | 'edit'`
-- [ ] **1e** `app/charts/page.tsx` — gate edit/share buttons on `chart.access_level === 'edit'` instead of role permission
-- [ ] **1e** `app/reports/page.tsx` — gate edit/delete/share buttons on `report.access_level === 'edit'`
-- [ ] **1f** Add `CascadeSourceSchema` to `resource_share_schema.py`
-- [ ] **1f** Update `ShareRowSchema` — add `cascade_sources`, make `share_id: Optional[int]`
-- [ ] **1f** Rewrite `list_grants` — group by principal, compute effective max, populate `cascade_sources`
+- [x] **1d** Replace `_require_owner_or_admin` with `_require_edit_or_admin` on all grant endpoints (`access_api.py`)
+- [x] **1e** `ChartService.list_charts` — add `orguser` param; apply `accessible_filter`; annotate `access_level` via `get_user_access_map`
+- [x] **1e** `charts_api.py list_charts` — pass `orguser`; include `access_level` in `ChartResponse`
+- [x] **1e** `ReportService.list_snapshots` — add `orguser` param; apply `accessible_filter`; annotate `access_level`
+- [x] **1e** `report_api.py list_snapshots` — pass `orguser`; include `access_level` in `SnapshotResponse`
+- [x] **1e** `webapp_v2/types/charts.ts` — add `access_level?: 'view' | 'edit'`
+- [x] **1e** `webapp_v2/types/reports.ts` — add `access_level?: 'view' | 'edit'`
+- [x] **1e** `app/charts/page.tsx` — gate edit/share buttons on `chart.access_level === 'edit'` instead of role permission
+- [x] **1e** `app/reports/page.tsx` — gate edit/delete/share buttons on `report.access_level === 'edit'`
+- [x] **1f** Add `CascadeSourceSchema` to `resource_share_schema.py`
+- [x] **1f** Update `ShareRowSchema` — add `cascade_sources`, make `share_id: Optional[int]`
+- [x] **1f** Rewrite `list_grants` — group by principal, compute effective max, populate `cascade_sources`
 - [x] **1g** Add `is_private = BooleanField(default=False)` to Dashboard, Chart, Report, KPI models + migration
-- [ ] **1g** Update `accessible_filter` in `access_control.py` — exclude private resources from floor-based access
-- [ ] **1g** Update `get_user_access` — skip floor fallback when `is_private=True` and no grant exists
-- [ ] **1g** Update `get_user_access_map` — skip floor fallback per resource when `is_private=True` and no grant exists
-- [ ] **1g** Add `PATCH /api/access/{rtype}/{resource_id}/private` endpoint — requires owner or Edit; clears public share token when setting `is_private=True`
-- [ ] **1h** Floor hierarchy validation in `org_preferences_api.py` PUT handler — reject if `default_member_level` rank > `default_analyst_level` rank
+- [x] **1g** Update `accessible_filter` in `access_control.py` — exclude private resources from floor-based access
+- [x] **1g** Update `get_user_access` — skip floor fallback when `is_private=True` and no grant exists
+- [x] **1g** Update `get_user_access_map` — skip floor fallback per resource when `is_private=True` and no grant exists
+- [x] **1g** Add `PATCH /api/access/{rtype}/{resource_id}/private` endpoint — requires owner or Edit; clears public share token when setting `is_private=True`
+- [x] **1h** Floor hierarchy validation in `org_preferences_api.py` PUT handler — reject if `default_member_level` rank > `default_analyst_level` rank
 
 ---
 
@@ -45,9 +45,9 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 
 ## M3 — Ownership transfer API (backend)
 
-- [ ] Add `TransferOwnershipPayload` schema to `resource_share_schema.py`
-- [ ] Implement `POST /api/access/{rtype}/{resource_id}/transfer-ownership` in `access_api.py`
-- [ ] Transfer logic in `ownership.py` — validate caller is owner/Admin; validate recipient has effective Edit via `get_user_access`; update `created_by`
+- [x] Add `TransferOwnershipPayload` schema to `resource_share_schema.py`
+- [x] Implement `POST /api/access/{rtype}/{resource_id}/transfer-ownership` in `access_api.py`
+- [x] Transfer logic in `ownership.py` — validate caller is owner/Admin; validate recipient has effective Edit via `get_user_access`; update `created_by`
 
 ---
 
@@ -55,55 +55,55 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 
 - [x] Add `AccessRequest` model (`models/resource_share.py` or new file)
 - [x] Write migration for `AccessRequest` table
-- [ ] `POST /api/access/{rtype}/{resource_id}/request-access` — create request
-- [ ] `GET /api/access/{rtype}/{resource_id}/request-access` — list pending requests (Edit-holders only)
-- [ ] `POST /api/access/{rtype}/{resource_id}/request-access/{id}/respond` — approve/decline
-- [ ] Resource detail endpoints — return 403 (not 404) when resource exists but caller lacks access; 404 only for genuinely missing resources
+- [x] `POST /api/access/{rtype}/{resource_id}/request-access` — create request
+- [x] `GET /api/access/{rtype}/{resource_id}/request-access` — list pending requests (Edit-holders only)
+- [x] `POST /api/access/{rtype}/{resource_id}/request-access/{id}/respond` — approve/decline
+- [x] Resource detail endpoints — return 403 (not 404) when resource exists but caller lacks access; 404 only for genuinely missing resources
 
 ---
 
 ## M5 — Invitation promotion + cleanup (backend)
 
-- [ ] Invitation promotion in `orguserfunctions.py` — on acceptance, update `ResourceShare` + `OrgUserGroupMember` rows
-- [ ] Group delete cleanup — `post_delete` signal on `OrgUserGroup` to delete orphan `ResourceShare` rows
-- [ ] Resource delete cleanup — in delete handlers for Dashboard, Chart, Report, KPI: delete `ResourceShare` + `AccessRequest` rows
+- [x] Invitation promotion in `orguserfunctions.py` — on acceptance, update `ResourceShare` + `OrgUserGroupMember` rows
+- [x] Group delete cleanup — `post_delete` signal on `OrgUserGroup` to delete orphan `ResourceShare` rows
+- [x] Resource delete cleanup — in delete handlers for Dashboard, Chart, Report, KPI: delete `ResourceShare` + `AccessRequest` rows
 
 ---
 
 ## M6 — Cascade removal warning + KPI sharing + Private toggle (frontend)
 
-- [ ] Cascade confirmation dialog in `share-modal.tsx` — static generic warning triggered when downgrading/removing Edit on a dashboard (no API call needed)
-- [ ] Add ShareModal to KPI page (`app/kpis/`) with `rtype="kpi"`
-- [ ] Private toggle in `share-modal.tsx` — calls `PATCH /api/access/{rtype}/{resource_id}/private`; hides public sharing toggle when Private is on
-- [ ] Floor hierarchy enforcement in `RolesTab.tsx` — disable Member floor options that exceed Analyst's current floor
+- [x] Cascade confirmation dialog in `share-modal.tsx` — static generic warning triggered when downgrading/removing Edit on a dashboard (no API call needed)
+- [x] Add ShareModal to KPI page (`app/kpis/`) with `rtype="kpi"`
+- [x] Private toggle in `share-modal.tsx` — calls `PATCH /api/access/{rtype}/{resource_id}/private`; hides public sharing toggle when Private is on
+- [x] Floor hierarchy enforcement in `RolesTab.tsx` — disable Member floor options that exceed Analyst's current floor
 
 ---
 
 ## M7 — Ownership transfer UI (frontend)
 
-- [ ] Add "Transfer Ownership" option to permission dropdown in share modal (owner/Admin only)
-- [ ] Ownership transfer confirmation dialog in `share-modal.tsx`
-- [ ] Add `transferOwnership` to `hooks/api/useAccess.ts`
-- [ ] Update `ShareRow` type in `types/access.ts` — add `cascade_sources: CascadeSource[]`, make `share_id: Optional<number>`
+- [x] Add "Transfer Ownership" option to permission dropdown in share modal (owner/Admin only)
+- [x] Ownership transfer confirmation dialog in `share-modal.tsx`
+- [x] Add `transferOwnership` to `hooks/api/useAccess.ts`
+- [x] Update `ShareRow` type in `types/access.ts` — add `cascade_sources: CascadeSource[]`, make `share_id: Optional<number>`
 
 ---
 
 ## M8 — Request access UI (frontend)
 
-- [ ] Redesign `NoAccess.tsx` — add "Request Access" button + request modal (level + note); handles 403 response from resource detail endpoints
-- [ ] Add request-access hooks to `hooks/api/useAccess.ts`
-- [ ] Add "Access Requests" section to share modal (`share-modal.tsx`) — visible to Edit-holders; approve/decline actions
+- [x] Redesign `NoAccess.tsx` — add "Request Access" button + request modal (level + note); handles 403 response from resource detail endpoints
+- [x] Add request-access hooks to `hooks/api/useAccess.ts`
+- [x] Add "Access Requests" section to share modal (`share-modal.tsx`) — visible to Edit-holders; approve/decline actions
 
 ---
 
 ## M9 — Bulk share + access badges (frontend)
 
-- [ ] Add `<AccessBadge>` component to `components/ui/`
-- [ ] Apply access badge to dashboard list (`dashboard-list-v2.tsx`)
-- [ ] Apply access badge to chart list (`app/charts/page.tsx`)
-- [ ] Apply access badge to reports list
-- [ ] Add bulk Share action to chart list (`app/charts/page.tsx`)
-- [ ] Add bulk Share action to dashboard list (`dashboard-list-v2.tsx`)
+- [x] Add `<AccessBadge>` component to `components/ui/`
+- [x] Apply access badge to dashboard list (`dashboard-list-v2.tsx`)
+- [x] Apply access badge to chart list (`app/charts/page.tsx`)
+- [x] Apply access badge to reports list
+- [x] Add bulk Share action to chart list (`app/charts/page.tsx`)
+- [x] Add bulk Share action to dashboard list (`dashboard-list-v2.tsx`)
 
 ---
 
