@@ -59,6 +59,12 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 - [x] `GET /api/access/{rtype}/{resource_id}/request-access` — list pending requests (Edit-holders only)
 - [x] `POST /api/access/{rtype}/{resource_id}/request-access/{id}/respond` — approve/decline
 - [x] Resource detail endpoints — return 403 (not 404) when resource exists but caller lacks access; 404 only for genuinely missing resources
+- [x] `get_user_access` returns `AccessLevel.NO_ACCESS` (was `None`) when resource exists but caller has no access; `has_access` decorator uses this to raise 403 for no-access, 404 only for missing
+- [x] Reuse `is_creator_or_admin` inside `get_user_access` (was duplicating the owner + admin checks); fix circular import by moving `ownership.py` off `ddpui.auth`
+- [x] Notify resource owner when a new access request is created (email + in-app via `create_notification`) — includes requester email, role, requested level, note, and a deep link to open the share modal
+- [x] Notify requester when their request is approved (email + in-app, with resource link)
+- [x] Notify requester when their request is declined (email + in-app, with resource link)
+- [x] `_resource_url` helper builds frontend URLs per rtype; KPI special-cased to `/kpis?openShare=true&kpiId={id}` since there's no `/kpis/{id}` route
 
 ---
 
@@ -93,6 +99,10 @@ Generic confirmation dialog in the frontend only; no backend API needed.
 - [x] Redesign `NoAccess.tsx` — add "Request Access" button + request modal (level + note); handles 403 response from resource detail endpoints
 - [x] Add request-access hooks to `hooks/api/useAccess.ts`
 - [x] Add "Access Requests" section to share modal (`share-modal.tsx`) — visible to Edit-holders; approve/decline actions
+- [x] `lib/api.ts` attaches `.status` to thrown errors so callers can distinguish 403 from other failures
+- [x] Dashboard router (`app/dashboards/[id]/page.tsx`) renders `NoAccess` when the native API returns 403 (was falling through to the generic "Error Loading Dashboard" card)
+- [x] `useOpenShareDeepLink` hook — reads `?openShare=true` on the URL, clears it (and any listed extras) on close so a refresh doesn't reopen the modal
+- [x] Auto-open share modal from notification deep link on dashboard (`DashboardNativeView`), chart (`ChartDetailClient`), report (`ReportShareMenu`), and KPI list (`kpi-page.tsx` — matches `kpiId` param to a loaded row)
 
 ---
 
@@ -141,5 +151,17 @@ Rename the 3 floor options in `Settings > Access > Roles` — UI-only. Backend /
 - [ ] `ddpui/tests/api/test_access_api.py` — grants CRUD, Edit-holder re-share, View-holder 403
 - [ ] Ownership transfer tests — owner → Analyst (Edit floor) succeeds; owner → Member with direct Edit share succeeds; owner → Member with no Edit share → 400; non-owner → 403
 - [ ] Request access tests — no access → 201; already has access → 409; duplicate pending → 409; owner approves → grant created; declines → status updated
+- [ ] Notification tests — owner notified on create; requester notified on approve/decline; notification failure doesn't fail the API; orphaned resource skips owner notification
 - [ ] Private toggle tests — private resource invisible to floor-based access; explicit grantee still has access; turning private on clears public link
 - [ ] Floor hierarchy validation tests — Member floor > Analyst floor → 400
+
+---
+
+## M13 — Follow-ups (uncovered / discovered during testing)
+
+- [ ] **Spec docs** — update `test-spec.md` and `spec.md` to reflect 403 (not 404) for exists+no-access resources
+- [ ] **Story 15 P03** — Edit-holder can moderate (delete) another user's comment on a report; currently `comment_service.py:177` allows author-only
+- [ ] **Story 13 — Bulk share improvements** — accept existing users + groups (not just new-user emails); show skip-count banner after bulk-share reports partial success
+- [ ] **Story 4** — verify (manually or via test) chart in multiple dashboards → effective access = max
+- [ ] **Story 16 Scenario 2** — verify direct-grant + higher-cascade blocks the direct-grant downgrade with the correct toast message
+- [ ] **Story 14** — resource / group delete orphan-cleanup: manual verification or dedicated test
