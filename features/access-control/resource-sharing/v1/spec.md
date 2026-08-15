@@ -115,7 +115,8 @@ EffectivePermission(user, resource) =
       — Direct grants to the user on this resource
       — Direct grants to any group the user belongs to on this resource
       — Cascaded grants from any dashboard that contains this resource
-    If none → no access (resource is invisible)
+    If none → no access (API returns 403 with a Request Access affordance;
+    resources not in the caller's org still return 404)
 ```
 
 The share modal shows the **resolved effective permission** per user/group — not the breakdown of which path contributed.

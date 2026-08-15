@@ -159,8 +159,8 @@ Rename the 3 floor options in `Settings > Access > Roles` — UI-only. Backend /
 
 ## M13 — Follow-ups (uncovered / discovered during testing)
 
-- [ ] **Spec docs** — update `test-spec.md` and `spec.md` to reflect 403 (not 404) for exists+no-access resources
-- [ ] **Story 15 P03** — Edit-holder can moderate (delete) another user's comment on a report; currently `comment_service.py:177` allows author-only
+- [x] **Spec docs** — updated `test-spec.md` (has_access semantics section, A03/A04/A08/C06/D01/D02 expected values, Story 9 notification rows L17-L21, deep-link frontend behavior) and `spec.md` (EffectivePermission "invisible" language)
+- [x] **Story 15 P03** — Edit-holder can moderate (delete) another user's comment on a report; `comment_service.py:delete_comment` now allows author OR any Edit-holder on the parent report. `update_comment` intentionally stays author-only (rewriting others' words is not moderation).
 - [ ] **Story 13 — Bulk share improvements** — accept existing users + groups (not just new-user emails); show skip-count banner after bulk-share reports partial success
 - [ ] **Story 4** — verify (manually or via test) chart in multiple dashboards → effective access = max
 - [ ] **Story 16 Scenario 2** — verify direct-grant + higher-cascade blocks the direct-grant downgrade with the correct toast message

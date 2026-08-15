@@ -10,6 +10,25 @@ Test files:
 - `ddpui/tests/api/test_access_api.py` — API integration tests (Django Ninja test client)
 - `ddpui/tests/core/test_orguserfunctions.py` — invitation/acceptance tests
 
+## `has_access` decorator — HTTP status semantics
+
+Resource-detail endpoints are gated by `@has_access(rtype, level, ...)`. The
+status codes it returns are consistent across all rtypes:
+
+| Situation | Status |
+|---|---|
+| Resource does not exist in the caller's org (missing / cross-org / soft-deleted) | **404** |
+| Resource exists in the caller's org but caller has no access | **403** (was 404 before Story 9 landed) |
+| Resource exists and caller has some access but below `required_level` (e.g. View, endpoint requires Edit) | **403** with a "you have {level}-only access" message |
+| Caller passes all gates | endpoint runs; `request.access_level` is populated with the effective level |
+
+The 403 for "exists but no access" is what enables the Request Access flow — the frontend can distinguish "not there" from "there but locked" and render the appropriate screen.
+
+`get_user_access` returns:
+- `None` — resource does not exist (translates to 404)
+- `AccessLevel.NO_ACCESS` — resource exists, caller has no access (translates to 403)
+- `AccessLevel.VIEW` / `AccessLevel.EDIT` — the caller's effective level
+
 ---
 
 ## Story 1: Admin sets org-wide permission floors
@@ -40,12 +59,13 @@ Test files:
 |---|---|---|---|
 | A01 | Analyst gets Edit on default Analyst floor | `prefs.default_analyst_level=edit`, no grant | `"edit"` |
 | A02 | Member gets View on default Member floor | `prefs.default_member_level=view`, no grant | `"view"` |
-| A03 | Member with No Access floor → invisible | `prefs.default_member_level=no_access` | `None` |
-| A04 | Analyst with No Access floor → invisible | `prefs.default_analyst_level=no_access` | `None` |
+| A03 | Member with No Access floor, resource exists → no_access | `prefs.default_member_level=no_access` | `"no_access"` |
+| A04 | Analyst with No Access floor, resource exists → no_access | `prefs.default_analyst_level=no_access` | `"no_access"` |
 | A05 | Admin always gets Edit regardless of floor | `prefs.default_analyst_level=no_access`, admin user | `"edit"` |
 | A06 | Missing OrgPreferences row → defaults to View | no OrgPreferences row for org | `"view"` |
 | A07 | Creator of resource always gets Edit | user == `resource.created_by`, floor=no_access | `"edit"` |
-| A08 | Floor change is immediate | prefs updated to no_access after resource created | `None` on next call |
+| A08 | Floor change is immediate | prefs updated to no_access after resource created | `"no_access"` on next call |
+| A09 | Resource does not exist in caller's org | any user; unknown resource_id | `None` (distinct from `no_access`) |
 | Q04 | Floor change immediate for list endpoints | Members at View → No Access; call list endpoint | empty queryset |
 | Q05 | Member empty state — no shares, no ownership | floor=No Access, no grants | all list endpoints return `[]` |
 
@@ -153,7 +173,7 @@ Test files:
 | C02 | View dashboard share → chart appears as view-only | cascade child row: level=view | `"view"` |
 | C04 | Cascade Edit + permissive floor → max applies | cascade=edit, floor=view | `"edit"` |
 | C05 | No Access floor + dashboard share → chart visible via cascade | floor=no_access, cascade child=view | `"view"` |
-| C06 | Dashboard share deleted → child rows auto-deleted → chart invisible | delete parent ResourceShare; floor=no_access | `None` |
+| C06 | Dashboard share deleted → child rows auto-deleted; chart still exists but no access | delete parent ResourceShare; floor=no_access | `"no_access"` |
 | C07 | KPI inside dashboard → cascade works same as chart | child row rtype=kpi | `get_user_access(user, "kpi", K) == "edit"` |
 | C08 | Group dashboard share → cascade for group → chart accessible | group grant on dashboard | group member gets chart access |
 | C09 | `accessible_filter` with cascade grant includes the chart | cascade child row only, no direct chart grant | chart in queryset |
@@ -256,8 +276,8 @@ Test files:
 
 | ID | Scenario | Setup | Expected |
 |---|---|---|---|
-| D01 | Private + View floor → invisible (floor bypassed) | is_private=True, floor=view, no grant | `None` |
-| D02 | Private + Edit floor → invisible | is_private=True, floor=edit, no grant | `None` |
+| D01 | Private + View floor → no access (floor bypassed) | is_private=True, floor=view, no grant | `"no_access"` |
+| D02 | Private + Edit floor → no access | is_private=True, floor=edit, no grant | `"no_access"` |
 | D03 | Private + direct Edit grant → Edit (grant still applies) | is_private=True, user grant=edit | `"edit"` |
 | D04 | Private + direct View grant → View | is_private=True, user grant=view | `"view"` |
 | D05 | Private + cascade Edit grant → Edit | is_private=True, cascade child row=edit | `"edit"` |
@@ -393,14 +413,26 @@ Test files:
 | L15 | Respond to non-existent request | owner | 404 |
 | L16 | Respond to already-decided request | owner, request already approved | 400 or 409 |
 
+#### Notifications
+
+| ID | Scenario | Expected |
+|---|---|---|
+| L17 | Create request → owner notified | Notification created for `resource.created_by`; email sent per requester's preference; body includes requester email + role, requested level, note, and a deep link with `?openShare=true` |
+| L18 | Approve request → requester notified | Notification created for requester; email sent per prefs; body includes responder email, granted level, and a plain resource link |
+| L19 | Decline request → requester notified | Notification created for requester; body says "declined" and includes a plain resource link |
+| L20 | Orphaned resource (`created_by=None`) → owner notification skipped, request still lands | No notification row created; `AccessRequest` row still present so admins can find it via share modal |
+| L21 | Notification failure does not fail the API call | Simulate `create_notification` raising; endpoint still returns 201 for create / 200 for respond |
+
 ### Frontend behavior
 
 | Scenario | Expected |
 |---|---|
-| User with no access opens a resource URL | No-access screen shown; owner's name is displayed; "Request Access" button is visible |
+| User with no access opens a resource URL | Detail endpoint returns 403; router renders the No-access screen with a "Request Access" button (owner's name is a nice-to-have — not currently shown) |
 | User clicks "Request Access" | Modal opens with a level picker (View / Edit) and a note text field |
 | User submits the request form | Button changes to "Request sent" confirmation state; form is no longer submittable |
-| Owner opens the share modal for that resource | "Access Requests" section is visible listing pending requests |
+| Owner clicks the deep link in the notification (`?openShare=true`) | Lands on the resource with the share modal auto-opened at the "Access Requests" section; the query param is stripped on modal close so a refresh doesn't reopen it |
+| Owner opens the share modal for that resource (without deep link) | "Access Requests" section is visible listing pending requests |
+| KPI deep link uses `/kpis?openShare=true&kpiId={id}` | List page finds the matching KPI row and auto-opens its share modal on load; both params stripped on close |
 
 ---
 
