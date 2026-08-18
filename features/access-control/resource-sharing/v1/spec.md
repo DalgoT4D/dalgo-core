@@ -292,13 +292,6 @@ When an authenticated user opens a resource link they don't have access to:
 - Unauthenticated visitors (e.g. public-link off, non-user opens a link) are prompted to sign in or ask to be invited.
 - Pending access requests expire on the same **30-day** constant.
 
-### Bulk sharing from resource lists
-
-Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk Share**.
-
-- Applies to resources the actor has effective Edit on; skips the rest with a count: *"Shared 8 of 10 — 2 skipped: you don't have Edit on those."*
-- The same share modal applies grants / public-link to all selected resources at once.
-
 ---
 
 ## Edge Cases & Explicit Rules
@@ -336,7 +329,7 @@ Every resource list (Dashboards, Charts, Reports) supports **multi-select + bulk
 |---|---|
 | **Settings > Access** | Single page with three tabs: **People** (user management, collapsed from the previous two-tab structure), **Groups** (group management), **Roles** (permission matrix with two columns — Metrics & Alerts fixed permissions and Resources configurable 3-way toggle; Allow public sharing org toggle). |
 | **Share modal** | Search people/groups/emails; per-share permission picker (View/Edit); pending state for external emails; People with access list; Private toggle; public sharing toggle (hidden if org disallows or Private is on). |
-| **Resource list pages** | Main-app pages (Dashboards, Charts, Reports, KPIs) — not a Settings surface. Effective-access indicator per resource (e.g. View / Edit / Owner); multi-select with bulk Share action and skipped-count summary; "Shared with you" section for Members. All sharing is done via the resource share modal, opened from the resource page or the list. |
+| **Resource list pages** | Main-app pages (Dashboards, Charts, Reports, KPIs) — not a Settings surface. Effective-access indicator per resource (e.g. View / Edit / Owner); "Shared with you" section for Members. All sharing is done via the resource share modal, opened from the resource page or the list. |
 | **Request-access screen** | Shown on access-denied for authenticated users; request View/Edit with note; routes to owner. States: form → submitted → decided (approved/declined). |
 | **Requests section** (in share modal) | Pending access requests with approve (pick level) / decline. |
 | **Groups (Settings > Access > Groups tab)** | Table: Group Name, member avatar stack, Created By, Created date, ⋮ actions (Edit Group / Delete Group). Create/Edit modal: group name + add people/emails + existing members list with ✕ per member. Scoped by role — Members only see groups they belong to. |

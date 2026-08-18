@@ -512,27 +512,6 @@ No backend tests. Frontend behavior only:
 
 ---
 
-## Story 13: Bulk share from resource lists
-
-**Journey:** Analyst selects 5 dashboards in the list, clicks "Share", adds the Field Staff group at View; 3 dashboards where the Analyst has Edit get shared; 2 are skipped with a count shown: "Shared 3 of 5 — 2 skipped: you don't have Edit on those."
-
-**Backend test file:** `test_access_api.py`
-
-### Backend tests
-
-| ID | Scenario | Expected |
-|---|---|---|
-| Q09 | Actor has Edit on 3 of 5 selected resources → 3 succeed, 2 skipped; response includes skip count | 3 grants created; skip count = 2 |
-
-### Frontend behavior
-
-| Scenario | Expected |
-|---|---|
-| User selects multiple resources in a list page and clicks Share | Share modal opens pre-loaded with the selected resources |
-| Bulk share completes with some resources skipped | Result banner shows "Shared X of Y — Z skipped: you don't have Edit on those" |
-
----
-
 ## Story 14: Resource or group deleted — orphan cleanup
 
 **Journey:** Analyst deletes a Dashboard; all ResourceShare rows, AccessRequest rows, and cascade child rows for that dashboard are removed automatically; no orphaned grants remain in the database.

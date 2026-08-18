@@ -55,10 +55,9 @@ The resource sharing spec (features/access-control/resource-sharing/spec.md) is 
 3. **Ownership transfer UI** — not in share-modal.tsx
 4. **Request access flow** — NoAccess screen is a stub (`components/common/NoAccess.tsx` has no request button)
 5. **Access requests section** — share modal doesn't show pending requests for the owner to approve/decline
-6. **Bulk Share** — charts and dashboards have bulk-delete but no bulk-share
-7. **Visual access badges** — resource list items don't display View/Edit/Owner badges
-8. **Private toggle** — not in share-modal.tsx
-9. **Floor hierarchy enforcement** — Roles tab doesn't disable Member floor options that exceed Analyst's current floor
+6. **Visual access badges** — resource list items don't display View/Edit/Owner badges
+7. **Private toggle** — not in share-modal.tsx
+8. **Floor hierarchy enforcement** — Roles tab doesn't disable Member floor options that exceed Analyst's current floor
 
 ---
 
@@ -389,11 +388,7 @@ Add `transferOwnership(rtype, resourceId, toOrguserId)` to `hooks/api/useAccess.
 
 ---
 
-### M9 — Bulk Share + Access badges (frontend)
-
-**Bulk Share:**
-- `app/charts/page.tsx`: add "Share" to bulk-action bar; open share modal applying to all selected IDs; show "Shared N of M — K skipped" toast
-- `components/dashboard/dashboard-list-v2.tsx`: same for dashboards
+### M9 — Access badges (frontend)
 
 **Visual access badges:**
 - Add `<AccessBadge level="view|edit|owner" />` component to `components/ui/`
@@ -446,7 +441,6 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 7. **KPI sharing**: KPI share modal opens; grants work; KPI appears in recipient's KPI list.
 8. **Ownership transfer to Member**: Give Member a direct Edit share on a dashboard → transfer ownership to them → succeeds.
 9. **Request access**: No-access Member opens link → request form → submits → owner sees in share modal → approves → Member gains access.
-10. **Bulk share**: Select 5 dashboards → Share → applied to all; 2 without Edit skipped with count shown.
-11. **Floor hierarchy**: Try setting Member floor above Analyst → Roles tab blocks it; API returns 400.
-12. **Public link toggle off**: Turning off org toggle makes all existing public links inaccessible immediately.
-13. **Invitation promotion**: External email invited via share modal → accepts → ResourceShare row promoted to new OrgUser (no longer pending).
+10. **Floor hierarchy**: Try setting Member floor above Analyst → Roles tab blocks it; API returns 400.
+11. **Public link toggle off**: Turning off org toggle makes all existing public links inaccessible immediately.
+12. **Invitation promotion**: External email invited via share modal → accepts → ResourceShare row promoted to new OrgUser (no longer pending).
