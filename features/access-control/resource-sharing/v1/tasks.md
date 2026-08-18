@@ -515,3 +515,41 @@ Backend `test_alert_api.py`: 47 passed (38 baseline + 9 new):
 - [x] `test_transfer_ownership_not_found` — 404
 
 Frontend `AlertsTable.test.tsx` updated with `canTransfer` / `onTransfer` in `baseProps` and `created_by_email` on the fixture — 11 / 11 pass.
+
+---
+
+## M17 — View → Edit upgrade + share notifications ✅
+
+Spec: `spec.md` §Request access (new "Upgrading View to Edit" paragraph) + new §Share notifications; UI Surface table gained a "Request Edit pill" row.
+
+Plan: see `plan.md::M17`. Test-spec: L03 revised, L03b/L03c added; new backend rows L22–L31; new frontend rows for the pill.
+
+### Backend ✅
+
+- [x] Loosen `create_access_request` guard — uses `LEVEL_RANK` comparison; 409 only when `existing_access >= requested_level`; allows strict-upgrade requests
+- [x] `respond_to_access_request` on approve — reuses `resource_share.add_grants` which now upgrades an existing direct `ResourceShare` in place (fix in `add_grants`: filter restricts to `parent__isnull=True` so cascade rows are never mutated). New direct row is created when the requester's View came only from cascade / group / floor.
+- [x] `add_resource_grants` — snapshot pre-existing `(principal_type, principal_id) → level` map via `_snapshot_direct_levels`; classify each written row into `new` / `upgrade` / no-op / downgrade via `_classify_share_recipients`
+- [x] Group principals expand to current `OrgUserGroupMember.orguser_id`s; invitations skipped; dedupe within (class, level); sender's own orguser_id filtered out; users in both classes stay in `new` only
+- [x] Fire one `create_notification` per (class, level) bucket via `_notify_share_recipients`; delivery flows through existing `handle_recipient` → `render_notification_email` HTML template. Wrapped in `try/except` — notification failure never blocks the API call.
+- [x] Backend tests: **12 new** in `ddpui/tests/api_tests/test_access_api.py` — L03 (view-holder can upgrade), L03b (edit-holder rejected), L03c (same-level rejected), L22 (approve upgrade merges in place), L23 (approve upgrade via group grant → new direct row, group untouched), L24 (direct user grant notify), L25 (group grant expands to all members), L26 (view→edit upgrade fires upgrade notif), L27 (no-op re-save no notif), L28 (downgrade no notif), L29 (invitation grants no share-notif), L30 (dedup direct + group), L31 (sender never their own recipient). All 133 tests pass.
+
+### Frontend ✅
+
+- [x] `components/access/request-access-dialog.tsx` — extracted from `no-access.tsx`. Props: `rtype`, `resourceId`, `defaultLevel?='view'`, `lockLevel?` (disables the Select), `isOpen`, `onClose`, `onSubmitted?`
+- [x] `components/access/request-edit-pill.tsx` — outline button using the same `text-xs border-green-600` styling as the dashboard header's Set Landing button. Visible only when `resourceAccessLevel === 'view'`. Opens the shared dialog with `defaultLevel='edit'` and `lockLevel` so the level select is disabled at Edit.
+- [x] Mounted in the right-side actions cluster (matching existing header buttons) on all 4 single-resource surfaces:
+  - `components/dashboard/dashboard-native-view.tsx` — mobile + desktop headers, before Set Landing
+  - `app/charts/[id]/ChartDetailClient.tsx` — after the Export dropdown
+  - `app/reports/[snapshotId]/page.tsx` — first item in the actions cluster, before Download + ReportShareMenu
+  - `components/kpis/kpi-detail-drawer.tsx` — before the Alert/Edit/Close icon row
+- [x] Frontend tests — `request-edit-pill.test.tsx` (5 tests: visibility gates + Edit pre-select + locked select + POST fires at edit level + sent state) + `request-access-dialog.test.tsx` (4 tests: `defaultLevel` pre-selects, `lockLevel` disables, unlocked flow allows picker, submit shape + callbacks). `no-access.test.tsx` continues to pass after the refactor.
+
+### Results
+
+- Backend `test_access_api.py`: **133 passed, 2 xfail**
+- Frontend jest suite: **181 / 182 suites pass, 2048 / 2054 tests pass**. Only failure is the pre-existing `DataPreview.test.tsx` locale flake (Indian vs US number formatting) — passes on CI's Linux `en_US.UTF-8`.
+
+### Cleanup
+
+- Removed empty `components/reports/__tests__/ReportShareModal.test.tsx` (re-introduced by the merge from main; had been deleted per M14 since all tests referenced removed props).
+- Consolidated migration `0177_orgusergroup_chart_is_private_dashboard_is_private_and_more.py` — replaces the two branch-local migrations (`0175_resource_sharing`, `0176_access_request`) that collided with main's `0175_userpreferences_trial_walkthrough_and_emails_sent` and `0176_trialsignup` after the merge. Applied to dev DB.

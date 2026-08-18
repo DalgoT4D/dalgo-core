@@ -444,3 +444,87 @@ Files: `ddpui/tests/core/test_access_control.py` (new), `ddpui/tests/api/test_ac
 10. **Floor hierarchy**: Try setting Member floor above Analyst → Roles tab blocks it; API returns 400.
 11. **Public link toggle off**: Turning off org toggle makes all existing public links inaccessible immediately.
 12. **Invitation promotion**: External email invited via share modal → accepts → ResourceShare row promoted to new OrgUser (no longer pending).
+
+---
+
+### M17 — View → Edit upgrade + share notifications
+
+Two related additions (see spec §Request access / §Share notifications):
+
+**Backend — request-access upgrade path** (`ddpui/api/access_api.py`):
+
+- `POST /request-access` currently 409s when `existing_access` is anything other than `None`/`no_access` (see `create_access_request` at ~line 457). Change the guard to:
+  ```python
+  if existing_access is not None and _rank(existing_access) >= _rank(requested_level):
+      raise HttpError(409, "you already have access at this level or higher")
+  ```
+  Reject same-level and downgrade requests; allow `view → edit`.
+- `respond_to_access_request` on approve: if the requester already has a direct `ResourceShare` row on this resource, upgrade its `access_level` in place instead of creating a duplicate row. If they only had View via cascade/group/floor, create a new direct Edit share (existing behavior).
+
+**Backend — share notifications** (`ddpui/api/access_api.py::add_resource_grants`):
+
+- Snapshot existing `(principal_type, principal_id) → access_level` map from `ResourceShare` rows for this resource before calling `resource_share.add_grants`.
+- After `add_grants` returns, diff to classify each row as:
+  - **new**: no matching pre-snapshot row
+  - **upgraded**: pre-snapshot level < post-snapshot level (per `AccessLevel` rank)
+  - **unchanged / downgraded**: skip
+- Expand recipients:
+  - `principal_type == "user"` → `[principal_id]`
+  - `principal_type == "group"` → `OrgUserGroupMember.objects.filter(group_id=principal_id, orguser__isnull=False).values_list("orguser_id", flat=True)`
+  - `principal_type == "invitation"` → skip (invitation email handles it)
+- De-dupe recipient orguser_ids across all classified rows; drop the sender's own id (don't notify yourself).
+- Fire one `create_notification` per rtype+resource with the deduped recipient list. Message shape:
+  - New: `"{sender_email} shared {rtype} '{title}' with you at {level} access.\n{resource_url}"`
+  - Upgrade: `"{sender_email} upgraded your access on {rtype} '{title}' to {level}.\n{resource_url}"`
+  - If both new and upgrade in the same call, send one notification per class (two `create_notification` calls) so email subjects can differ.
+- Wrap in `try/except Exception as err: logger.error(...)` — notification failure never fails the API call (same pattern as `_notify_owner_of_new_request`).
+
+**Frontend — one dialog, two entry points:**
+
+Both the NoAccess screen and the new Request-Edit pill use the **same** `RequestAccessDialog` — same JSX, same POST `/request-access` call, same submitted state. The only per-entry-point variation is the pre-selected level radio.
+
+- **Step 1 — extract dialog from NoAccess.** Move the modal body from `components/no-access.tsx` into `components/access/request-access-dialog.tsx`:
+  ```tsx
+  interface Props {
+    rtype: string;
+    resourceId: number;
+    defaultLevel?: 'view' | 'edit';   // default 'view'
+    isOpen: boolean;
+    onClose: () => void;
+    onSubmitted?: () => void;
+  }
+  ```
+  Update `NoAccess` to render the extracted dialog with `defaultLevel='view'`. `no-access.test.tsx` must keep passing.
+
+- **Step 2 — new `RequestEditPill`** (`components/access/request-edit-pill.tsx`):
+  - Props: `rtype`, `resourceId`, `resourceAccessLevel: 'view' | 'edit'`
+  - Renders a pill at the top of the resource: *"You have View access · Request Edit"*.
+  - Hidden when `resourceAccessLevel !== 'view'`. No admin/owner check needed — the backend already computes `access_level = 'edit'` for Owners and Admins, so the level gate is sufficient.
+  - Reuses `RequestAccessDialog` with `defaultLevel='edit'`.
+
+- **Step 3 — mount the pill** in the four single-resource surfaces:
+  - `components/dashboard/individual-dashboard-view.tsx`
+  - `app/charts/[id]/ChartDetailClient.tsx`
+  - `app/reports/[id]/page.tsx` (or the report detail component)
+  - `components/kpis/kpi-detail-drawer.tsx`
+
+**Tests — backend** (`ddpui/tests/api_tests/test_access_api.py`):
+
+- L22 — view-holder can request edit → 201; `requested_level='edit'`
+- L23 — edit-holder requesting edit → 409
+- L24 — approve upgrade merges into existing `ResourceShare` row (no duplicate; `access_level` bumped from `view` → `edit`)
+- L25 — approve upgrade when only cascade/floor gave View → new direct Edit row created
+- L26 — direct user grant fires a share notification to the grantee
+- L27 — group grant fires a share notification to every current group member
+- L28 — level change from View → Edit on an existing row fires an upgrade notification
+- L29 — no-op re-save (same level) does not fire a notification
+- L30 — downgrade (edit → view) does not fire a notification
+- L31 — invitation-typed rows do not fire share notifications (pending emails)
+- L32 — user is both direct grantee and member of a granted group → single deduplicated notification
+- L33 — sender is never their own share notification recipient
+
+**Tests — frontend:**
+
+- Pill visibility: renders for `access_level='view'`, hidden for `access_level='edit'`, hidden for Owner (backend returns `edit` for Owner).
+- Clicking pill opens `RequestAccessDialog` with the level radio pre-selected to Edit.
+- Existing `NoAccess.test.tsx` continues to pass after the modal refactor.

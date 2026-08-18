@@ -388,7 +388,9 @@ The 403 for "exists but no access" is what enables the Request Access flow — t
 |---|---|---|---|
 | L01 | User with no access requests View | user cannot currently see the resource (no floor access, no explicit share) | 201 — request created |
 | L02 | User with no access requests Edit | same as above, requests a higher permission level | 201 — request created |
-| L03 | User already has access (via floor) → rejected | floor=view | 409 |
+| L03 | User has View, requests Edit | effective View via any path (direct, group, cascade, floor) | 201 — upgrade request created |
+| L03b | User has Edit, requests any level → rejected | effective Edit | 409 — already has access at this level or higher |
+| L03c | User has View, requests View → rejected | effective View, requesting same level | 409 |
 | L04 | Duplicate pending request → rejected | existing pending for same user + resource | 409 |
 | L05 | Resource does not exist — no request screen shown | any user; resource_id is invalid | 404 (frontend shows not-found page, never the request-access screen) |
 | L06 | Resource in different org | any user | 404 |
@@ -422,6 +424,16 @@ The 403 for "exists but no access" is what enables the Request Access flow — t
 | L19 | Decline request → requester notified | Notification created for requester; body says "declined" and includes a plain resource link |
 | L20 | Orphaned resource (`created_by=None`) → owner notification skipped, request still lands | No notification row created; `AccessRequest` row still present so admins can find it via share modal |
 | L21 | Notification failure does not fail the API call | Simulate `create_notification` raising; endpoint still returns 201 for create / 200 for respond |
+| L22 | Approve upgrade merges into existing direct share | requester had a direct `view` row → approve `edit` → same row updated to `edit`; no new row | Row count unchanged; `access_level='edit'` on the pre-existing row |
+| L23 | Approve upgrade when View came from cascade/group/floor | no pre-existing direct row → approve `edit` → new direct Edit row created |
+| L24 | Direct user grant fires share notification | `POST /grants` adds one user at View | Notification created for that user; message names sender + resource + level; deep link included |
+| L25 | Group grant fires notification to every current member | group has 3 members; grant the group at View | 3 notifications (or one notification with 3 recipients) — every current member; late joiners not backfilled |
+| L26 | View → Edit upgrade on existing row fires an upgrade notification | pre-existing user grant at View; `POST /grants` upgrades to Edit | Notification created with the "upgraded" phrasing |
+| L27 | No-op re-save does not notify | pre-existing user grant at Edit; `POST /grants` re-saves at Edit | No notification |
+| L28 | Downgrade does not notify | pre-existing user grant at Edit; `POST /grants` downgrades to View | No notification |
+| L29 | Invitation-typed rows do not fire share notifications | grant to an email not in the system | No share notification (the platform invite email handles it) |
+| L30 | User is both direct grantee and group member → single notification | user is in a group being granted; user is also directly granted in the same call | Exactly one notification per (recipient, resource) |
+| L31 | Sender is not their own recipient | grantor's own orguser_id appears among expanded recipients (via group membership) | Sender is filtered out |
 
 ### Frontend behavior
 
@@ -429,6 +441,8 @@ The 403 for "exists but no access" is what enables the Request Access flow — t
 |---|---|
 | User with no access opens a resource URL | Detail endpoint returns 403; router renders the No-access screen with a "Request Access" button (owner's name is a nice-to-have — not currently shown) |
 | User clicks "Request Access" | Modal opens with a level picker (View / Edit) and a note text field |
+| View-holder opens a resource they can see | A persistent "Request Edit access" pill is visible at the top of the resource view; hidden for Owner/Admin and for effective-Edit users |
+| View-holder clicks the "Request Edit" pill | Same request-access modal opens with the level radio pre-selected to Edit; submission goes to the same `POST /request-access` endpoint |
 | User submits the request form | Button changes to "Request sent" confirmation state; form is no longer submittable |
 | Owner clicks the deep link in the notification (`?openShare=true`) | Lands on the resource with the share modal auto-opened at the "Access Requests" section; the query param is stripped on modal close so a refresh doesn't reopen it |
 | Owner opens the share modal for that resource (without deep link) | "Access Requests" section is visible listing pending requests |

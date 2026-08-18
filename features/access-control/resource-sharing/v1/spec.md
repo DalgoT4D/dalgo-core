@@ -292,6 +292,24 @@ When an authenticated user opens a resource link they don't have access to:
 - Unauthenticated visitors (e.g. public-link off, non-user opens a link) are prompted to sign in or ask to be invited.
 - Pending access requests expire on the same **30-day** constant.
 
+**Upgrading View to Edit on a resource you can already see.** Users who hold effective **View** (via any path — direct, group, cascade, or floor) on a resource they've opened see a persistent **"Request Edit access"** pill at the top of that resource's view. Clicking it opens the same request-access flow with the level pre-set to Edit. Rules:
+
+- The pill is **hidden** for anyone whose effective access on the resource is already Edit (direct, cascade, or floor), and for Owners and Admins.
+- The request routes to the owner exactly like a first-time request.
+- **Approval merges into the existing direct share** — the same `ResourceShare` row is upgraded from View to Edit; no duplicate row is created. If the requester's View came only from a group or cascade (no direct row), approval creates a new direct Edit share.
+- The same 30-day expiry and one-pending-per-user-per-resource rules apply.
+
+### Share notifications
+
+Direct grantees are notified whenever access changes in their favor:
+
+- **New direct share** — every newly added user or group in a Share action is notified.
+- **Upgrade** — bumping an existing grantee from View to Edit fires a notification. Downgrades and no-op re-saves (same level as before) do not.
+- **Group grants** — a group grant notifies every current member of the group at the moment of sharing. Members added to the group *after* the share are not backfilled.
+- **De-duplication** — a user hit via both a direct grant and a group grant in the same Share click receives one notification.
+- **Pending-email invitees** — continue to receive the existing platform invite email; this share-notification path does not double up.
+- **Delivery** — all notifications route through the standard in-app notifications service (in-app + email per user preference), using the shared Dalgo HTML email template.
+
 ---
 
 ## Edge Cases & Explicit Rules
@@ -331,6 +349,7 @@ When an authenticated user opens a resource link they don't have access to:
 | **Share modal** | Search people/groups/emails; per-share permission picker (View/Edit); pending state for external emails; People with access list; Private toggle; public sharing toggle (hidden if org disallows or Private is on). |
 | **Resource list pages** | Main-app pages (Dashboards, Charts, Reports, KPIs) — not a Settings surface. Effective-access indicator per resource (e.g. View / Edit / Owner); "Shared with you" section for Members. All sharing is done via the resource share modal, opened from the resource page or the list. |
 | **Request-access screen** | Shown on access-denied for authenticated users; request View/Edit with note; routes to owner. States: form → submitted → decided (approved/declined). |
+| **Request Edit pill** | Persistent pill at the top of a single-resource view (Dashboard / Chart / Report / KPI). Visible only to users whose effective access is View — Owner, Admin, and effective-Edit users don't see it. Opens the same request-access modal, level pre-set to Edit. |
 | **Requests section** (in share modal) | Pending access requests with approve (pick level) / decline. |
 | **Groups (Settings > Access > Groups tab)** | Table: Group Name, member avatar stack, Created By, Created date, ⋮ actions (Edit Group / Delete Group). Create/Edit modal: group name + add people/emails + existing members list with ✕ per member. Scoped by role — Members only see groups they belong to. |
 | **Reports** | Comments panel for viewers; moderation for report editors. |
