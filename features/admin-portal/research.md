@@ -1,6 +1,6 @@
 # Admin Portal — Research
 
-**Date:** 2026-07-22 · **Tracking:** Issue #1254
+**Date:** 2026-07-22 · **Revised:** 2026-08-19 (is_active removal + model-reuse re-check — see boxes below) · **Tracking:** Issue #1254
 **Spec:** `features/admin-portal/spec.md`
 
 **Acronyms:** JWT (the signed login token) · claim (a named field inside the token) · cookie (a value the browser stores per host and re-sends) · host-only cookie (bound to the exact host that set it, no `domain=`) · FK (foreign key) · CRUD (create, read, update, delete) · N+1 (one query that fans out into many) · PII (personally identifiable information).
@@ -17,7 +17,21 @@
 > - §2.2's note that `CustomJwtAuthMiddleware` reads the cookie name "by literal name at `:115`" is now a class attribute (`cookie_name`). Behaviour is unchanged.
 > - A wrong password used to surface as a **500** (DRF's `AuthenticationFailed` falling through Ninja's catch-all handler). It now returns **401** via a new `drf_authentication_failed_handler` in `ddpui/routes.py`.
 >
-> See `plan.md` §3.2 for why the reversal happened. Nothing else below was re-verified after 2026-07-22.
+> See `plan.md` §3.2 for why the reversal happened. Nothing else below was re-verified after 2026-07-22, **except §1's Org/user CRUD list and §3/§4's model-reuse check, re-verified 2026-08-19 — see the box below.**
+
+> ### ⚠️ Second update, 2026-08-19 — `Org.is_active` / `OrgUser.is_active` fully removed
+>
+> Overnight on 2026-08-19, `Org.is_active` and `OrgUser.is_active` were removed entirely: model fields, migration (`0172_remove_org_is_active_orguser_is_active`), and the `auth.py` enforcement that read them (`026decfb`). Confirmed live in `DDP_backend` at commit `21a3484f` (current HEAD of `feature/admin-portal-m4-users`):
+> - `ddpui/models/org.py` and `ddpui/models/org_user.py` — no `is_active` field on `Org` or `OrgUser`.
+> - `ddpui/auth.py` — no org-deactivated / orguser-deactivated 403 checks anywhere in `CustomJwtAuthMiddleware`.
+> - `ddpui/api/admin_api.py` routes — confirmed by listing every `@admin_router.*` route: `GET/POST /orgs`, `GET/PUT /orgs/{id}`, `GET /orgs/{id}/users`, `POST /orgs/{id}/users/invite`, `PUT /orgs/{id}/users/{id}/role`, `GET /orgs/{id}/users/{id}/removal-impact`, `DELETE /orgs/{id}/users/{id}`, `DELETE /orgs/{id}/invitations/{id}`. **No deactivate/reactivate route for orgs or users, and no delete route for an org.**
+>
+> §1 below (written 2026-07-22) still describes a `POST /orgs/{id}/deactivate|reactivate` route and user deactivate/reactivate — **that text is now wrong and is corrected in place below.** This does not touch the shared-session auth model from the first update above; it's an unrelated, later change to a different pair of fields.
+>
+> Also re-verified 2026-08-19, at the same commit — confirming the spec's re-use decision for Milestones 2–3 still holds:
+> - `ddpui/models/notifications.py` — `Notification` and `NotificationRecipient` **both still exist**, unchanged from §3.1 below. Reuse them; do not add new models.
+> - `ddpui/models/org.py:340` — `OrgFeatureFlag` **still exists**, unchanged from §4.1 below (nullable `org` FK, `flag_name`, `flag_value`, `unique_together`). Reuse it; do not add a new model.
+> - Per the standing convention (reuse existing schema/functions before writing new ones), no new model is needed for either feature area — only new admin-facing HTTP endpoints on top of what's already there.
 
 > This is a **fresh read** of DDP_backend and webapp_v2 as of 2026-07-22. Every file/line below was re-verified that day. It covers the five surfaces the portal touches: the existing admin portal, the auth system, notifications, feature flags, and the Airbyte/pipeline read paths — plus the frontend shell. Pre-existing bugs found along the way are listed at the end and are **not** fixed here.
 
@@ -29,7 +43,7 @@ Organization onboarding and user management are built and merged, backend and fr
 
 **Backend** — `ddpui/api/admin_api.py`:
 - `admin_router = Router()` (`:33`), logger `CustomLogger("ddpui")` (`:31`). Mounted at `/api/v1/admin/` in `ddpui/routes.py:119`.
-- Every route is decorated `@platform_admin_required` (`ddpui/auth.py:63-80`). Org CRUD: `GET/POST /orgs`, `GET/PUT /orgs/{id}`, `POST /orgs/{id}/deactivate|reactivate` (`:112-179`). User management: list users, invite, change role, deactivate/reactivate, removal-impact, delete user, cancel invitation (`:259-453`).
+- Every route is decorated `@platform_admin_required` (`ddpui/auth.py:63-80`). Org CRUD: `GET/POST /orgs`, `GET/PUT /orgs/{id}` — **create and edit only; no deactivate/reactivate, no delete** (`Org.is_active` was removed 2026-08-19; delete was never built). User management: list users, invite, change role, removal-impact, remove (delete) user, cancel invitation — **no deactivate/reactivate** (`OrgUser.is_active` was removed 2026-08-19).
 - Business logic lives in `ddpui/core/admin/admin_service.py` (logger `CustomLogger("ddpui.core.admin")`, `:25`). Its docstring states the convention: handlers stay thin (**parse → call service → convert → return**); the service "knows nothing about HTTP" and returns models/primitives (`:1-11`).
 
 **Frontend** — `webapp_v2`:
@@ -38,7 +52,7 @@ Organization onboarding and user management are built and merged, backend and fr
 - `components/admin/AdminGuard.tsx`: reads `is_platform_admin` from the `/api/currentuserv2` SWR cache (`:33`, `data[0].is_platform_admin` `:37`); non-admin bounce → `router.replace('/')` (`:41`).
 - Pages under `app/admin/`: `page.tsx` (dashboard, with Notifications/Feature-Flags stat cards as `comingSoon`), `organizations/page.tsx`, `organizations/new/page.tsx`, `organizations/[id]/page.tsx`. Data hooks in `hooks/api/useAdminPortal`.
 
-> **Takeaway:** the portal's org/user work is done and does not get re-planned. The new work re-homes it behind the independent admin login and adds Notifications, Feature Flags, and the Airbyte/Pipeline view.
+> **Takeaway:** the portal's org/user work is done and does not get re-planned. The remaining work is Notifications, Feature Flags, and the Airbyte/Pipeline view, all behind the **shared** session's `@platform_admin_required` gate (§2) — there is no independent admin login to build.
 
 ---
 
@@ -106,6 +120,8 @@ Organization onboarding and user management are built and merged, backend and fr
 - **Broken + ungated:** the HTTP `POST /api/notifications/` route (`ddpui/api/notifications_api.py:15`) builds a plain dict **without `email_subject`** and passes it to `create_notification` (which does attribute access and requires `email_subject`) — so it fails. And notification routes carry **no `@has_permission`** gate (only the global JWT), so any authenticated user could hit them. See bugs list.
 
 > **Takeaway for the plan:** build the admin broadcast on the **service functions** (`get_recipients`, `create_notification`, `schedule_notification_task`, `delete_scheduled_notification`), under new `@platform_admin_required` admin routes — do **not** extend the broken/ungated `/api/notifications/` HTTP path.
+>
+> **Correction, 2026-08-19:** `NotificationRecipient.read_status` exists in the model (used by the main product's own notification list) and could technically back a "how many have read this" report. **The spec explicitly drops that** — the admin portal's history shows audience, time, and recipient count only, never read counts, and adds no audit-trail field (e.g. no "sent by" column beyond what the model already carries). Do not build a `GET /notifications/{id}/recipients` read-count endpoint; the plan should not include one.
 
 ### 3.4 Reusable frontend
 
@@ -200,7 +216,7 @@ Organization onboarding and user management are built and merged, backend and fr
 
 | Surface | New work | Migration? |
 |---|---|---|
-| Independent admin session | New admin cookie + JWT session claim + dedicated admin auth middleware + admin login/logout/refresh/currentuser; re-gate the existing `admin_router` behind it | **No** (cookie + claim) |
-| Broadcast notifications | Admin routes on the service functions; additive fields to record audience for history | **Yes** (additive, nullable) |
-| Per-org feature flags | Admin HTTP endpoints (set on/off, clear) + UI; the model already supports per-org rows | **No** |
+| Admin access model | **Shipped (Milestone 1, 2026-07-26).** Not the independent session this research originally proposed — that was built and then reversed. What shipped instead: the shared product session plus `@platform_admin_required` on every admin route. Nothing left to build here. | No |
+| Broadcast notifications | Admin routes on the existing service functions (`Notification`/`NotificationRecipient`, reused as-is); additive fields to record audience for history. **No read-count endpoint and no audit-trail fields — both explicitly out of scope (spec, corrected 2026-08-19).** | **Yes** (additive, nullable — `scope` + `target_org` only) |
+| Per-org feature flags | Admin HTTP endpoints (get catalog, read, set on/off, clear) + UI; `OrgFeatureFlag` already supports per-org rows, reused as-is. No audit fields, no global-default-inheritance model. | **No** |
 | Airbyte/pipeline read view | Read-only admin endpoints built on the **safe** primitives; neutralize the destructive `get_connections` path; org-ownership gate for bare-id log fetches | **No** |

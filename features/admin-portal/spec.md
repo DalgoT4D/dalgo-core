@@ -1,7 +1,7 @@
 # Admin Portal — Product Spec
 
 **Status:** Draft — for team review
-**Date:** 2026-07-22 · **Revised:** 2026-07-26 (sign-in reworked to a shared session; sign-out added) · **Tracking:** Issue #1254
+**Date:** 2026-07-22 · **Revised:** 2026-07-26 (sign-in reworked to a shared session; sign-out added) · 2026-08-19 (org/user deactivate removed — see note below; notifications scope drops read tracking and an audit trail) · **Tracking:** Issue #1254
 
 **Acronyms:** NGO (non-governmental organization) · CRUD (create, read, update, delete).
 
@@ -106,6 +106,8 @@ This spec describes the whole portal, but not all of it is new work.
 | Airbyte & pipeline read-only view | **Not yet built.** |
 
 > **Note on an earlier direction.** An earlier draft of this spec described a *separate* admin session — its own login cookie, independent of the normal product. That was built first and then deliberately reversed after review, because a second session added real complexity (a second cookie, a second refresh path, two ways to be signed out) without adding protection the server-side platform-admin check did not already give. The shared-session model above is what ships.
+>
+> **Note on org/user status, corrected 2026-08-19.** `Org.is_active` and `OrgUser.is_active` — the fields a deactivate/reactivate toggle would have needed — were fully removed from the codebase on 2026-08-19: the model fields, the migration, and the auth-time enforcement that read them are all gone. There is no reversible "pause this org" or "pause this user" control left. Deactivation had been built into the admin API earlier, then deliberately removed; delete was never built at all — it was always a deferred item. What's actually available is described below.
 
 ---
 
@@ -155,7 +157,7 @@ Exit: a new org exists with its first user invited.
 Entry: Organizations → open an org → Users tab
   → invite a user (email + role: Admin, Analyst, or Member)
   → change an existing user's role
-  → deactivate or remove a user
+  → remove a user from the org
   → cancel an invitation that hasn't been accepted yet
        removing a user warns first if it would leave their created content without an owner
 Exit: the org's members and pending invitations reflect the change.
@@ -181,12 +183,13 @@ Exit: the broadcast is sent, or queued as scheduled.
 
 ```
 Entry: Notifications → history
-  → see past and scheduled broadcasts: message, audience, when, how many recipients,
-    and how many have read it
+  → see past and scheduled broadcasts: message, audience, when, and how many recipients
   → cancel a scheduled broadcast that hasn't sent yet
        a broadcast that has already sent cannot be cancelled or unsent
-Exit: the admin knows what was sent, to whom, and how many read it.
+Exit: the admin knows what was sent, to whom, and when.
 ```
+
+> **Explicitly excluded.** This version has no read/unread tracking (no "N people have read this") and no audit trail of who sent or scheduled a broadcast. See Scope → Deferred.
 
 ### Flow 6 — Turn a feature on or off for an org *(not yet built)*
 
@@ -231,16 +234,16 @@ Exit: the admin has diagnosed the run, changed nothing.
   - Acceptance: a "Log out" control in the portal sidebar ends the shared session everywhere and returns me to the admin sign-in; if the network call fails I am still signed out locally rather than left in a signed-in-looking screen.
 
 - **As a platform admin, I want to create and edit organizations, so that I can onboard partners without an engineer.** *(shipped)*
-  - Acceptance: I can create an org (name, slug, visualization URL, plan), edit it, and deactivate/delete it; the slug cannot be changed after creation.
+  - Acceptance: I can create an org (name, slug, visualization URL, plan) and edit it; the slug cannot be changed after creation. There is no deactivate and no delete for an org.
 
 - **As a platform admin, I want to manage the users inside any org, so that I can set up and maintain partner teams.** *(shipped)*
-  - Acceptance: I can invite a user at any role (Admin, Analyst, Member), change a role, deactivate/remove a user, and cancel a pending invitation; removing a user warns me before it orphans content they created.
+  - Acceptance: I can invite a user at any role (Admin, Analyst, Member), change a role, remove a user from the org, and cancel a pending invitation; removing a user warns me before it orphans content they created. There is no deactivate for a user.
 
 - **As a platform admin, I want to send an announcement to everyone or to one org, so that I can communicate maintenance, outages, and news.**
   - Acceptance: I can pick "whole platform" or one org; I see the recipient count before sending; I can send now or schedule for later; recipients see it in-app and (if opted in) by email; the audience can never be silently empty.
 
-- **As a platform admin, I want to see what I've broadcast and how many read it, so that I have a record and can judge reach.**
-  - Acceptance: a history lists sent and scheduled broadcasts with audience, time, recipient count, and read count; I can cancel a scheduled one before it sends; a sent one cannot be unsent.
+- **As a platform admin, I want to see what I've broadcast, so that I have a record of what was sent, to whom, and when.**
+  - Acceptance: a history lists sent and scheduled broadcasts with audience, time, and recipient count; I can cancel a scheduled one before it sends; a sent one cannot be unsent. There is no read/unread tracking and no audit trail of who sent or scheduled it.
 
 - **As a platform admin, I want to turn a feature on or off for a single org, so that I can beta-test with one partner before a wider rollout.**
   - Acceptance: I can set each toggleable feature on or off per org; the change affects only that org; no code release is needed.
@@ -274,9 +277,9 @@ Where the portal lives and the screens it introduces. (Screens for onboarding an
 | Organizations list | Exists | All orgs, with quick status | loading, empty, populated |
 | Organization detail | Exists (gains new tabs) | One org's Overview and Users; **new** Feature flags, Airbyte, and Pipelines tabs | loading, populated, per-tab empty/error |
 | New / edit organization form | Exists | Create and edit an org | empty, validation error, saving, saved |
-| Users tab (within an org) | Exists | Invite / role / deactivate / remove / cancel invite | loading, empty, populated, confirm-remove warning |
+| Users tab (within an org) | Exists | Invite / role / remove / cancel invite | loading, empty, populated, confirm-remove warning |
 | Notifications — composer | New | Write, target, preview count, send or schedule | empty, count-loading, confirm, sent, scheduled, blocked-empty-audience |
-| Notifications — history | New | Sent + scheduled broadcasts with read counts | loading, empty, populated |
+| Notifications — history | New | Sent + scheduled broadcasts (audience, time, recipient count — no read counts) | loading, empty, populated |
 | Feature flags — per org (and a portal-wide view) | New | Toggle features on/off per org | loading, populated |
 | Airbyte tab (within an org) | New | Connections, sync status, full logs — read-only | loading, empty, error/partial, populated |
 | Pipelines tab (within an org) | New | Run history + full logs — read-only | loading, empty, error/partial, populated |
@@ -297,9 +300,9 @@ Where the portal lives and the screens it introduces. (Screens for onboarding an
 | Capability | Notes |
 |---|---|
 | Admin sign-in + platform-admin gate | Already shipped. The portal has its own sign-in screen, which always appears; it authenticates through the shared product login, and platform-admin privilege is verified on every admin action server-side. Sign-out from the portal ends the shared session everywhere. |
-| Organization onboarding | Already shipped. Full CRUD on orgs (create, edit, deactivate/delete). |
-| User management within an org | Already shipped. Invite, change role (Admin / Analyst / Member), deactivate/remove, cancel invitations. |
-| Broadcast notifications | New. Whole-platform or single-org audience; recipient count before send; send now or schedule; cancel a scheduled one; in-app + email delivery; history with read counts. |
+| Organization onboarding | Already shipped. Create and edit orgs. No deactivate or delete — `Org.is_active` was removed from the codebase (2026-08-19), and delete was never implemented. |
+| User management within an org | Already shipped. Invite, change role (Admin / Analyst / Member), remove from org, cancel invitations. No deactivate — `OrgUser.is_active` was removed from the codebase (2026-08-19). |
+| Broadcast notifications | New. Anyone with platform-admin access can send. Whole-platform or single-org audience; mandatory recipient-count preview + confirm before anything sends; send now or schedule; cancel a scheduled one; in-app + email delivery; history of past and scheduled broadcasts. No audit trail, no read/unread tracking. |
 | Per-org feature flags | New. Turn each toggleable feature on or off, independently per org. |
 | Airbyte & pipeline view (read-only) | New. Per-org connection status, sync history, pipeline runs, and full logs. No changes of any kind. |
 
@@ -313,6 +316,8 @@ Where the portal lives and the screens it introduces. (Screens for onboarding an
 | Pipeline controls (pause / resume / cancel / trigger) | This version is strictly read-only for pipelines and connections; controls are a separate, higher-risk step. |
 | Superset (visualization tool) management | Out of the operational-tasks core for this version. |
 | Advanced analytics and bulk operations | Not part of the routine-operations problem this version solves. |
+| Read/unread tracking on broadcasts (e.g. "38 of 42 have read this") | Explicitly dropped. Adds a UI surface and a report with no clear demand yet; the underlying data (`NotificationRecipient.read_status`) exists in the codebase for the main product's notification list, but the admin portal does not expose it. |
+| An audit trail of admin actions (who sent a broadcast, who toggled a flag, when) | Explicitly dropped. This version relies on the platform-admin gate on every action, not on a record of who did what; a general audit log is a separate, larger effort. |
 
 > **The rule:** this version replaces the engineer-run command line for **routine** operations; anything sensitive (credentials) or operational-with-consequences (pipeline controls) stays out.
 > **Example:** Arjun can *see* that Akshara's sync failed and read the logs, but he cannot *re-run* it from the portal — re-running is deferred.
@@ -342,7 +347,7 @@ Names other product areas this portal relies on or enables — not technologies.
 - [x] The access model is specified as behavior: an always-shown sign-in screen over one shared session, server-side verification on every admin action, refusal for non-admins, and a full shared sign-out.
 - [x] Build status is explicit per capability (onboarding, sign-in, and sign-out shipped; notifications, feature flags, and the Airbyte/pipeline view still to build).
 - [x] Scope is bounded: what's in, what's deferred, and why.
-- [x] The four product forks are resolved: notifications = in-app + email with schedule/cancel + read-count history; feature flags = per-org on/off; Airbyte/pipeline view = full logs, read-only.
+- [x] The four product forks are resolved: notifications = in-app + email with schedule/cancel, no audit trail or read tracking; feature flags = per-org on/off; Airbyte/pipeline view = full logs, read-only.
 - [x] Location is fixed: a path (`insights.dalgo.org/admin`) inside the existing production deployment — no separate domain to provision.
 - [ ] Team review of this spec before engineering planning begins.
 

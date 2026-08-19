@@ -1,7 +1,7 @@
 # Admin Portal — Implementation Plan
 
 **Status:** Milestone 1 shipped; Milestones 2–4 for engineering review
-**Date:** 2026-07-22 · **Revised:** 2026-07-26 (independent session reversed to a shared session) · **Tracking:** Issue #1254
+**Date:** 2026-07-22 · **Revised:** 2026-07-26 (independent session reversed to a shared session) · 2026-08-19 (dropped the read-count notification endpoint and org/user deactivate — see §2, §3.3, §4.3, §7) · **Tracking:** Issue #1254
 **Spec:** `features/admin-portal/spec.md` · **Research:** `features/admin-portal/research.md`
 
 **Acronyms:** HLD (High-Level Design) · LLD (Low-Level Design) · JWT (the signed login token) · claim (a named field inside the token) · cookie (a value the browser stores per host and re-sends) · host-only cookie (bound to the exact host that set it, no `domain=`) · FK (foreign key) · CRUD (create, read, update, delete) · PII (personally identifiable information) · N+1 (one query that fans out into many).
@@ -33,9 +33,9 @@ Traversed from `docs/domain-map.md`. The portal **operates** entities but change
 
 | Surface | Hop | Why affected | Status |
 |---|---|---|---|
-| **Organization** | 0 | Onboarding CRUD | **Existing (shipped).** No change. |
-| **OrgUser** | 0 | User management; removal orphans owned content | **Existing (shipped).** Removal warning already built. |
-| **Notification** | 0 | Broadcasts create Notification + NotificationRecipient rows | **In scope (new).** Additive fields to record audience for history (§4.1). |
+| **Organization** | 0 | Onboarding — create + edit only | **Existing (shipped).** No change. No deactivate, no delete — `Org.is_active` was removed from the codebase 2026-08-19, and delete was never built. |
+| **OrgUser** | 0 | User management — invite, role change, remove, cancel invite; removal orphans owned content | **Existing (shipped).** Removal warning already built. No deactivate — `OrgUser.is_active` was removed from the codebase 2026-08-19. |
+| **Notification** | 0 | Broadcasts create Notification + NotificationRecipient rows | **In scope (new).** Additive fields to record audience for history (§4.1). No audit-trail field, no read-count field — both explicitly out of scope. |
 | **OrgUser (as recipient)** | 1 | A broadcast is delivered to OrgUsers in-app + email | **In scope.** Reuses the existing delivery path (research §3). |
 | **Source / Warehouse / Transform / Pipeline / Data Quality** | 0–1 | Read-only Airbyte/pipeline view reads connection + run status/logs | **In scope (new), read-only.** No data-model change; safety work required (research §5). |
 | **Chart / Dashboard / Metric / KPI / ReportSnapshot / Share link** | 2+ | — | **Not affected.** The portal never creates or edits analytics entities. Only indirect tie: removing an OrgUser orphans `created_by` on Chart/Dashboard/ReportSnapshot — existing shipped behavior with a warning. |
@@ -47,6 +47,8 @@ Traversed from `docs/domain-map.md`. The portal **operates** entities but change
 > **Why it matters:** it bounds review to auth correctness, notification blast radius, and the read-only-view safety issues — there is no risk to any NGO's analytics data from this work.
 
 **No unaddressed surfaces.** Every domain-map entity above has a status the spec already decides; none is silently included or excluded.
+
+**Corrected 2026-08-19.** Two things are confirmed absent from this blast radius, not merely unmentioned: (1) org/user deactivation — `Org.is_active`/`OrgUser.is_active` were removed from the codebase entirely, so no entity in this table carries a reversible suspend state; (2) an audit trail or read/unread tracking on broadcasts — neither `Notification` nor `NotificationRecipient` gains a field for either, and no admin route exposes `NotificationRecipient.read_status`.
 
 ---
 
@@ -101,7 +103,7 @@ Four things this design does, each server-side:
 | Area | Endpoint(s) |
 |---|---|
 | Session — **BUILT** | `GET /currentuser` only. Sign-in uses the shared `POST /api/v2/login/`; sign-out uses the shared `POST /api/logout/`. The admin-specific `login` / `logout` / `token/refresh` routes an earlier draft specified were built and then removed (`eca9865f`). |
-| Notifications | `GET /notifications` (history), `POST /notifications/preview` (recipient count), `POST /notifications` (create/schedule), `DELETE /notifications/{id}` (cancel scheduled), `GET /notifications/{id}/recipients` (read counts) |
+| Notifications | `GET /notifications` (history), `POST /notifications/preview` (recipient count), `POST /notifications` (create/schedule), `DELETE /notifications/{id}` (cancel scheduled) |
 | Feature flags | `GET /flags/catalog`, `GET /orgs/{org_id}/flags`, `PUT /orgs/{org_id}/flags/{flag_name}` (on/off), `DELETE /orgs/{org_id}/flags/{flag_name}` (clear) |
 | Airbyte/Pipelines (read-only) | `GET /orgs/{org_id}/connections`, `GET /orgs/{org_id}/connections/{cid}/sync-history`, `GET /orgs/{org_id}/connections/{cid}/jobs/{job_id}/logs`, `GET /orgs/{org_id}/pipelines`, `GET /orgs/{org_id}/pipelines/{dep_id}/runs`, `GET /orgs/{org_id}/pipelines/runs/{flow_run_id}/logs` |
 
@@ -154,13 +156,13 @@ There is **no admin session code**. The portal reuses the product's login, and e
 
 ### 4.3 Backend — the three feature areas
 
-**Notifications** (build on the service functions; do **not** use the broken/ungated HTTP route — research §3.3):
+**Notifications** (build on the service functions; do **not** use the broken/ungated HTTP route — research §3.3). **`Notification` and `NotificationRecipient` are reused exactly as they exist today — no new model, no new fields beyond `scope`/`target_org` (§4.1), re-verified in research.md 2026-08-19:**
 - `POST /notifications/preview` → `len(get_recipients(...))` only. **Never return the recipient list** (would leak a cross-org email roster).
 - `POST /notifications` → build a proper `NotificationDataSchema` (with `email_subject`, and **`author` derived server-side** from `request.orguser.user`, not client input) → `create_notification`; persist `scope`/`target_org`; block a 0-recipient audience.
 - `DELETE /notifications/{id}` → `delete_scheduled_notification` (refuses if already sent).
-- `GET /notifications` (history) → a **new admin query** (do not extend `get_notification_history`, which has a `FieldError` bug — research §7); `GET /notifications/{id}/recipients` → read counts from `NotificationRecipient.read_status`.
+- `GET /notifications` (history) → a **new admin query** (do not extend `get_notification_history`, which has a `FieldError` bug — research §7); returns audience, time, and recipient count only. **No read-count endpoint** — `NotificationRecipient.read_status` is not surfaced by the admin portal (spec, corrected 2026-08-19).
 
-**Feature flags** (per-org on/off — model already supports it, research §4):
+**Feature flags** (per-org on/off — `OrgFeatureFlag` is reused exactly as it exists today, no new model, re-verified in research.md 2026-08-19, research §4):
 - `GET /flags/catalog` → the `FEATURE_FLAGS` registry (ends the Python/TS duplication). `GET /orgs/{id}/flags` → `get_all_feature_flags_for_org`. `PUT /orgs/{id}/flags/{name}` → `enable_feature_flag`/`disable_feature_flag` (validated against the registry). `DELETE` → clear the org row (a small new `clear_org_flag` in `utils/feature_flags.py`, since only a "write False" path exists today). No migration; no audit fields (out of scope per spec).
 
 **Airbyte/pipeline read-only view** — the safety work is the point (research §5):
@@ -199,7 +201,7 @@ There is **no admin session code**. The portal reuses the product's login, and e
 | **Shared-auth touches** | Two, both proven by the normal-product suite passing unmodified: the cookie-name constant in `CustomJwtAuthMiddleware` (non-behavioral, retained), and the new `AuthenticationFailed → 401` handler in `routes.py`, which changes a wrong password from 500 to 401 for the normal login as well as the admin one. |
 | **Broadcast is the highest-reach action** | Every admin route is `@platform_admin_required` behind the admin session. Author is **server-derived** (not the client-supplied `author` the current schema takes — research §3.3). Mandatory recipient-count preview + confirm; a 0-recipient audience is blocked. |
 | **Message rendering / stored XSS** | `NotificationRow` linkifies URLs and now renders admin-authored content to every user (research §3.4). Confirm escaping before enabling send. |
-| **Notification data exposure** | `/preview` returns a **count only** — never the recipient list. Read-count report is per-notification, no inline emails. |
+| **Notification data exposure** | `/preview` returns a **count only** — never the recipient list. No read-count report exists — dropped from scope, no inline emails. |
 | **Pre-existing ungated notification routes (bug #2)** | The admin path is separate and gated; but the existing `/api/notifications/*` routes lack `@has_permission` (research §7). Flagged in §8 — decide whether to close it here. |
 | **Feature flags are not a security boundary** | A flag hides UI only; underlying APIs stay callable. `flag_name` is validated against the registry. No reviewer should treat a flag as access control. |
 | **Airbyte read path — destructive side effect** ⚠️ | `get_connections`/`get_one_connection` dispatch real deletions (research §5.1). The admin view **must** pass `cleanup=False`; a test asserts zero dispatches while the existing path still dispatches. |
@@ -226,7 +228,7 @@ There is **no admin session code**. The portal reuses the product's login, and e
 - Sign-out calls the shared `/api/logout/`, never an admin-specific route; it clears the store, tracks the event, and lands on `/admin/login`; and a **failed** network call still signs the user out locally rather than stranding them in a signed-in-looking shell.
 
 **Backend — feature areas:**
-- Notifications: preview returns a count matching `len(get_recipients)` and **never** the list; author is server-derived (a client-supplied `author` is ignored); `scope`/`target_org` persist and show in history; cancel refuses an already-sent notification; read counts match `NotificationRecipient`.
+- Notifications: preview returns a count matching `len(get_recipients)` and **never** the list; author is server-derived (a client-supplied `author` is ignored); `scope`/`target_org` persist and show in history; cancel refuses an already-sent notification. No read-count test — that endpoint is out of scope.
 - Feature flags: `PUT` on/off writes the org row; `DELETE` clears it; unknown `flag_name` → 400; the existing `GET /api/organizations/flags` and `test_feature_flags` stay green.
 - Airbyte/pipeline: **`cleanup=False` dispatches zero deletions** (mock + assert 0) while `cleanup=True` still dispatches; warehouse-null returns `warehouse_name=None`; a wrong-org `deployment_id`/`job_id` → 404; external timeout → `partial:true`, not 500; the existing single-org endpoints (research §5.5) behave unchanged.
 
@@ -264,20 +266,20 @@ Each milestone is one reviewable PR set (backend PR first where both are touched
 - **Not done, deliberately:** no separate admin session. See §3.2 for why it was reversed.
 
 #### Milestone 2: Broadcast notifications
-- **Deliverable:** platform admins compose, preview, send/schedule, cancel, and review broadcasts with read counts.
+- **Deliverable:** platform admins compose, preview, send/schedule, cancel, and review broadcasts. No read tracking, no audit trail (spec, corrected 2026-08-19).
 - **Services:** DDP_backend, webapp_v2
 - **Key tasks:**
-  - [ ] Migration: additive `scope` + `target_org` on `Notification`.
-  - [ ] Admin routes on the service functions: `preview` (count only), create (author server-derived, persists scope/target_org), cancel, history, read counts.
+  - [ ] Migration: additive `scope` + `target_org` on `Notification`. Reuses the existing `Notification`/`NotificationRecipient` models as-is — no new model.
+  - [ ] Admin routes on the service functions: `preview` (count only), create (author server-derived, persists scope/target_org), cancel, history (audience, time, recipient count — no read-count endpoint).
   - [ ] Frontend: `app/admin/notifications/*` composer + history (reuse `NotificationRow`); un-disable the nav item; confirm message-escaping.
   - [ ] Tests per §6.
-- **Acceptance:** Meera sends to one org, sees "reaches 42 people", it appears in those users' notifications, and the history shows audience + read count; a scheduled broadcast can be cancelled before it sends; a 0-recipient audience is blocked.
+- **Acceptance:** Meera sends to one org, sees "reaches 42 people", it appears in those users' notifications, and the history shows audience and recipient count; a scheduled broadcast can be cancelled before it sends; a 0-recipient audience is blocked.
 
 #### Milestone 3: Per-org feature flags
 - **Deliverable:** platform admins turn each feature on/off per org.
 - **Services:** DDP_backend, webapp_v2
 - **Key tasks:**
-  - [ ] Admin endpoints: catalog, per-org read, set on/off, clear; small `clear_org_flag` in `utils/feature_flags.py`.
+  - [ ] Admin endpoints: catalog, per-org read, set on/off, clear; small `clear_org_flag` in `utils/feature_flags.py`. Reuses `OrgFeatureFlag` as-is — no new model, no audit fields, no global-default-inheritance change.
   - [ ] Frontend: per-org Flags tab + portal-wide matrix; serve the catalog; un-disable the nav item.
   - [ ] Tests per §6 (incl. the existing `/api/organizations/flags` unchanged).
 - **Acceptance:** Meera turns `REPORTS` on for Akshara only; Akshara's users see it, others unchanged; a non-admin gets 403 on every flag route.
