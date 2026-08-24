@@ -91,6 +91,8 @@ On top of the org floor, owners and editors can grant specific users or groups *
 - Direct shares override the floor **upward** on a per-resource basis — even when the role's floor is Create only, a direct share grants access on that specific resource.
 - Effective permission = max(floor, direct shares).
 - Removing a direct share removes only that grant; the org floor and other direct shares remain.
+- **The current owner cannot be added as a direct share principal.** Their access is governed by ownership, not by grants. Attempting to share with the owner is rejected with an error.
+- When ownership is transferred, the previous owner is automatically granted a direct Edit share (see [Ownership transfer](#ownership-transfer)). This Edit share can be removed or downgraded by anyone who holds Edit on the resource.
 
 ### Cascade: Dashboard → Charts / KPIs
 
@@ -270,8 +272,8 @@ Ownership transfer is available directly from the share modal — it is a third 
 - Only the **current owner or an Admin** can initiate a transfer.
 - Ownership can only be transferred to a user who holds **effective Edit** on the resource — via the role floor or a direct Edit share. A Member with a direct Edit share qualifies.
 - When the recipient becomes owner they receive full ownership rights (Edit + delete + share) regardless of their current share level on the resource.
-- The **previous owner's direct shares are not changed**. Their effective access after the transfer = max(org floor for their role, any existing direct share). If they had no direct share and their org floor is Create only, they lose access entirely.
-- A **confirmation dialog is required** before the transfer applies: *"Transfer ownership of [Resource] to [Name]? You will lose owner status. Your access will revert to your role permissions or any direct share you hold."*
+- The **previous owner is automatically granted Edit access** after the transfer. If they already have a direct share on the resource it is updated to Edit; otherwise a new Edit share is created. This ensures the previous owner never loses the ability to work on the resource.
+- A **confirmation dialog is required** before the transfer applies: *"Transfer ownership of [Resource] to [Name]? You will lose owner status. You will retain Edit access."*
 
 ---
 
