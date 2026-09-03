@@ -1,0 +1,68 @@
+feature: settings_access
+output_dir: settings
+nuances: |
+  - Route is /settings/access. The page has three tabs: People, Groups, Roles.
+  - Tabs use data-testid="tab-people", "tab-groups", "tab-roles".
+  - Invite User button: data-testid="invite-user-button".
+  - Invite dialog fields: data-testid="invite-email-input", data-testid="invite-role-select".
+  - Create Group button: data-testid="create-group-button".
+  - Allow Public Sharing toggle: data-testid="allow-public-sharing-toggle" (on Roles tab).
+  - All flows are optional — they depend on org having data.
+
+flows:
+  - name: people_tab
+    optional: true
+    steps:
+      - navigate: /settings/access
+      - wait: 1500
+      - snap: access_people.png
+        label: Access — People tab
+
+  - name: invite_dialog
+    optional: true
+    steps:
+      - navigate: /settings/access
+      - wait: 1500
+      - click:
+          css: "[data-testid='invite-user-button']"
+      - wait: 1000
+      - snap: access_invite_dialog.png
+        label: Access — Invite User dialog
+      - press: Escape
+
+  - name: groups_tab
+    optional: true
+    steps:
+      - navigate: /settings/access
+      - wait: 1500
+      - click:
+          css: "[data-testid='tab-groups']"
+      - wait: 1000
+      - snap: access_groups.png
+        label: Access — Groups tab
+
+  - name: create_group_modal
+    optional: true
+    steps:
+      - navigate: /settings/access
+      - wait: 1500
+      - click:
+          css: "[data-testid='tab-groups']"
+      - wait: 800
+      - click:
+          css: "[data-testid='create-group-button']"
+      - wait: 1000
+      - snap: access_create_group.png
+        label: Access — Create Group dialog
+      - press: Escape
+
+  - name: roles_tab
+    optional: true
+    steps:
+      - navigate: /settings/access
+      - wait: 1500
+      - click:
+          css: "[data-testid='tab-roles']"
+      - wait: 1000
+      - snap: access_roles.png
+        label: Access — Roles tab (floor settings + Allow public sharing)
