@@ -1,0 +1,138 @@
+feature: sharing
+output_dir: sharing
+nuances: |
+  - Share modal opens from multiple entry points; each flow uses a specific trigger.
+  - Dashboard list share button: data-testid="dashboard-share-table-{id}" (table view)
+    or data-testid="dashboard-share-card-{id}" (card view). Use prefix match.
+  - Dashboard detail share button: inside the dashboard viewer toolbar.
+  - Chart detail share button: data-testid="chart-detail-share-button".
+  - Report list: per-row Share button is data-testid="report-share-{snapshotId}".
+    Email PDF button is data-testid="report-email-pdf-{snapshotId}" on the same row.
+  - Report detail: data-testid="report-share-btn" (Share) and
+    data-testid="report-email-pdf-btn" (Email PDF) are separate top-bar buttons.
+  - Share modal: data-testid="share-modal". Close via data-testid="share-close-btn"
+    or press Escape.
+  - Admin takeover button: data-testid="admin-takeover-btn" (visible on owner's row
+    only when the logged-in user is an Admin who is NOT the current owner).
+  - All interactive flows assume at least one shareable resource exists on staging.
+  - chart_share_modal: share button has no testid. Targets the 2nd button in the last
+    cell of the first chart row (Edit + Share appear together when access_level=edit).
+    Requires the docs user to have edit access on at least one chart.
+  - report_email_pdf: Email PDF is inside the report-actions-{id} dropdown menu.
+    Flow opens that menu first, then clicks the menu item.
+    Requires the docs user to have edit access on at least one report.
+
+flows:
+  - name: dashboard_share_modal
+    optional: true
+    steps:
+      - navigate: /dashboards
+      - wait: 1500
+      - snap: sharing_dashboard_list.png
+        label: Sharing — dashboard list (share buttons visible)
+      - click:
+          css: "[data-testid^='dashboard-share-table-']"
+          first: true
+      - wait: 1000
+      - snap: sharing_dashboard_modal.png
+        label: Sharing — dashboard share modal
+      - click:
+          css: "[data-testid='share-close-btn']"
+
+  - name: chart_share_modal
+    optional: true
+    steps:
+      - navigate: /charts
+      - wait: 1500
+      - snap: sharing_chart_list.png
+        label: Sharing — chart list (share buttons visible for edit-access charts)
+      - click:
+          css: "table tbody tr:first-child td:last-child button:nth-child(2)"
+          first: true
+      - wait: 1000
+      - snap: sharing_chart_modal.png
+        label: Sharing — chart share modal
+      - press: Escape
+
+  - name: report_share_modal
+    optional: true
+    steps:
+      - navigate: /reports
+      - wait: 1500
+      - snap: sharing_report_list.png
+        label: Sharing — report list (Share and Email PDF buttons visible)
+      - click:
+          css: "[data-testid^='report-share-']"
+          first: true
+      - wait: 1000
+      - snap: sharing_report_modal.png
+        label: Sharing — report share modal
+      - press: Escape
+
+  - name: report_email_pdf
+    optional: true
+    steps:
+      - navigate: /reports
+      - wait: 1500
+      - click:
+          css: "[data-testid^='report-actions-']"
+          first: true
+      - wait: 600
+      - click:
+          css: "[data-testid^='report-email-pdf-']"
+          first: true
+      - wait: 1000
+      - snap: sharing_report_email_pdf.png
+        label: Sharing — report Email PDF dialog
+      - press: Escape
+
+  - name: share_modal_general_access
+    optional: true
+    steps:
+      - navigate: /dashboards
+      - wait: 1500
+      - click:
+          css: "[data-testid^='dashboard-share-table-']"
+          first: true
+      - wait: 1000
+      - snap: sharing_general_access.png
+        label: Sharing — share modal general access section
+      - click:
+          css: "[data-testid='share-close-btn']"
+
+  - name: report_detail_share
+    optional: true
+    steps:
+      - navigate: /reports
+      - wait: 1500
+      - click:
+          css: "table tbody tr"
+          first: true
+      - wait: 2000
+      - snap: sharing_report_detail.png
+        label: Sharing — report detail page (Share and Email PDF buttons)
+      - click:
+          css: "[data-testid='report-share-btn']"
+      - wait: 1000
+      - snap: sharing_report_detail_modal.png
+        label: Sharing — report detail share modal
+      - press: Escape
+
+  - name: kpi_share_modal
+    optional: true
+    steps:
+      - navigate: /kpis
+      - wait: 1500
+      - snap: sharing_kpi_list.png
+        label: Sharing — KPI list (share buttons visible)
+      - click:
+          css: "[data-testid^='kpi-card-'] [aria-haspopup='menu']"
+          first: true
+      - wait: 600
+      - click:
+          role: menuitem
+          name: Share
+      - wait: 1000
+      - snap: sharing_kpi_modal.png
+        label: Sharing — KPI share modal
+      - press: Escape

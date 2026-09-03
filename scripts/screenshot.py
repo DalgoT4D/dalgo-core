@@ -64,6 +64,13 @@ def login(page: Page):
     page.wait_for_function("window.location.pathname !== '/login'", timeout=20000)
     page.wait_for_load_state("load")
     page.wait_for_timeout(1500)
+
+    # Dismiss any onboarding / walkthrough dialog that may block clicks.
+    overlay = page.locator("[data-slot='dialog-overlay'][data-state='open']")
+    if overlay.count() > 0:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(800)
+
     print(f"✓ Login successful — landed on {page.url}\n")
 
 
@@ -101,6 +108,11 @@ def execute_step(page: Page, step: dict, feature: str, output_dir: str):
         page.goto(f"{BASE_URL}{step['navigate']}")
         page.wait_for_load_state("load")
         page.wait_for_timeout(2000)
+        # Dismiss any onboarding overlay before proceeding.
+        overlay = page.locator("[data-slot='dialog-overlay'][data-state='open']")
+        if overlay.count() > 0:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(600)
         return
 
     if "wait" in step:

@@ -528,3 +528,202 @@ Both the NoAccess screen and the new Request-Edit pill use the **same** `Request
 - Pill visibility: renders for `access_level='view'`, hidden for `access_level='edit'`, hidden for Owner (backend returns `edit` for Owner).
 - Clicking pill opens `RequestAccessDialog` with the level radio pre-selected to Edit.
 - Existing `NoAccess.test.tsx` continues to pass after the modal refactor.
+
+---
+
+### M11 — Alert recipients: backend schema + validation
+
+Adds `user_group` as a third recipient type. Existing `orguser` and `external` records are unaffected.
+
+**`ddpui/schemas/alert_schema.py`:**
+- Extend `RecipientIn.type` Literal: `"orguser" | "external" | "user_group"`
+- Add `user_group_id: Optional[int] = None` to `RecipientIn`
+- Add `user_group_id: Optional[int] = None` and `user_group_name: Optional[str] = None` to `RecipientOut`
+
+No migration needed — `Alert.recipients` is a JSONField.
+
+**`ddpui/core/alerts/alert_service.py`:**
+```python
+VALID_RECIPIENT_TYPES = {"orguser", "external", "user_group"}
+
+# In _validate_recipients — add branch:
+elif rtype == "user_group":
+    group_id = r.get("user_group_id") if isinstance(r, dict) else r.user_group_id
+    if not group_id:
+        raise AlertValidationError(
+            f"Recipient[{idx}]: user_group_id is required for type='user_group'"
+        )
+    if not OrgUserGroup.objects.filter(id=group_id, org=org).exists():
+        raise AlertValidationError(
+            f"Recipient[{idx}]: UserGroup {group_id} not in this org"
+        )
+```
+
+`_serialize_recipients` needs no change — `r.model_dump()` with None-stripping handles the new field automatically.
+
+**GET response** — wherever `RecipientOut` is built from stored `alert.recipients` JSON, add a bulk lookup for group names:
+```python
+group_ids = [r["user_group_id"] for r in recipients if r.get("type") == "user_group"]
+group_name_by_id = {g.id: g.name for g in OrgUserGroup.objects.filter(id__in=group_ids)}
+```
+
+**Tests — new file `ddpui/tests/core/alerts/test_recipient_groups.py`:**
+
+| Test | Checks |
+|---|---|
+| `test_validate_user_group_recipient_valid` | Valid group ID in same org passes |
+| `test_validate_user_group_recipient_wrong_org` | Group from another org raises `AlertValidationError` |
+| `test_validate_user_group_recipient_missing_id` | Missing `user_group_id` raises `AlertValidationError` |
+| `test_existing_orguser_still_valid` | Backward compat — `orguser` type unchanged |
+| `test_existing_external_still_valid` | Backward compat — `external` type unchanged |
+
+---
+
+### M12 — Alert recipients: backend delivery
+
+When an alert fires, `user_group` recipients expand to all active group members' emails. Deduplication is applied across all recipient types.
+
+**`ddpui/core/notifications/triggers/alert.py`:**
+
+```python
+from ddpui.models.org_user import OrgUser, OrgUserGroupMember
+
+def notify_alert_recipients(alert, *, subject, body):
+    deliveries = []
+    recipients = alert.recipients or []
+
+    # Resolve orguser recipients
+    orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
+    orguser_email_by_id = {}
+    if orguser_ids:
+        for ou in OrgUser.objects.filter(id__in=orguser_ids, org_id=alert.org_id).select_related("user"):
+            orguser_email_by_id[ou.id] = ou.user.email
+
+    # Expand user_group recipients to active member emails
+    group_ids = [r["user_group_id"] for r in recipients if r.get("type") == "user_group"]
+    group_member_emails = set()
+    if group_ids:
+        memberships = (
+            OrgUserGroupMember.objects
+            .filter(group_id__in=group_ids, orguser__isnull=False)
+            .select_related("orguser__user")
+        )
+        group_member_emails = {m.orguser.user.email for m in memberships}
+
+    # Build deduplicated email list
+    seen = set()
+    resolved_emails = []
+    for r in recipients:
+        email = _resolve_recipient_email(r, orguser_email_by_id)
+        if email and email not in seen:
+            seen.add(email)
+            resolved_emails.append(email)
+    for email in group_member_emails:
+        if email not in seen:
+            seen.add(email)
+            resolved_emails.append(email)
+
+    for email in resolved_emails:
+        deliveries.append(_deliver_email(to_email=email, subject=subject, ...))
+    return deliveries
+```
+
+Update `_resolve_recipient_email` to return `None` for `user_group` entries (expanded in bulk above):
+```python
+def _resolve_recipient_email(recipient, orguser_email_by_id):
+    if recipient.get("type") == "external":
+        return recipient.get("email")
+    if recipient.get("type") == "orguser":
+        return orguser_email_by_id.get(recipient.get("orguser_id"))
+    return None   # user_group: handled in bulk
+```
+
+Update `_describe_missing_recipient` to handle `user_group`:
+```python
+if r.get("type") == "user_group":
+    return f"user_group:{r.get('user_group_id')}"
+```
+
+**Tests — update `ddpui/tests/core/alerts/test_delivery.py`:**
+
+| Test | Checks |
+|---|---|
+| `test_group_recipient_expands_to_active_members` | 3 active members → 3 delivery dicts |
+| `test_pending_members_skipped` | Members with `orguser=None` → 0 deliveries |
+| `test_deduplication_across_types` | orguser who is also in a group → 1 delivery dict |
+| `test_empty_group_no_deliveries` | Group with 0 members → 0 deliveries, no error |
+| `test_orguser_and_external_unchanged` | Existing recipient types work alongside new type |
+
+---
+
+### M13 — Alert recipients: frontend picker
+
+Replaces the existing `RecipientCombobox` with a unified `RecipientPicker` that supports org members, user groups, and external emails.
+
+**`webapp_v2/types/alerts.ts`:**
+```typescript
+// Add to RecipientIn and RecipientOut:
+user_group_id?: number | null;
+user_group_name?: string | null;
+// Extend type literal:
+type: 'orguser' | 'external' | 'user_group';
+```
+
+**New component `webapp_v2/components/alerts/RecipientPicker.tsx`:**
+
+Props: `value: RecipientIn[]`, `onChange: (v: RecipientIn[]) => void` — same interface as the old `RecipientCombobox`.
+
+Data: `useActiveMembers()` for Members section; `useUserGroups()` for Groups section (both hooks already in `hooks/api/useAccess.ts`).
+
+Dropdown layout:
+```
+┌──────────────────────────────────────────────────┐
+│ [input: "fun"]                                    │
+├──────────────────────────────────────────────────┤
+│ Members                                           │
+│  👤 funder@example.org          [Analyst]         │
+├──────────────────────────────────────────────────┤
+│ Groups                                            │
+│  👥 Funders                     3 members         │
+├──────────────────────────────────────────────────┤
+│ External                                          │
+│  ✉  Add "fun@external.com"  ← only for valid email│
+└──────────────────────────────────────────────────┘
+```
+
+Chip color coding:
+
+| Type | Icon | Colors |
+|---|---|---|
+| `orguser` | `UserIcon` | Emerald (`bg-emerald-50 text-emerald-800 border-emerald-200`) |
+| `user_group` | `Users2Icon` | Violet (`bg-violet-50 text-violet-800 border-violet-200`) |
+| `external` | `MailIcon` | Gray (`bg-gray-50 text-gray-700 border-gray-200`) |
+
+Key behaviors:
+- Members: substring-filtered, capped at 5; click → `{ type: 'orguser', orguser_id, orguser_name }`.
+- Groups: substring-filtered, capped at 5; click → `{ type: 'user_group', user_group_id, user_group_name }`. Section hidden silently if hook returns no data (permission gap).
+- External: shown only when input is a valid email; click or Enter → `{ type: 'external', email }`.
+- Backspace on empty input removes last chip. Already-added recipients filtered from dropdown.
+
+**`webapp_v2/components/alerts/AlertNotifyStep.tsx`:**
+```typescript
+// Replace:
+import { RecipientCombobox } from './RecipientCombobox';
+// With:
+import { RecipientPicker } from './RecipientPicker';
+```
+
+Delete `RecipientCombobox.tsx` and its test file after swapping.
+
+**Tests — new file `webapp_v2/components/alerts/__tests__/RecipientPicker.test.tsx`:**
+
+| Test | Checks |
+|---|---|
+| `adds orguser chip from suggestion` | Member suggestion → emerald chip |
+| `adds user_group chip from suggestion` | Group suggestion → violet chip |
+| `adds external chip on valid email + Enter` | Valid email → gray external chip |
+| `rejects duplicate across types` | Cannot add same orguser twice |
+| `removes chip on X click` | All three types |
+| `removes last chip on Backspace on empty input` | Backspace behavior |
+| `already-added items filtered from suggestions` | Added orguser not in dropdown |
+| `external section hidden for non-email input` | "Add" row only for valid email |

@@ -34,7 +34,7 @@ For dashboards specifically, direct shares **cascade automatically** to all inne
 - Row-level security and column masking on datasets
 - Audit log of who viewed / shared
 - Time-bound / expiring access
-- Sharing on Data infrastructure (Ingest, Transform, Orchestrate, Warehouse) — stays role-gated
+- Sharing on Data infrastructure (Ingest, Transform, Orchestrate, Warehouse) — stays role-gated. Ingest action menus (source and connection ⋮ buttons) are hidden entirely for roles with no edit/delete permissions — Analysts and Members see the connection list in read-only with no action buttons.
 - Custom roles, cross-org sharing, comments on anything other than Reports
 
 ---
@@ -174,16 +174,32 @@ Alerts are **creator-owned personal automation** with a recipient list. An Analy
 | Role | Access |
 |---|---|
 | **Admin** | CRUD all alerts; transfer ownership |
-| **Analyst** | Create alerts on accessible sources; read any alert on accessible sources; edit and delete **only their own** alerts |
+| **Analyst** | Create alerts on accessible sources; read any alert on accessible sources; edit, toggle, and delete **only their own** alerts |
 | **Member** | Cannot create alerts; can view alert config on accessible sources; can be a recipient |
 
 Rules:
 - **Trigger source:** a KPI or a Metric.
 - **Ownership is transferable** — the owner or an Admin can transfer ownership to another Analyst.
 - **View (config):** anyone who can access the trigger source (including a Member) can view the alert config. Creator always sees it. **Sensitive-source lock:** if the trigger source becomes restricted, the alert drops to creator + Admin visibility only.
-- **Edit and Delete:** owner + Admin only (chosen over "any analyst with access" to prevent ambiguity over who can modify shared automation).
+- **Edit, Toggle, and Delete:** owner + Admin only (chosen over "any analyst with access" to prevent ambiguity over who can modify shared automation). The UI hides — not just disables — Edit and Delete actions on alerts the user did not create. The active/inactive toggle is also disabled for non-owners.
 - **Recipient list is a separate axis.** Receiving alert notifications ≠ any config right. Members can be recipients regardless of edit rights. Managing the recipient list is an edit action — owner/Admin only.
 - **Two entry points:** a **bell-in-context** on a KPI or Metric to create an alert in context, plus a **manage/list page under Data** ("alerts I own or receive").
+
+### Alert recipients
+
+The recipient list supports three types:
+
+| Type | Description |
+|---|---|
+| **Org member** | An existing active user in the org — selected by searching name or email |
+| **User group** | An existing org group — expands to all **active** group members at delivery time, so membership changes take effect automatically without editing the alert |
+| **External email** | An email address not in the org — they receive the alert email directly without needing a Dalgo account |
+
+Rules:
+- **Group expansion is at-delivery-time.** Members added to a group after the alert is saved automatically receive future firings. Pending group invitees (not yet accepted) are skipped.
+- **Deduplication.** If a user appears via multiple paths (direct + group member), they receive exactly one email per firing.
+- The alert wizard **recipient picker** is a unified search field: typing filters org members and groups simultaneously; a valid email address reveals an "Add external" option.
+- Recipient management (add, remove, change) is an edit action — owner/Admin only.
 
 ### Dataset access scope
 
@@ -258,6 +274,7 @@ Share "Field Performance Dashboard"
 - **Dashboard sharing** — when sharing a Dashboard, the modal displays: *"All inner charts and KPIs will inherit this permission."*
 - **Matched emails / names** — existing users or groups get the chosen permission immediately on Share.
 - **Unmatched emails** — flagged inline as external; invited as Member on accept; share applied on accept; shown as **pending** until then.
+- **"You" indicator** — the current user's own row in the "People with access" list is marked with a **You** badge to help them avoid accidentally revoking their own access.
 - **Bulk paste** — comma- or newline-separated emails accepted in one paste.
 - **Default permission** = View; owner or editor can switch to Edit.
 - **Re-sharing is limited to the owner and Edit-holders.** View-holders cannot open the share modal to add others. An Edit-holder can share at View or Edit (never above their own level). A View-holder who wants to give a colleague access must ask the owner or an Edit-holder to do it.
