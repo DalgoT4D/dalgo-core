@@ -1,78 +1,79 @@
-# Dependent (Cascading) Dashboard Filters
+# Dependent Filters
 
-**Owner:** Product (Abhishek) · **Date:** 2026-08-05 · **Status:** Draft · **Area:** Dashboards → Filters
+**Owner:** Product (Abhishek) · **Date:** 2026-09-25 · **Status:** Draft (v2 — supersedes parent-child) · **Area:** Dashboards → Filters
 
-**In one line.** Let a dashboard builder link filters so a viewer's choice in one narrows the options in the next — pick Kerala in State and the District filter shows only Kerala's districts, chaining Country → State → District → Block → School.
-
----
+**In one line.** Group filters so selecting a value in one narrows the options in the others — pick a State and Country / District / City narrow to what's consistent with it.
 
 ## Problem
 
-Dashboard filters are independent today. A State filter and a District filter each always show every value, so filtering to Kerala still lists all ~700 districts. Viewers scroll through irrelevant options and can pick impossible combinations (Kerala + a Gujarat district).
+Filters are independent today: a District filter lists all ~700 districts even after a State is picked. Viewers scroll irrelevant options and can choose impossible combinations (Kerala + a Gujarat district) that return empty charts.
 
-## Key decisions (read this first)
+## Key points
 
-- **Per-dashboard.** Relationships are set in the dashboard's filter config (edit mode) — not inferred from the data, not defined org-wide.
-- **Same table.** Parent and child must be columns on the same warehouse table. Cross-table links (via joins) are out for v1.
-- **Child = value filter; parent = any filter.** The filter being narrowed is always a dropdown (value) filter. The parent narrowing it can be a value, date, or numerical filter — so a date range with no data hides the child values that fall outside it.
-- **Live options, Apply gates charts.** Picking a parent narrows the child dropdowns instantly. Charts only re-render on Apply (unchanged from today).
-- **Auto-drop invalid selections.** If a parent change makes a child selection impossible (District = Pune, then State → Kerala), Pune is cleared silently and the child shows Kerala's districts. No note, no block, no error.
-- **Cross-tab unchanged.** Filters already apply to every tile on every tab; that stays.
-- **No cycles.** A can't depend on B if B already depends on A.
+- **Dependent group** = a set of filters that mutually narrow each other. No direction, no parent/child, no cycles.
+- **Per dashboard.** Groups are configured on the dashboard; they are not shared or reused across dashboards.
+- **Set in one place** — a central "Dependent groups" config, not a per-filter "depends on".
+- **Same-table members** — but for *narrowing only* (see Two mechanisms). One group per filter; ungrouped filters stay independent.
+- **Live narrowing; Apply still gates charts; cross-tab application unchanged.**
+- **Reverse narrowing:** pick City → State and Country narrow too.
+- **Conflicts auto-resolve silently:** the just-changed filter wins; an older, now-impossible selection is dropped (no note).
 
-Everything below is the detail behind these.
+## Model
 
-## The model (edit mode)
+Within a group, a filter's available values = distinct values from the group's table where **all other members' selections** apply — never its own (the exclude-self rule; otherwise it collapses to the value you just picked). The result is the same regardless of click order.
 
-A value filter gets a **"Depends on"** dropdown in its config. It lists eligible parents — any value / date / numerical filter **on the same table**, minus any that would create a cycle. Empty = independent filter (today's behavior).
+## Two mechanisms — don't conflate
 
-- One parent per filter. A parent can have many children, and a child can itself be a parent — so chains form (Country → State → District).
-- Children render below their parent in the panel, so narrowing reads top-to-bottom.
-- Filters on another table, or ones that would close a loop, don't appear in the picker.
+1. **Application (filter → charts)** — unchanged and already cross-table. Filters apply by column name (`WHERE <col> IN (...)`) with no table check, so one State filter drives charts on *any* table that has a `state` column.
+2. **Narrowing (valid options for a member)** — what groups add, and the only thing needing same-table: computing valid value *combinations* requires the columns to sit on one table. Two tables that merely share a column can't supply combinations without a join (deferred). Build the group on the hierarchy table; its filters still drive charts on every table by column name.
+
+## Setup — central config
+
+A **Dependent groups** section sits beside Filters in the display-controls panel. Create a group, name it, and check the filters that belong. Only same-table value / date / number filters are selectable; others are greyed out. The per-filter modal just shows a read-only "In group: Geography". Membership is the whole config — no direction, so no cycles.
+
+```
+Dependent groups        + New group
+
+┌ New group ──────────────────────────────┐
+│ Name:  Geography                         │
+│ Add filters (same table only):           │
+│   [x] Country    [x] State               │
+│   [x] District   [x] City                │
+│   [ ] CF work type  — different table     │
+│                          Cancel    Save  │
+└──────────────────────────────────────────┘
+
+Left rail after saving:
+  Filters (4):           Country · State · District · City
+  Dependent groups (1):  Geography = Country, State, District, City
+```
 
 ## Behavior (view mode)
 
-**On load.** Nothing is pre-selected (filters have no defaults today), so every filter shows its full list. Narrowing starts on the viewer's first parent pick.
+- On load: nothing pre-selected, all full lists; narrowing starts on the first pick.
+- Select or change any member → the others re-query options for the current selections (exclude-self), instantly, in all directions. Multi-select unions within a filter and intersects across filters.
+- One valid option left → narrow to it, don't auto-select.
+- Apply commits selections to every tile on every tab (charts update only on Apply).
+- Clear a member → the others widen. Reset all → full lists.
+- Member states: full · narrowed · empty ("no values for current selection") · broken (edit mode only).
 
-**Pick or change a parent.**
+## Ungrouped filters
 
-- Child dropdowns re-fetch their valid options for the current selection. Multi-select parents merge results (India + USA → Indian and American states).
-- Child selections that are now invalid are cleared silently — the child just shows the newly valid options.
-- Narrowing flows down the whole chain: change Country → State re-narrows → District re-narrows.
-
-**Apply.** Commits the current selections to all tiles on all tabs. Only still-valid selections apply. A child left empty applies nothing — its options were narrowed, but it adds no filter of its own.
-
-**Clear a parent.** Its children re-open to full lists; selections that only existed under it are dropped. The dashboard is not forced empty.
-
-**Deselect one value in a multi-select parent.** Re-narrows to the remaining values and drops selections that no longer fit. Removing the last value = "no parent selected" → child re-opens fully.
-
-**Child filter states:** full-list · narrowed · empty ("no values for current selection") · broken (edit mode only).
+An ungrouped filter is independent: always its full list, never narrows or is narrowed. It can hold a selection that contradicts the group and return empty charts on Apply — by design; add it to the group to fix. Membership is all-or-nothing (no "relates to District but not Country").
 
 ## Edge cases
 
-- **Parent value has no children** → child shows an empty state, not a spinner or error.
-- **Same child value under two parents** (a district name reused across states) → matched by the actual row pairing, not by name. Same-table makes this exact.
-- **Large lists** → option lists stay capped (100 today) with in-dropdown search; narrowing usually shrinks them, and search respects the current narrowing.
-- **Deep chains** → each level is one more query when an ancestor changes. No hard limit; nudge builders to keep chains to levels viewers actually use.
-- **Column renamed or removed** → the filter shows as broken in edit mode (prompt to remap/remove); its children fall back to full-list rather than breaking the dashboard.
-- **Public links / report view** → identical narrowing; no authoring involved.
+- **Column renamed → the group survives.** The member re-binds to the renamed column (via warehouse mapping, or a remap prompt in edit mode); membership and links are preserved, never silently dropped.
+- **Column removed** (truly gone) → that member shows broken in edit mode; the rest of the group keeps working.
+- **Over-constraint** → members with no matching values show the empty state, not an error.
+- **Auto-drop converges** — dropping only relaxes constraints, so it can't loop.
+- **Unlink or delete a member** → the others widen; a group under 2 members dissolves.
+- **Large lists** stay capped (100) with search that respects the current narrowing.
+- **Performance** — each change re-queries the other N−1 members; cost grows with group size (caching is engineering's call).
+- **Public / report view** — identical narrowing.
 
 ## Scope
 
-**In (v1):** same-table parent→child links (child = value; parent = value/date/numerical), chains, one-parent-many-children, cycle prevention, live narrowing, silent auto-drop of invalid selections, Apply-gated + cross-tab application, and the filter states above.
+**In (v1):** central per-dashboard groups; mutual all-direction narrowing; same-table membership; multi-select; live narrowing; narrow-only on a single option; silent auto-drop (just-changed-wins); Apply-gated cross-tab application; rename-safe groups; the member states above.
 
-**Out (later versions):**
-
-- **Cross-table links via joins** — needs a table-relationship model we don't have. Biggest single lever; its own spec.
-- **Reusable field hierarchies** — define Country > State > District once and reuse across dashboards, instead of per-dashboard linking. Natural v2 once per-dashboard proves out.
-- **Date/numerical filter as a *child*** — narrowing a date picker's own min/max *bounds* to an ancestor. That's a range-bounds problem, not option-list narrowing. (A date/numerical filter as a *parent* is in scope.)
-- **Filter defaults** — no way to set a default today; it's a separate feature. If it ships, a child's default must apply only when valid for the current parent.
-
-**Engineering's call:** how child options are re-queried and cached.
-
----
-
-## Appendix — how other BI tools do this
-
-- **Superset** native filters cascade the same way: re-query the child when the parent changes, block cyclic dependencies. Their well-known bug is *not* dropping invalid child selections — which is exactly why we auto-drop.
-- **Metabase, Power BI, Tableau** all require the linked levels either on one table or joined by a defined relationship. Confirms the same-table-first call for v1.
+**Out (later):** cross-table groups via joins; reusable groups across dashboards; date/number filter as a *narrowed* member (bounds); filter defaults.
