@@ -1,6 +1,6 @@
 # Dependent Filters
 
-**Owner:** Product (Abhishek) · **Date:** 2026-09-25 · **Status:** Draft (v2 — supersedes parent-child) · **Area:** Dashboards → Filters
+**Owner:** Product (Abhishek) · **Date:** 2026-09-28 · **Status:** Draft (v2 — supersedes parent-child) · **Area:** Dashboards → Filters
 
 **In one line.** Group filters so selecting a value in one narrows the options in the others — pick a State and Country / District / City narrow to what's consistent with it.
 
@@ -13,7 +13,10 @@ Filters are independent today: a District filter lists all ~700 districts even a
 - **Dependent group** = a set of filters that mutually narrow each other. No direction, no parent/child, no cycles.
 - **Per dashboard.** Groups are configured on the dashboard; they are not shared or reused across dashboards.
 - **Set in one place** — a central "Dependent groups" config, not a per-filter "depends on".
-- **Same-table members** — but for *narrowing only* (see Two mechanisms). One group per filter; ungrouped filters stay independent.
+- **Categorical only (v1).** Groups contain string / categorical (dropdown) filters. Date and numeric filters don't participate yet — deferred.
+- **No name.** A group is just its set of filters; there's nothing to name.
+- **One group per dashboard (v1).** A dashboard has a single dependent group; each filter is either in it or independent. Multiple groups are deferred.
+- **Same-table members** — but for *narrowing only* (see Two mechanisms). Ungrouped filters stay independent.
 - **Live narrowing; Apply still gates charts; cross-tab application unchanged.**
 - **Reverse narrowing:** pick City → State and Country narrow too.
 - **Conflicts auto-resolve silently:** the just-changed filter wins; an older, now-impossible selection is dropped (no note).
@@ -29,24 +32,21 @@ Within a group, a filter's available values = distinct values from the group's t
 
 ## Setup — central config
 
-A **Dependent groups** section sits beside Filters in the display-controls panel. Create a group, name it, and check the filters that belong. Only same-table value / date / number filters are selectable; others are greyed out. The per-filter modal just shows a read-only "In group: Geography". Membership is the whole config — no direction, so no cycles.
+A **Dependent filters** section sits beside Filters in the display-controls panel. A dashboard has one dependent group: check the filters that belong to it — no name to fill in. Only same-table categorical (string / dropdown) filters are selectable; date, numeric, and different-table filters are greyed out. The per-filter modal just shows a read-only "Linked with: State, District, City". Membership is the whole config — no direction, so no cycles.
 
-```
-Dependent groups        + New group
-
-┌ New group ──────────────────────────────┐
-│ Name:  Geography                         │
-│ Add filters (same table only):           │
+┌ Dependent filters ───────────────────────┐
+│ Filters that narrow each other            │
+│ (same table, dropdown only):              │
 │   [x] Country    [x] State               │
 │   [x] District   [x] City                │
 │   [ ] CF work type  — different table     │
+│   [ ] work_month    — date, not supported  │
 │                          Cancel    Save  │
 └──────────────────────────────────────────┘
 
 Left rail after saving:
-  Filters (4):           Country · State · District · City
-  Dependent groups (1):  Geography = Country, State, District, City
-```
+  Filters (5):        Country · State · District · City · work_month
+  Dependent group:    Country, State, District, City
 
 ## Behavior (view mode)
 
@@ -74,6 +74,6 @@ An ungrouped filter is independent: always its full list, never narrows or is na
 
 ## Scope
 
-**In (v1):** central per-dashboard groups; mutual all-direction narrowing; same-table membership; multi-select; live narrowing; narrow-only on a single option; silent auto-drop (just-changed-wins); Apply-gated cross-tab application; rename-safe groups; the member states above.
+**In (v1):** one dependent group per dashboard; **categorical (string) filters only**; unnamed group; mutual all-direction narrowing; same-table membership; multi-select; live narrowing; narrow-only on a single option; silent auto-drop (just-changed-wins); Apply-gated cross-tab application; rename-safe group; the member states above.
 
-**Out (later):** cross-table groups via joins; reusable groups across dashboards; date/number filter as a *narrowed* member (bounds); filter defaults.
+**Out (later):** multiple dependent groups per dashboard; date & numeric filters in the group (as drivers and as narrowed members); cross-table groups via joins; reusable groups across dashboards; filter defaults.
