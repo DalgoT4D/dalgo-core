@@ -48,7 +48,7 @@ Builder (edit mode)                         Viewer (view mode)
 **Key design decisions:**
 
 - **No cycle detection.** Membership is a flat list, not a graph — nothing to walk, nothing that can loop (research §2).
-- **Group membership lives on `Dashboard`, not per-filter.** A new `Dashboard.dependent_group_filter_ids` field holds the flat list (research §3).
+- **Group membership is stored per-filter.** `DashboardFilter.dependent_group_id` is a nullable integer; filters sharing the same value belong to the same group, `null` means ungrouped (research §3). `Dashboard.to_json()` computes the flat `dependent_group_filter_ids` list the frontend consumes by querying the dashboard's filters for a non-null `dependent_group_id` — the API shape stays a flat list of ids either way.
 - **"Just-changed-wins" needs no extra bookkeeping.** Because the UI only ever processes one change at a time, and every *other* member recomputes from the full current selection set on every change, whichever member's own current pick becomes invalid *as a direct result of this change* gets cleared by an auto-drop check run symmetrically for every member. No "who changed most recently" tracking needed.
 - **Narrowing query stays AND-combination, reusing `apply_chart_filters`.** For member X, the constraint list is "every other member's current value, as an `in` operator," sourced from everyone else in the group.
 - **Query shape: N independent calls per change, not one combined endpoint (see Decisions §8).** Each member keeps its own `/preview/`-style call, including every other member's current value. Simpler, reuses the existing endpoint shape and frontend SWR pattern; the trade-off is more round-trips for a large group. Given Dalgo's dashboards have a handful of filters, not dozens, this is the pragmatic default — flagged as revisitable if real usage shows otherwise.
@@ -59,15 +59,15 @@ Builder (edit mode)                         Viewer (view mode)
 
 ### Data model
 
-New field on `Dashboard` (`ddpui/models/dashboard.py`):
+New field on `DashboardFilter` (`ddpui/models/dashboard.py`):
 
 ```python
-dependent_group_filter_ids = models.JSONField(default=list)
+dependent_group_id = models.BigIntegerField(null=True, blank=True)
 ```
 
-One migration (adds a column, not a table). No changes needed to `DashboardFilter` itself — a filter's group membership is read by checking whether its id appears in its dashboard's list, not stored on the filter.
+One migration (adds a column, not a table). The group itself has no separate row or id-generation scheme — `dependent_group_id` is a fixed `1` whenever a dashboard has a group, since a dashboard holds at most one group in this version (see §8). `Dashboard.to_json()` computes the flat `dependent_group_filter_ids` list the frontend/API consume from this field, so the external contract is still "a list of filter ids."
 
-**Example:** Dashboard 5 has `dependent_group_filter_ids = [12, 13, 14, 15]` (Country, State, District, City's ids). Filter 16 (CF work type) isn't in that list — it stays independent regardless of its own settings.
+**Example:** Dashboard 5's Country, State, District, and City filters (ids 12, 13, 14, 15) each have `dependent_group_id = 1`. Filter 16 (CF work type) has `dependent_group_id = null` — it stays independent regardless of its own settings.
 
 ### API design
 
@@ -80,9 +80,11 @@ One migration (adds a column, not a table). No changes needed to `DashboardFilte
 **The rule:** validation for the group-set endpoint belongs in `DashboardService`, matching the existing API → Core → Models layering.
 
 ```python
-def set_dependent_group(dashboard_id, org, filter_ids: list[int]) -> None:
+def set_dependent_group(dashboard_id, org, filter_ids: list[int]) -> list[int]:
     # every id belongs to this dashboard, is categorical (VALUE type),
-    # and shares one (schema_name, table_name) — raises FilterValidationError otherwise
+    # and shares one (schema_name, table_name) — raises FilterValidationError otherwise.
+    # Clears any existing group on this dashboard first, then sets dependent_group_id = 1
+    # on the given filters (dissolving instead, i.e. returning [], if fewer than 2 ids).
 ```
 
 **Narrowing itself needs no backend function.** Building the "every other member's current value" list is just relaying values the frontend already holds (the current selection of each filter, which lives only in the browser) paired with column names it already has from the loaded dashboard — there's no decision or lookup the backend needs to make that the frontend can't. That list gets built in `dashboard-filter-utils.ts` (§7 Milestone 4) and sent as the existing `constraints` param, unchanged from how it works today.
@@ -111,7 +113,7 @@ Frontend → backend: same query-param pattern on the existing `/preview/` endpo
 
 **Backend:**
 - Unit: `set_dependent_group` rejects a different-table filter (done — accepting/replacing a valid set is a trivial assignment, not separately tested).
-- Integration: dashboard duplication remaps `dependent_group_filter_ids` to the copy's new filter ids (done).
+- Integration: dashboard duplication carries each filter's `dependent_group_id` into the copy unchanged (done).
 - No new tests needed for narrowing itself — `get_filter_preview`/public routes' `constraints`-based narrowing is pre-existing and already covered.
 
 **Frontend:**
@@ -125,10 +127,10 @@ Frontend → backend: same query-param pattern on the existing `/preview/` endpo
 - **Deliverable:** a dashboard's dependent group (a flat list of filter ids) can be set via a new endpoint, with same-table + categorical-only validation.
 - **Services:** DDP_backend
 - **Key tasks:**
-  - [x] `Dashboard.dependent_group_filter_ids` field + migration (`0185_dashboard_dependent_group_filter_ids.py`)
+  - [x] `DashboardFilter.dependent_group_id` field + migration (`0189_dashboard_filter_dependent_group_id.py`)
   - [x] `DashboardService.set_dependent_group()` + validation
   - [x] New endpoint (`PUT /api/dashboards/{id}/dependent-group/`) + `SetDependentGroup`/`DependentGroupResponse` schemas
-  - [x] `duplicate_dashboard` remaps the group list to the copy's filter ids
+  - [x] `duplicate_dashboard` copies each filter's `dependent_group_id` straight to its counterpart in the new dashboard — safe without remapping, since every query reading it is already scoped by dashboard
   - [x] Delete the now-unused `_has_cycle` / `depends_on_filter_ids` cycle-check code (done in pre-execution cleanup pass)
 - **Acceptance criteria:** valid same-table categorical sets save; a different-table or non-categorical id is rejected with a clear error; duplicating a dashboard with a group produces a correctly-relinked copy.
 - **Verified:** 121 passed (`test_dashboard_service.py`, `test_dashboard_native_api.py`, `test_filter_api.py`, `test_public_report_api.py`), worktree `DDP_backend-dependent-filters`.
