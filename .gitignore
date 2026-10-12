@@ -3,6 +3,7 @@
 DDP_backend
 webapp_v2
 dalgo_docs
+prefect-proxy
 
 # secrets
 .env
